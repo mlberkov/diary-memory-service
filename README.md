@@ -2,7 +2,7 @@
 
 Diary RAG Service for **TheyGrow** — a low-friction memory system for parents who write family and child observations in Telegram and later ask natural-language questions over them.
 
-> **Status:** Phase 0 / early Phase 1 — source-of-truth establishment mode. Canonical docs are in place; no application code yet.
+> **Status:** early Phase 1 — toolchain wired, FastAPI service shell boots. Telegram adapter, ingestion, retrieval, and provider integration are still pending.
 
 ## What this is
 
@@ -41,7 +41,10 @@ Core rules (from `AGENTS.md` and the canonical docs):
 - `docs/todo.md` — ordered backlog of the next slices.
 
 ### Scaffold
-- `Makefile` — placeholder targets, no real commands yet.
+- `pyproject.toml`, `.python-version`, `uv.lock` — Python 3.11 + uv project (D-016, D-017).
+- `Makefile` — `format`, `lint`, `typecheck`, `test`, `check`, `run` (D-018).
+- `src/diary_rag/` — package skeleton (`config`, `logging`, `app`, `__main__`) plus placeholder packages for `adapters/telegram`, `core/routing`, `services`, `storage/mock`.
+- `tests/` — Slice 1.1 smoke tests.
 - `.env.example` — config keys we expect to need.
 - `.gitignore` — local artifacts and secrets.
 
@@ -51,11 +54,12 @@ Core rules (from `AGENTS.md` and the canonical docs):
 - Operating contract (AGENTS, CLAUDE) populated.
 - Supporting docs populated; open items surfaced in `docs/assumptions.md`.
 - Phase-1 platform decisions locked: **Python 3.11** (D-016), **`uv`** (D-017), **Ruff + Mypy + Pytest** (D-018), **Telegram webhook transport** (D-019).
-- No application code yet.
-- Next gate: Slice 1.1 — wire the toolchain (`docs/todo.md`).
+- **Slice 1.1 done:** toolchain wired, package skeleton in place, `make check` green, FastAPI `/health` smokeable via `make run`.
+- Next gate: Slice 1.2 — Telegram adapter shell (`docs/todo.md`).
 
 ## How to start
 
 1. Read `AGENTS.md`, then `CLAUDE.md`.
 2. Read canonical docs in the order listed in `CLAUDE.md`.
-3. Pick the top item from `docs/todo.md` and follow `docs/RUNBOOK.md`.
+3. `uv sync --all-extras && make check` (see `QUICKSTART.md`).
+4. Pick the top item from `docs/todo.md` and follow `docs/RUNBOOK.md`.

@@ -1,11 +1,9 @@
 # Quickstart
 
-> The repository is in **Phase 0**. There is no runnable application yet.
-> Anything below marked **(Phase 1+)** is aspirational and becomes real as phases land.
+> The repository is in **early Phase 1**. The toolchain is wired and the FastAPI shell boots.
+> Telegram, ingestion, retrieval, and provider integration are still pending — see `docs/todo.md`.
 
-## Today
-
-Read the docs:
+## Read first
 
 ```bash
 git clone <this repo>
@@ -17,18 +15,22 @@ Read order: `AGENTS.md` → `CLAUDE.md` → `docs/product/PRD.md` → `docs/prod
 
 Then look at `docs/RUNBOOK.md` for how work is done here, and `docs/todo.md` for what's next.
 
-## (Phase 1+) Local bootstrap
+## Local bootstrap
 
-Tooling is locked: Python 3.11 (D-016), `uv` (D-017), Ruff + Mypy + Pytest (D-018). Once Slice 1.1 wires the targets:
+Tooling is locked: Python 3.11 (D-016), `uv` (D-017), Ruff + Mypy + Pytest (D-018).
+
+Prerequisites: `uv` installed (`curl -LsSf https://astral.sh/uv/install.sh | sh`). `uv` will pick up or install the Python 3.11 interpreter pinned in `.python-version`.
 
 ```bash
-uv sync                    # install deps from the uv lockfile
-cp .env.example .env       # fill TELEGRAM_BOT_TOKEN, OPENAI_API_KEY, POSTGRES_*
+uv sync --all-extras       # install runtime + dev deps; creates .venv
+cp .env.example .env       # optional at Slice 1.1; fill in as later slices need it
 make check                 # ruff (lint + format check) + mypy + pytest
-make run                   # start the bot locally (Phase 1.2)
+make run                   # boot the FastAPI shell on http://127.0.0.1:8000
+curl http://127.0.0.1:8000/health
+# {"status":"ok","version":"0.0.0","env":"local"}
 ```
 
-Prerequisites: `uv` installed; `uv` will pick up or install Python 3.11.
+Available `make` targets: `init`, `sync`, `format`, `lint`, `typecheck`, `test`, `check`, `run`, `tree`, `clean`.
 
 ### Required environment
 

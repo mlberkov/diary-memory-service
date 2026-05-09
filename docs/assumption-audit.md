@@ -27,3 +27,5 @@ When an item is decided, move it to `docs/decision-log.md` (next D-### id) and r
 | A-21 | TheyGrow integration surface | Integration cost | API/SDK sketch | human | Phase 9 |
 | A-22 | Hosting target | Operational rework | Decision + runbook update | human | Phase 6 |
 | A-23 | Backup strategy | Data loss | Drill + runbook | human | Phase 7 |
+| A-24 | Python package name `diary_rag` | Rename cost grows over time | Confirm before Phase 9 integration surface | human | Phase 9 |
+| A-25 | `/health` is liveness-only at 1.1 | Misleading readiness signal | Replace with R-10 readiness checks | agent | Phase 2/3 |

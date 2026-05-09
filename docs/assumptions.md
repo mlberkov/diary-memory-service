@@ -35,6 +35,10 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 - **A-22. Hosting target**: where the service runs (local-only MVP? managed PaaS? self-hosted VM?). Required before Phase 6.
 - **A-23. Backup strategy**: not stated. Required before Phase 7/8.
 
+## Naming & layout
+- **A-24. Python package name**: Slice 1.1 introduced `diary_rag` (PyPI distribution name `diary-rag`) as the import root. Rationale: short, channel-neutral, matches "Diary Memory Service" naming. Not yet promoted to a decision-log entry. If a different name is preferred before Phase 9 (TheyGrow integration surface, A-21), rename now while the cost is low.
+- **A-25. Health endpoint contract**: `/health` currently returns `{status, version, env}`. The full set of boot health checks (PostgreSQL connectivity, schema version, embedding-model dimension — see R-10) lands in Phase 2/3. The Slice 1.1 endpoint is a liveness probe only.
+
 ---
 
 ## Recently closed

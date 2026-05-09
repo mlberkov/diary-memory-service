@@ -33,16 +33,18 @@
 
 ## Local commands
 
-The toolchain is **Python 3.11 + uv + Ruff + Mypy + Pytest** (D-016 / D-017 / D-018). Targets below are documentation hooks until Slice 1.1 wires them to real commands.
+The toolchain is **Python 3.11 + uv + Ruff + Mypy + Pytest** (D-016 / D-017 / D-018). Slice 1.1 wired all targets below to real commands.
 
-- `make init` — environment sanity (currently `python3 --version`; expanded in Slice 1.1).
-- `make format` — Ruff format (Slice 1.1).
-- `make lint` — Ruff lint (Slice 1.1).
-- `make typecheck` — Mypy (Slice 1.1).
-- `make test` — Pytest (Slice 1.1).
-- `make check` — runs lint + typecheck + test (Slice 1.1).
-- `make run` — start the bot (Slice 1.2).
+- `make init` — print `uv` and Python versions.
+- `make sync` — `uv sync --all-extras`.
+- `make format` — Ruff format + Ruff lint autofix.
+- `make lint` — Ruff lint + format check (no writes).
+- `make typecheck` — Mypy strict.
+- `make test` — Pytest.
+- `make check` — runs `lint` + `typecheck` + `test`.
+- `make run` — boot the FastAPI shell on `127.0.0.1:8000` (Slice 1.1 `/health`; Telegram webhook in Slice 1.2).
 - `make tree` — show the top of the repo tree.
+- `make clean` — remove caches and build artifacts.
 
 ### Telegram in local development
 Webhook only (D-019). Expose the local process via a tunnel (e.g. `ngrok`, `cloudflared`) and register the tunnel URL with the bot. There is no polling fallback.

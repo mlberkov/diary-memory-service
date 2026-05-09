@@ -12,9 +12,9 @@ Files listed are *targets*. Most do not exist yet. Each row will be split into o
 ## Phase 1 — Telegram Shell and Mock Flow
 | Slice | Files / artifacts |
 | --- | --- |
-| 1.1 language & toolchain | `pyproject.toml` for Python 3.11 (D-016), `uv` lockfile (D-017), Ruff + Mypy + Pytest configs (D-018), real `make format`/`lint`/`typecheck`/`test`/`check` |
+| 1.1 language & toolchain | `pyproject.toml` (Py 3.11, D-016), `.python-version`, `uv` lockfile (D-017), Ruff + Mypy + Pytest configs (D-018); `Makefile` `format`/`lint`/`typecheck`/`test`/`check`/`run`; `src/diary_rag/{config,logging,app,__main__}.py`; placeholders `adapters/telegram/`, `core/routing/`, `services/`, `storage/mock/` (with `InMemorySourceMessageStore` stub); FastAPI `/health` smoke; `tests/test_smoke.py`, `test_config.py`, `test_app_health.py`, `test_mock_store.py` |
 | 1.2 Telegram adapter shell | webhook receiver (D-019), command parser (`/start`, `/help`, `/entry`, `/ask`), reply formatter, dev-tunnel docs |
-| 1.3 mock services | `MockSourceMessageRepository`, `MockSearchRepository`, `MockEmbeddingClient`, `MockChatClient` |
+| 1.3 mock services | `MockSourceMessageRepository`, `MockSearchRepository`, `MockEmbeddingClient`, `MockChatClient` (replaces 1.1 stub) |
 | 1.4 routing | command + heuristic routing, low-confidence clarification path |
 | 1.5 mock end-to-end | smoke run exercising `/entry` and `/ask` against mocks |
 

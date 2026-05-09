@@ -23,6 +23,7 @@ Thumbs.db
 # build / temp
 dist/
 build/
+*.egg-info/
 tmp/
 temp/
 coverage/
