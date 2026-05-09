@@ -1,0 +1,44 @@
+# Invariants
+
+These hold at all times. Code that breaks any of them must not be merged. Changing one of them requires a new entry in `docs/decision-log.md`.
+
+Derived from `AGENTS.md` §Non-Negotiable Product Rules and `docs/product/TechSpec.md` §14.
+
+## I-1. Channel boundary
+Telegram is a channel, not the system of record. No Telegram-specific type or assumption may appear outside the channel adapter layer.
+
+## I-2. Source of truth
+PostgreSQL is the durable system of record. Embeddings, indexes, and provider responses are derived state and must be reproducible from PostgreSQL data.
+
+## I-3. Raw before enrichment
+Every inbound diary message is persisted as a `SourceMessage` before any enrichment (parsing, chunking, embedding, indexing). No enrichment step may run if raw persistence has not committed.
+
+## I-4. Lineage preserved
+Every `EventChunk` references its `DiaryEntry` and `SourceMessage`. Lineage from chunk → entry → source → channel message is never lost.
+
+## I-5. Event-per-chunk
+Each diary event line becomes exactly one `EventChunk`. Multiple events do not share a chunk; one event does not split across chunks.
+
+## I-6. Authorship
+`author_user_id` is mandatory at `SourceMessage`, `DiaryEntry`, and `EventChunk`. Shared diary mode never erases authorship.
+
+## I-7. Family scoping
+Every persisted record outside `SourceMessage` carries `family_id`. No retrieval may cross families.
+
+## I-8. Hybrid retrieval
+The retrieval contract supports both dense and sparse signals. A retrieval backend that cannot deliver hybrid retrieval is not acceptable.
+
+## I-9. Grounded answers
+Every answer references the chunks used as evidence (`AnswerTrace.context_chunk_ids`). An answer with no retrieved evidence must use an explicit `fallback_mode`, not a fabricated response.
+
+## I-10. Optional AI is optional
+Query rewriting, semantic expansion, reranking, and answer-style modes are feature-flagged. The base ingestion → retrieval → answer flow must work end-to-end with all enhancements disabled.
+
+## I-11. Provider isolation
+External providers (LLM, embeddings, search backend) are accessed through explicit adapters. Domain code does not import provider SDKs directly.
+
+## I-12. Replayability
+Parsing and chunking are deterministic for a given `parse_version`. Re-running parse + chunk + embed on the same `SourceMessage` produces the same logical state, not duplicates.
+
+## I-13. Soft delete by default
+Deletes default to tombstones. Hard deletion of source data requires an explicit, audited operation. (Specific edit/delete mechanics are open — see `docs/assumptions.md` A-10.)

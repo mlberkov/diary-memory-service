@@ -1,0 +1,29 @@
+# Assumption Audit
+
+When an item is decided, move it to `docs/decision-log.md` (next D-### id) and remove or strike its row here.
+
+| ID | Assumption | Risk if wrong | Validation method | Owner | Due by |
+| --- | --- | --- | --- | --- | --- |
+| A-1 | Python 3.11+ as implementation language | Wrong ecosystem; rewrite cost | Decision in Slice 1.1 | human | Phase 1 |
+| A-2 | Dependency manager TBD | Lockfile churn; CI breakage | Decision in Slice 1.1 | agent | Phase 1 |
+| A-3 | Test/format/type toolchain TBD | Inconsistent style; weak CI | Decision in Slice 1.1 | agent | Phase 1 |
+| A-4 | Telegram transport: webhook (local-dev TBD) | Local DX pain; prod reliability | Spike both, document choice | agent | Phase 1 |
+| A-5 | pgvector + Postgres FTS for hybrid | Wrong scale ceiling; rework cost | Benchmark on synthetic 10k chunks | agent | Phase 3 |
+| A-6 | Hybrid merge location (DB vs app) | Latency + correctness | Prototype merge in code vs SQL | agent | Phase 3 |
+| A-7 | Sync vs async indexing | UX latency vs system complexity | Measure ingest latency on Phase 2 data | agent | Phase 3 |
+| A-8 | Embedding model & dim | Retrieval quality + storage | Eval on RU/EN diary samples | agent | Phase 3 |
+| A-9 | Chat model | Quality, cost, fallback compatibility | Smoke + eval in Phase 4 | agent | Phase 4 |
+| A-10 | Edit/delete strategy | Data loss / duplication | Spec + small prototype | human + agent | Phase 2.5 |
+| A-11 | Entry grouping rule | Wrong split/merge of entries | Walk 10 sample sessions | human | Phase 2.3 |
+| A-12 | Date parsing scope | Misclassification of entries | List supported formats + tests | agent | Phase 2.3 |
+| A-13 | Timezone source | Wrong `entry_date` | Spec + tests | agent | Phase 2.3 |
+| A-14 | Family/child bootstrap | UX confusion; orphan records | Define onboarding flow | human | Phase 2.1 |
+| A-15 | Visibility scopes | Privacy gaps in shared mode | Enumerate + review | human | Phase 8 |
+| A-16 | Routing confidence threshold | Misclassification or noise | Heuristic + small eval | agent | Phase 1.4 |
+| A-17 | Clarification UX | User confusion | Mock chat exchange + review | human | Phase 1.4 |
+| A-18 | Data residency | Compliance failure | Stakeholder confirmation | human | before prod |
+| A-19 | Retention policy | Storage growth; user trust | Policy doc + sample math | human | Phase 8 |
+| A-20 | Export/delete semantics | Compliance, trust | Spec + prototype | human | Phase 8 |
+| A-21 | TheyGrow integration surface | Integration cost | API/SDK sketch | human | Phase 9 |
+| A-22 | Hosting target | Operational rework | Decision + runbook update | human | Phase 6 |
+| A-23 | Backup strategy | Data loss | Drill + runbook | human | Phase 7 |
