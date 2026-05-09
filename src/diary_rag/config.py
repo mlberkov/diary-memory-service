@@ -32,8 +32,9 @@ class Settings(BaseSettings):
     app_env: str = Field(default="local", description="local|dev|staging|prod")
     log_level: LogLevel = Field(default="INFO")
 
-    # Filled in by later slices. Empty defaults so Slice 1.1 boots clean.
+    # Filled in by later slices. Empty defaults so the service boots clean.
     telegram_bot_token: str = Field(default="")
+    telegram_webhook_secret: str = Field(default="")
     openai_api_key: str = Field(default="")
 
     postgres_host: str = Field(default="localhost")

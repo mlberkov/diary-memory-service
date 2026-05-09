@@ -2,7 +2,7 @@
 
 Diary RAG Service for **TheyGrow** — a low-friction memory system for parents who write family and child observations in Telegram and later ask natural-language questions over them.
 
-> **Status:** early Phase 1 — toolchain wired, FastAPI service shell boots. Telegram adapter, ingestion, retrieval, and provider integration are still pending.
+> **Status:** early Phase 1 — toolchain wired, FastAPI service shell boots, Telegram webhook adapter shell accepts updates and dispatches to stub handlers. Ingestion, retrieval, and provider integration are still pending.
 
 ## What this is
 
@@ -55,7 +55,8 @@ Core rules (from `AGENTS.md` and the canonical docs):
 - Supporting docs populated; open items surfaced in `docs/assumptions.md`.
 - Phase-1 platform decisions locked: **Python 3.11** (D-016), **`uv`** (D-017), **Ruff + Mypy + Pytest** (D-018), **Telegram webhook transport** (D-019).
 - **Slice 1.1 done:** toolchain wired, package skeleton in place, `make check` green, FastAPI `/health` smokeable via `make run`.
-- Next gate: Slice 1.2 — Telegram adapter shell (`docs/todo.md`).
+- **Slice 1.2 done:** `POST /telegram/webhook` accepts a Telegram update, fails closed without the secret header (A-26), parses `/start` `/help` `/entry` `/ask`, dispatches to stub handlers, and returns a `sendMessage`-shaped payload.
+- Next gate: Slice 1.3 — Mock services (`docs/todo.md`).
 
 ## How to start
 

@@ -29,3 +29,4 @@ When an item is decided, move it to `docs/decision-log.md` (next D-### id) and r
 | A-23 | Backup strategy | Data loss | Drill + runbook | human | Phase 7 |
 | A-24 | Python package name `diary_rag` | Rename cost grows over time | Confirm before Phase 9 integration surface | human | Phase 9 |
 | A-25 | `/health` is liveness-only at 1.1 | Misleading readiness signal | Replace with R-10 readiness checks | agent | Phase 2/3 |
+| A-26 | Webhook fails closed when `TELEGRAM_WEBHOOK_SECRET` is unset or mismatched | Open webhook accepts spoofed traffic | Verified in Slice 1.2 secret-header tests | agent | end of Phase 1 |

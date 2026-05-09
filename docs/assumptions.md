@@ -39,6 +39,9 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 - **A-24. Python package name**: Slice 1.1 introduced `diary_rag` (PyPI distribution name `diary-rag`) as the import root. Rationale: short, channel-neutral, matches "Diary Memory Service" naming. Not yet promoted to a decision-log entry. If a different name is preferred before Phase 9 (TheyGrow integration surface, A-21), rename now while the cost is low.
 - **A-25. Health endpoint contract**: `/health` currently returns `{status, version, env}`. The full set of boot health checks (PostgreSQL connectivity, schema version, embedding-model dimension — see R-10) lands in Phase 2/3. The Slice 1.1 endpoint is a liveness probe only.
 
+## Adapter security
+- **A-26. Webhook secret enforcement**: the `/telegram/webhook` endpoint fails closed when `TELEGRAM_WEBHOOK_SECRET` is unset or mismatched (returns 401). The `X-Telegram-Bot-Api-Secret-Token` header is compared with `secrets.compare_digest`.
+
 ---
 
 ## Recently closed

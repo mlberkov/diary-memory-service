@@ -2,14 +2,7 @@
 
 Top of list = pick next. Each item maps to a row in `docs/execution-map.md`. When a slice is done, remove it and add the next downstream slice.
 
-## Slice 1.2 — Telegram adapter shell (next)
-- Owner: agent
-- Map: execution-map 1.2
-- Concrete: webhook receiver mounted on the existing FastAPI app (D-019), command parser for `/start`, `/help`, `/entry`, `/ask`, reply formatter, dev-tunnel documentation in `QUICKSTART.md`.
-- Outcome: a tunneled local run can receive a Telegram update and dispatch to a stub handler. No real provider integration.
-- Done when: a manual webhook send reaches the dispatcher; smoke test exercises the handshake.
-
-## Slice 1.3 — Mock services
+## Slice 1.3 — Mock services (next)
 - Owner: agent
 - Map: execution-map 1.3
 - Concrete: `MockSourceMessageRepository`, `MockSearchRepository`, `MockEmbeddingClient`, `MockChatClient` exposing the interfaces real implementations will use. Replaces the placeholder `InMemorySourceMessageStore`.
@@ -38,3 +31,14 @@ Closed in Slice 1.1:
 - FastAPI `/health` endpoint smokeable via `make run`.
 - `make check` is green; `/health` returns 200.
 - `.python-version` pins 3.11.
+
+Closed in Slice 1.2:
+- `POST /telegram/webhook` mounted on the FastAPI app (D-019).
+- `X-Telegram-Bot-Api-Secret-Token` validation, fail-closed when secret is unset or mismatched (A-26).
+- Telegram update Pydantic schema (`adapters/telegram/models.py`).
+- Command parser for `/start`, `/help`, `/entry`, `/ask` with `@BotName` suffix stripping.
+- Channel-neutral routing types in `core/routing` (`RouteKind`, `InboundMessage`, `DispatchResult`).
+- `Dispatcher` (`services/dispatcher.py`) with stub handlers per route.
+- `sendMessage`-shaped JSON returned in the webhook response body — no outbound HTTP.
+- Tests: secret gating, command parsing, dispatch wiring, reply payload, update schema.
+- New open assumption: A-26.

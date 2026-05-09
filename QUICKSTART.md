@@ -34,9 +34,10 @@ Available `make` targets: `init`, `sync`, `format`, `lint`, `typecheck`, `test`,
 
 ### Required environment
 
-See `.env.example` for the full list. As of Phase 0:
+See `.env.example` for the full list. Currently used:
 
-- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_BOT_TOKEN` — bot identity (Phase 1.2+)
+- `TELEGRAM_WEBHOOK_SECRET` — required for `/telegram/webhook` to accept any call (A-26)
 - `OPENAI_API_KEY`
 - `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
 - `EMBEDDING_MODEL` (value not yet chosen — see `docs/assumptions.md` A-8)
@@ -50,6 +51,37 @@ See `.env.example` for the full list. As of Phase 0:
 ### Telegram transport
 
 The bot uses a **webhook receiver in all environments** (D-019). Local development requires a public URL pointing at the local process — use a tunnel such as `ngrok` or `cloudflared`. Long-polling is not supported.
+
+#### Local smoke against the webhook
+
+```bash
+export TELEGRAM_WEBHOOK_SECRET=dev-secret
+make run    # FastAPI on http://127.0.0.1:8000
+
+# 401 — missing or wrong header
+curl -i -X POST http://127.0.0.1:8000/telegram/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"update_id":1,"message":{"message_id":1,"date":1715300000,"chat":{"id":42},"from":{"id":7},"text":"/start"}}'
+
+# 200 — sendMessage payload returned in the response body
+curl -X POST http://127.0.0.1:8000/telegram/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
+  -d '{"update_id":1,"message":{"message_id":1,"date":1715300000,"chat":{"id":42},"from":{"id":7},"text":"/start"}}'
+# → {"method":"sendMessage","chat_id":42,"text":"Welcome — diary mode. ..."}
+```
+
+#### Registering the webhook with Telegram (when using a real bot)
+
+```bash
+# 1. Run a tunnel pointing at port 8000
+ngrok http 8000   # copy the https URL it prints
+
+# 2. Tell Telegram where to post updates and which secret to send back
+curl "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
+  --data-urlencode "url=https://YOUR-TUNNEL.ngrok.app/telegram/webhook" \
+  --data-urlencode "secret_token=${TELEGRAM_WEBHOOK_SECRET}"
+```
 
 ## When something is broken
 

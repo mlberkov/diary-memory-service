@@ -1,6 +1,9 @@
-"""Telegram adapter.
+"""Telegram channel adapter.
 
-Placeholder package. The webhook receiver, command parser
-(`/start`, `/help`, `/entry`, `/ask`), and reply formatter land in
-Slice 1.2 (see docs/execution-map.md and docs/decision-log.md D-019).
+Mounts the webhook endpoint via :func:`register_telegram_webhook`. Per
+Invariant I-1, Telegram-specific types do not leak past this package.
 """
+
+from diary_rag.adapters.telegram.webhook import register_telegram_webhook
+
+__all__ = ["register_telegram_webhook"]
