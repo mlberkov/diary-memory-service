@@ -4,14 +4,6 @@ Not yet locked. Each item must either be promoted to `docs/decision-log.md` (wit
 
 Add new items here the moment one is identified. Do not let assumptions live only in code or chat.
 
-## Platform & language
-- **A-1. Implementation language**: not chosen. Makefile uses `python3` as a sanity check, but no language is ratified. Default candidate: Python 3.11+. Decide in Slice 1.1.
-- **A-2. Dependency manager**: undecided (e.g. uv, poetry, pip-tools, or other). Decide in Slice 1.1.
-- **A-3. Test/format/type toolchain**: undecided. Decide in Slice 1.1.
-
-## Telegram transport
-- **A-4. Webhook vs long-polling**: BuildPlan §Phase 1 says "Telegram webhook receiver." Webhook is the working assumption, but local-dev ergonomics (tunneling) are not addressed. Decide whether dev uses polling, a tunnel, or both.
-
 ## Storage & search
 - **A-5. PostgreSQL extensions**: pgvector for dense vectors is the leading candidate but not locked. The sparse retrieval mechanism (Postgres FTS, ParadeDB, external) is also not locked. Required before Phase 3.
 - **A-6. Hybrid retrieval implementation**: where dense and sparse signals merge (DB-side, app-side, or external) is undecided. Required before Phase 3.
@@ -42,3 +34,11 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 ## Operational
 - **A-22. Hosting target**: where the service runs (local-only MVP? managed PaaS? self-hosted VM?). Required before Phase 6.
 - **A-23. Backup strategy**: not stated. Required before Phase 7/8.
+
+---
+
+## Recently closed
+- A-1 → D-016 (Python 3.11 as implementation language).
+- A-2 → D-017 (`uv` as dependency and environment manager).
+- A-3 → D-018 (Ruff + Mypy + Pytest as baseline toolchain).
+- A-4 → D-019 (Telegram webhook transport, dev via tunnel).

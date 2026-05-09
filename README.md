@@ -49,9 +49,10 @@ Core rules (from `AGENTS.md` and the canonical docs):
 
 - Canonical docs (PRD, BuildPlan, TechSpec, decision log) populated.
 - Operating contract (AGENTS, CLAUDE) populated.
-- Supporting docs populated as a baseline; open items surfaced in `docs/assumptions.md`.
-- No application code, no dependencies, no language pinned.
-- Next gate: human review of supporting docs + resolution of pre-Phase-1 assumptions (see `docs/todo.md`).
+- Supporting docs populated; open items surfaced in `docs/assumptions.md`.
+- Phase-1 platform decisions locked: **Python 3.11** (D-016), **`uv`** (D-017), **Ruff + Mypy + Pytest** (D-018), **Telegram webhook transport** (D-019).
+- No application code yet.
+- Next gate: Slice 1.1 — wire the toolchain (`docs/todo.md`).
 
 ## How to start
 

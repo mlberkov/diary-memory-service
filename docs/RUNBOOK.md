@@ -31,15 +31,21 @@
 - Verify durable state is intact (raw `SourceMessage` rows present; no chunks orphaned).
 - Reprocess from raw via the replay path; do not hand-fix derived state.
 
-## Local commands (placeholders until Phase 1)
-- `make init` — environment sanity (currently `python3 --version`).
-- `make check` — lint + types + tests + config (TBD in Slice 1.1).
-- `make format` — formatter (TBD in Slice 1.1).
-- `make test` — tests (TBD in Slice 1.1).
-- `make run` — start the bot (TBD in Slice 1.2).
+## Local commands
+
+The toolchain is **Python 3.11 + uv + Ruff + Mypy + Pytest** (D-016 / D-017 / D-018). Targets below are documentation hooks until Slice 1.1 wires them to real commands.
+
+- `make init` — environment sanity (currently `python3 --version`; expanded in Slice 1.1).
+- `make format` — Ruff format (Slice 1.1).
+- `make lint` — Ruff lint (Slice 1.1).
+- `make typecheck` — Mypy (Slice 1.1).
+- `make test` — Pytest (Slice 1.1).
+- `make check` — runs lint + typecheck + test (Slice 1.1).
+- `make run` — start the bot (Slice 1.2).
 - `make tree` — show the top of the repo tree.
 
-These are wired to real commands in Slice 1.1. Until then they are documentation hooks only.
+### Telegram in local development
+Webhook only (D-019). Expose the local process via a tunnel (e.g. `ngrok`, `cloudflared`) and register the tunnel URL with the bot. There is no polling fallback.
 
 ## Useful reads when stuck
 - Workflow & recovery: this file.

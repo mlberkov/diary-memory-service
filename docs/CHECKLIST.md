@@ -9,6 +9,7 @@
 - [ ] Confirm the slice respects mock-before-real where applicable.
 
 ## Pre-merge (every change)
+- [ ] `make check` is green (Ruff lint + format check, Mypy, Pytest — D-018) once Slice 1.1 has wired the targets.
 - [ ] No invariant broken; new invariants added to `docs/INVARIANTS.md` or `docs/RUNTIME-INVARIANTS.md` if introduced.
 - [ ] No new assumption left undocumented; resolved assumptions promoted to `docs/decision-log.md` (next D-### id).
 - [ ] No Telegram-specific code outside the Telegram adapter (I-1).

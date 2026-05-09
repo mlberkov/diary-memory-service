@@ -19,14 +19,16 @@ Then look at `docs/RUNBOOK.md` for how work is done here, and `docs/todo.md` for
 
 ## (Phase 1+) Local bootstrap
 
-Once Slice 1.1 lands and a language is chosen, the loop will look like this:
+Tooling is locked: Python 3.11 (D-016), `uv` (D-017), Ruff + Mypy + Pytest (D-018). Once Slice 1.1 wires the targets:
 
 ```bash
+uv sync                    # install deps from the uv lockfile
 cp .env.example .env       # fill TELEGRAM_BOT_TOKEN, OPENAI_API_KEY, POSTGRES_*
-make init                  # environment sanity
-make check                 # lint + types + tests + config
-make run                   # start the bot locally
+make check                 # ruff (lint + format check) + mypy + pytest
+make run                   # start the bot locally (Phase 1.2)
 ```
+
+Prerequisites: `uv` installed; `uv` will pick up or install Python 3.11.
 
 ### Required environment
 
@@ -45,7 +47,7 @@ See `.env.example` for the full list. As of Phase 0:
 
 ### Telegram transport
 
-Phase 1 uses a webhook receiver (per BuildPlan §Phase 1). Local-dev tunneling vs. polling is open — see `docs/assumptions.md` A-4.
+The bot uses a **webhook receiver in all environments** (D-019). Local development requires a public URL pointing at the local process — use a tunnel such as `ngrok` or `cloudflared`. Long-polling is not supported.
 
 ## When something is broken
 

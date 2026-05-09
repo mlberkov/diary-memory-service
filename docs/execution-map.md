@@ -12,8 +12,8 @@ Files listed are *targets*. Most do not exist yet. Each row will be split into o
 ## Phase 1 — Telegram Shell and Mock Flow
 | Slice | Files / artifacts |
 | --- | --- |
-| 1.1 language & toolchain | language config, lint/format/type/test toolchain, real `make` targets |
-| 1.2 Telegram adapter shell | webhook receiver, command parser (`/start`, `/help`, `/entry`, `/ask`), reply formatter |
+| 1.1 language & toolchain | `pyproject.toml` for Python 3.11 (D-016), `uv` lockfile (D-017), Ruff + Mypy + Pytest configs (D-018), real `make format`/`lint`/`typecheck`/`test`/`check` |
+| 1.2 Telegram adapter shell | webhook receiver (D-019), command parser (`/start`, `/help`, `/entry`, `/ask`), reply formatter, dev-tunnel docs |
 | 1.3 mock services | `MockSourceMessageRepository`, `MockSearchRepository`, `MockEmbeddingClient`, `MockChatClient` |
 | 1.4 routing | command + heuristic routing, low-confidence clarification path |
 | 1.5 mock end-to-end | smoke run exercising `/entry` and `/ask` against mocks |

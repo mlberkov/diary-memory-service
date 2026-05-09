@@ -4,10 +4,10 @@ When an item is decided, move it to `docs/decision-log.md` (next D-### id) and r
 
 | ID | Assumption | Risk if wrong | Validation method | Owner | Due by |
 | --- | --- | --- | --- | --- | --- |
-| A-1 | Python 3.11+ as implementation language | Wrong ecosystem; rewrite cost | Decision in Slice 1.1 | human | Phase 1 |
-| A-2 | Dependency manager TBD | Lockfile churn; CI breakage | Decision in Slice 1.1 | agent | Phase 1 |
-| A-3 | Test/format/type toolchain TBD | Inconsistent style; weak CI | Decision in Slice 1.1 | agent | Phase 1 |
-| A-4 | Telegram transport: webhook (local-dev TBD) | Local DX pain; prod reliability | Spike both, document choice | agent | Phase 1 |
+| ~~A-1~~ | ~~Python 3.11+ as implementation language~~ | — | — | — | Closed → D-016 |
+| ~~A-2~~ | ~~Dependency manager TBD~~ | — | — | — | Closed → D-017 |
+| ~~A-3~~ | ~~Test/format/type toolchain TBD~~ | — | — | — | Closed → D-018 |
+| ~~A-4~~ | ~~Telegram transport: webhook (local-dev TBD)~~ | — | — | — | Closed → D-019 |
 | A-5 | pgvector + Postgres FTS for hybrid | Wrong scale ceiling; rework cost | Benchmark on synthetic 10k chunks | agent | Phase 3 |
 | A-6 | Hybrid merge location (DB vs app) | Latency + correctness | Prototype merge in code vs SQL | agent | Phase 3 |
 | A-7 | Sync vs async indexing | UX latency vs system complexity | Measure ingest latency on Phase 2 data | agent | Phase 3 |

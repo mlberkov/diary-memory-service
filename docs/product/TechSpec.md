@@ -56,6 +56,10 @@ LangGraph is not recommended at MVP stage because the problem is still a relativ
 12. generate grounded answer,
 13. log trace.
 
+### Ordering rule
+Route classification (step 2) operates on the incoming in-memory message and does not require any persisted state.
+The `SourceMessage` row (step 3) must be committed before any enrichment step — parsing, chunking, embedding, or indexing — runs. No enrichment step may begin if raw persistence has not succeeded.
+
 ## 4. Routing
 
 ### Preferred routing

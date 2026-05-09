@@ -199,3 +199,60 @@ The long-term target is reuse, not replacement.
 
 ### Consequence
 Telegram-specific assumptions must stay isolated in adapter code and not leak into core domain logic.
+
+---
+
+## D-016 — Implementation language: Python 3.11
+
+### Decision
+The service is implemented in Python 3.11.
+
+### Why
+Python is the working language for the AI/RAG ecosystem (provider SDKs, embedding tooling, evaluation harnesses) and matches the team's existing fluency. 3.11 is recent enough for performance and typing improvements while broadly supported by tooling.
+
+### Consequence
+Closes assumption A-1. All tooling, CI, and runtime targets assume CPython 3.11+. A move to a newer minor version is allowed; downgrade requires a new decision.
+
+---
+
+## D-017 — Dependency and environment manager: uv
+
+### Decision
+`uv` is the canonical dependency and virtual-environment manager.
+
+### Why
+`uv` is fast, deterministic, and consolidates resolver, installer, and venv management in one tool, removing the separate choice between pip-tools, poetry, and venv handling.
+
+### Consequence
+Closes assumption A-2. The repo uses a `uv`-managed lockfile. Make targets shell out to `uv` rather than directly to `pip`/`python`. Contributors need only `uv` plus a Python 3.11 interpreter that `uv` can pick up or install.
+
+---
+
+## D-018 — Baseline toolchain: Ruff, Mypy, Pytest
+
+### Decision
+The baseline toolchain is:
+- **Ruff** — formatter and linter,
+- **Mypy** — static type checker,
+- **Pytest** — test runner.
+
+`Makefile` exposes `format`, `lint`, `typecheck`, `test`, and `check` (where `check` runs `lint` + `typecheck` + `test`).
+
+### Why
+Ruff replaces Black + isort + flake8 with one fast tool. Mypy is the de-facto Python type checker. Pytest is the lowest-friction test runner and is the implicit assumption in the build plan.
+
+### Consequence
+Closes assumption A-3. CI gates on `make check`. New code must pass Ruff and Mypy in the configuration agreed in Slice 1.1.
+
+---
+
+## D-019 — Telegram transport: webhook only
+
+### Decision
+Telegram is consumed via webhook in MVP and production. Local development also uses webhook, exposed through a tunnel (e.g. `ngrok`, `cloudflared`). Long-polling is not introduced in MVP.
+
+### Why
+Two transports double the surface area (state model, idempotency contract, retry semantics). Webhook is the production target per BuildPlan §Phase 1; using the same transport in dev keeps the contract identical end-to-end.
+
+### Consequence
+Closes assumption A-4. The Telegram adapter implements only a webhook receiver. Developers configure a tunnel locally; the runbook and quickstart document the setup. R-2 (idempotent ingest on `(telegram_chat_id, telegram_message_id, edit_seq)`) covers webhook retry semantics.
