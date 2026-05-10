@@ -105,6 +105,33 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
 # → text: "Mock /entry needs an ISO date (YYYY-MM-DD) on the first line. Got: 'not-a-date'."
 ```
 
+#### Heuristic plain-text routing (`/entry` / `/ask` optional)
+
+Plain text without a slash command is classified by `core.routing.classifier`: a dated body becomes an entry, a question becomes an ask, anything else gets a clarification reply. Heuristic-routed replies carry an explicit marker so the user can see what happened (D-006, R-6, R-11).
+
+```bash
+# 5. Dated plain text — heuristic ENTRY
+curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
+  -d '{"update_id":5,"message":{"message_id":5,"date":1715300400,"chat":{"id":42},"from":{"id":7},"text":"2026-05-10\nLearned a new recipe\nWalked 5km"}}'
+# → text: "Saved 2 events for 2026-05-10.\n(routed as entry — send /entry next time to be explicit)"
+
+# 6. Plain question — heuristic ASK (terminal "?" stripped before substring search)
+curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
+  -d '{"update_id":6,"message":{"message_id":6,"date":1715300500,"chat":{"id":42},"from":{"id":7},"text":"recipe?"}}'
+# → text: "Found 1 memory:\n- [2026-05-10] Learned a new recipe\n(mock retrieval — substring match)\n(routed as question — send /ask next time to be explicit)"
+
+# 7. Ambiguous text — CLARIFY (no persistence, no guessed route)
+curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
+  -d '{"update_id":7,"message":{"message_id":7,"date":1715300600,"chat":{"id":42},"from":{"id":7},"text":"recipe yesterday"}}'
+# → text: "I couldn't tell if that's a diary entry or a question. Send /entry <YYYY-MM-DD> on the first line then your events to record it, or /ask <your question> to query."
+```
+
 #### Registering the webhook with Telegram (when using a real bot)
 
 ```bash

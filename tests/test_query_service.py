@@ -20,6 +20,7 @@ def _ask(query: str, *, chat: str = "42", user: str = "7") -> InboundMessage:
         text=f"/ask {query}",
         route=RouteKind.ASK,
         received_at=datetime.now(tz=UTC),
+        route_source="command",
         payload=query,
     )
 
@@ -32,6 +33,7 @@ def _entry(payload: str, *, chat: str = "42", user: str = "7") -> InboundMessage
         text=f"/entry {payload}",
         route=RouteKind.ENTRY,
         received_at=datetime.now(tz=UTC),
+        route_source="command",
         payload=payload,
     )
 
@@ -121,6 +123,7 @@ def test_missing_family_id_raises() -> None:
                 text="/ask book",
                 route=RouteKind.ASK,
                 received_at=datetime.now(tz=UTC),
+                route_source="command",
                 payload="book",
             )
         )

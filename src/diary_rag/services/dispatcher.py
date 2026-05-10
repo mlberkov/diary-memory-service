@@ -2,8 +2,9 @@
 
 Maps a channel-neutral :class:`InboundMessage` to a
 :class:`DispatchResult` carrying a reply string. ``ENTRY`` and ``ASK``
-delegate to :class:`DiaryService` / :class:`QueryService`; other routes
-return fixed strings appropriate for the current phase.
+delegate to :class:`DiaryService` / :class:`QueryService`; ``CLARIFY``
+returns a fixed clarification message; other routes return fixed
+strings appropriate for the current phase.
 
 Reply wording lives next to the dispatcher (channel-neutral) so the
 Telegram adapter remains a transport layer (Invariant I-1).
@@ -22,6 +23,13 @@ _REPLY_HELP = (
     "Diary mode is in setup; durable persistence and retrieval arrive in later phases."
 )
 _REPLY_UNKNOWN = "I haven't been taught how to handle plain messages yet — use /entry or /ask."
+_REPLY_CLARIFY = (
+    "I couldn't tell if that's a diary entry or a question. "
+    "Send /entry <YYYY-MM-DD> on the first line then your events to record it, "
+    "or /ask <your question> to query."
+)
+_HEURISTIC_MARKER_ENTRY = "(routed as entry — send /entry next time to be explicit)"
+_HEURISTIC_MARKER_ASK = "(routed as question — send /ask next time to be explicit)"
 
 
 def _format_ingest_reply(result: IngestResult) -> str:
@@ -48,6 +56,10 @@ def _format_answer_reply(result: AnswerResult) -> str:
     return "\n".join(lines)
 
 
+def _append_marker(reply: str, marker: str) -> str:
+    return f"{reply}\n{marker}"
+
+
 class Dispatcher:
     """Maps an :class:`InboundMessage` to a :class:`DispatchResult`."""
 
@@ -57,22 +69,42 @@ class Dispatcher:
 
     def dispatch(self, message: InboundMessage) -> DispatchResult:
         route = message.route
+        is_heuristic = message.route_source == "heuristic"
+
         if route is RouteKind.START:
             return DispatchResult(reply_text=_REPLY_START, route=route)
         if route is RouteKind.HELP:
             return DispatchResult(reply_text=_REPLY_HELP, route=route)
         if route is RouteKind.ENTRY:
             ingest = self._diary.ingest(message)
+            reply = _format_ingest_reply(ingest)
+            if is_heuristic:
+                reply = _append_marker(reply, _HEURISTIC_MARKER_ENTRY)
             return DispatchResult(
-                reply_text=_format_ingest_reply(ingest),
+                reply_text=reply,
                 route=route,
-                metadata={"fallback": ingest.fallback.value},
+                metadata={
+                    "fallback": ingest.fallback.value,
+                    "route_source": message.route_source,
+                },
             )
         if route is RouteKind.ASK:
             answer = self._query.answer(message)
+            reply = _format_answer_reply(answer)
+            if is_heuristic:
+                reply = _append_marker(reply, _HEURISTIC_MARKER_ASK)
             return DispatchResult(
-                reply_text=_format_answer_reply(answer),
+                reply_text=reply,
                 route=route,
-                metadata={"fallback": answer.fallback.value},
+                metadata={
+                    "fallback": answer.fallback.value,
+                    "route_source": message.route_source,
+                },
+            )
+        if route is RouteKind.CLARIFY:
+            return DispatchResult(
+                reply_text=_REPLY_CLARIFY,
+                route=route,
+                metadata={"route_source": message.route_source},
             )
         return DispatchResult(reply_text=_REPLY_UNKNOWN, route=RouteKind.UNKNOWN)

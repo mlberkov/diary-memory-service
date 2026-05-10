@@ -20,8 +20,7 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 - **A-15. Visibility scopes**: enumerated values for `visibility_scope` are undefined. Required before Phase 8.
 
 ## Routing & UX
-- **A-16. Routing confidence threshold**: TechSpec §4 says low-confidence routing should ask for clarification. The threshold and the clarification UX are unspecified.
-- **A-17. Clarification fallback UX**: the exact Telegram interaction model for clarification is unspecified.
+*A-16 → D-020. A-17 → D-020.*
 
 ## Privacy & lifecycle
 - **A-18. Data residency**: not stated.
@@ -46,6 +45,7 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 - **A-28. Mock `/entry` accepts ISO-only dates**: the date parser in `core/diary/parser.py` recognizes only `YYYY-MM-DD` on the first non-empty line. Anything else returns `INVALID_INPUT`. Precursor to A-12 (date parsing scope).
 - **A-29. Mock retrieval is case-insensitive substring match**: `MockDiaryStore.search_chunks` is the only retrieval surface; results are scoped to one `family_id` and returned in insertion order. Precursor to A-5/A-6 (hybrid retrieval design) and to the eventual `SearchRepository` interface.
 - **A-30. Mock state is process-local and non-idempotent**: `MockDiaryStore` lives only inside one running `make run` process; webhook retries with the same `update_id` create duplicate `SourceMessage` rows. Precursor to slice 2.4 (idempotent webhook handling) and Phase 2 durable persistence.
+- **A-31. Mock per-route persistence**: in the current in-memory contour, only ENTRY messages persist a `SourceMessage`; ASK and CLARIFY do not. This describes mock behavior only — it is not an architectural rule about durable storage. Per-route persistence semantics are an open design question for Phase 2 and are not bound by this assumption.
 
 ---
 
@@ -54,3 +54,5 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 - A-2 → D-017 (`uv` as dependency and environment manager).
 - A-3 → D-018 (Ruff + Mypy + Pytest as baseline toolchain).
 - A-4 → D-019 (Telegram webhook transport, dev via tunnel).
+- A-16 → D-020 (heuristic routing rule set with explicit confidence labels).
+- A-17 → D-020 (CLARIFY reply naming both `/entry` and `/ask`).

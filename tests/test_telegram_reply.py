@@ -5,12 +5,18 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from diary_rag.adapters.telegram.reply import build_send_message_payload
-from diary_rag.core.routing import InboundMessage, RouteKind
+from diary_rag.core.routing import InboundMessage, RouteKind, RouteSource
 from diary_rag.services import DiaryService, Dispatcher, QueryService
 from diary_rag.storage.mock import MockDiaryStore
 
 
-def _inbound(route: RouteKind, text: str = "", payload: str = "") -> InboundMessage:
+def _inbound(
+    route: RouteKind,
+    text: str = "",
+    payload: str = "",
+    *,
+    route_source: RouteSource = "command",
+) -> InboundMessage:
     return InboundMessage(
         external_message_id="1",
         external_chat_id="42",
@@ -18,6 +24,7 @@ def _inbound(route: RouteKind, text: str = "", payload: str = "") -> InboundMess
         text=text,
         route=route,
         received_at=datetime(2026, 5, 10, tzinfo=UTC),
+        route_source=route_source,
         payload=payload,
     )
 
@@ -52,3 +59,59 @@ def test_dispatcher_unknown_reply_points_at_help() -> None:
     result = _dispatcher().dispatch(_inbound(RouteKind.UNKNOWN, "hello"))
     text = result.reply_text
     assert "/entry" in text or "/ask" in text
+
+
+def test_dispatcher_clarify_reply_explains_both_commands() -> None:
+    result = _dispatcher().dispatch(
+        _inbound(RouteKind.CLARIFY, "recipe yesterday", route_source="heuristic")
+    )
+    assert result.route is RouteKind.CLARIFY
+    assert "/entry" in result.reply_text
+    assert "/ask" in result.reply_text
+    assert result.metadata["route_source"] == "heuristic"
+
+
+def test_dispatcher_appends_heuristic_marker_to_entry_reply() -> None:
+    result = _dispatcher().dispatch(
+        _inbound(
+            RouteKind.ENTRY,
+            text="2026-05-10\nLearned a new recipe",
+            payload="2026-05-10\nLearned a new recipe",
+            route_source="heuristic",
+        )
+    )
+    assert result.reply_text.endswith("(routed as entry — send /entry next time to be explicit)")
+    assert result.metadata["route_source"] == "heuristic"
+
+
+def test_dispatcher_appends_heuristic_marker_to_ask_reply() -> None:
+    dispatcher = _dispatcher()
+    dispatcher.dispatch(
+        _inbound(
+            RouteKind.ENTRY,
+            text="2026-05-10\nLearned a new recipe",
+            payload="2026-05-10\nLearned a new recipe",
+        )
+    )
+    result = dispatcher.dispatch(
+        _inbound(
+            RouteKind.ASK,
+            text="recipe?",
+            payload="recipe?",
+            route_source="heuristic",
+        )
+    )
+    assert result.reply_text.endswith("(routed as question — send /ask next time to be explicit)")
+    assert result.metadata["route_source"] == "heuristic"
+
+
+def test_command_routed_entry_reply_has_no_heuristic_marker() -> None:
+    result = _dispatcher().dispatch(
+        _inbound(
+            RouteKind.ENTRY,
+            text="/entry 2026-05-10\nA",
+            payload="2026-05-10\nA",
+        )
+    )
+    assert "routed as entry" not in result.reply_text
+    assert result.metadata["route_source"] == "command"

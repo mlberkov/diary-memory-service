@@ -10,6 +10,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
+
+RouteSource = Literal["command", "heuristic"]
 
 
 class RouteKind(StrEnum):
@@ -17,6 +20,7 @@ class RouteKind(StrEnum):
     HELP = "help"
     ENTRY = "entry"
     ASK = "ask"
+    CLARIFY = "clarify"
     UNKNOWN = "unknown"
 
 
@@ -30,6 +34,7 @@ class InboundMessage:
     text: str
     route: RouteKind
     received_at: datetime
+    route_source: RouteSource
     payload: str = ""
 
 

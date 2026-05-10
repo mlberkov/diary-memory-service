@@ -83,11 +83,46 @@ def test_dispatch_called_with_route_ask_for_question_command() -> None:
     assert fake.calls[0].payload == "what did we do?"
 
 
-def test_dispatch_called_with_route_unknown_for_plain_text() -> None:
+def test_dispatch_called_with_route_entry_for_dated_plain_text() -> None:
     client, fake = _client_with_fake()
-    response = _post(client, _message_update("hello"))
+    response = _post(client, _message_update("2026-05-10\nLearned a new recipe"))
+    assert response.status_code == 200
+    assert fake.calls[0].route is RouteKind.ENTRY
+    assert fake.calls[0].route_source == "heuristic"
+    assert fake.calls[0].payload == "2026-05-10\nLearned a new recipe"
+
+
+def test_dispatch_called_with_route_ask_for_question_plain_text() -> None:
+    client, fake = _client_with_fake()
+    response = _post(client, _message_update("what did I learn"))
+    assert response.status_code == 200
+    assert fake.calls[0].route is RouteKind.ASK
+    assert fake.calls[0].route_source == "heuristic"
+
+
+def test_dispatch_called_with_route_clarify_for_ambiguous_plain_text() -> None:
+    client, fake = _client_with_fake()
+    response = _post(client, _message_update("recipe yesterday"))
+    assert response.status_code == 200
+    assert fake.calls[0].route is RouteKind.CLARIFY
+    assert fake.calls[0].route_source == "heuristic"
+
+
+def test_command_routing_wins_over_heuristic_when_command_present() -> None:
+    client, fake = _client_with_fake()
+    response = _post(client, _message_update("/entry what is this?"))
+    assert response.status_code == 200
+    assert fake.calls[0].route is RouteKind.ENTRY
+    assert fake.calls[0].route_source == "command"
+    assert fake.calls[0].payload == "what is this?"
+
+
+def test_empty_text_short_circuits_to_unknown_command_route() -> None:
+    client, fake = _client_with_fake()
+    response = _post(client, _message_update(""))
     assert response.status_code == 200
     assert fake.calls[0].route is RouteKind.UNKNOWN
+    assert fake.calls[0].route_source == "command"
 
 
 def test_webhook_returns_200_with_empty_body_for_non_message_update() -> None:

@@ -20,6 +20,7 @@ def _entry_message(payload: str, *, chat: str = "42", user: str = "7") -> Inboun
         text=f"/entry {payload}",
         route=RouteKind.ENTRY,
         received_at=datetime.now(tz=UTC),
+        route_source="command",
         payload=payload,
     )
 

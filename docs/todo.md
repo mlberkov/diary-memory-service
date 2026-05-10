@@ -7,16 +7,6 @@ Top of list = pick next. Each item maps to a row in `docs/execution-map.md`. Whe
 - Map: execution-map 1.3
 - Concrete: `MockEmbeddingClient` and `MockChatClient` once the interfaces they will mirror are sketched in slice 3.1 / 4.1. Hold until those interfaces are clearer; mock provider clients ahead of their real shape locks the wrong contract.
 
-## Slice 1.4 — Routing
-- Owner: agent
-- Map: execution-map 1.4
-- Concrete: heuristic plain-text routing (date-led → entry, otherwise → ask) and the low-confidence clarification path. Decides A-16/A-17.
-
-## Slice 1.5 — Mock end-to-end smoke (extend)
-- Owner: agent
-- Map: execution-map 1.5
-- Concrete: extend the existing smoke once heuristic routing lands so plain-text messages flow through the same diary/query services.
-
 ## TechSpec field-name reconciliation
 - `core/diary/models.SourceMessage` uses `external_chat_id` / `external_user_id` to keep the channel-of-origin out of core (Invariant I-1). TechSpec §5 still names these fields `telegram_chat_id` / `telegram_user_id`. Reconcile before Phase 2.1 schema lands — either rename the spec fields, or introduce a `channel_kind` + `external_*` pair.
 
@@ -42,6 +32,15 @@ Closed in Slice 1.2:
 - `sendMessage`-shaped JSON returned in the webhook response body — no outbound HTTP.
 - Tests: secret gating, command parsing, dispatch wiring, reply payload, update schema.
 - New open assumption: A-26.
+
+Closed in the heuristic-routing packet:
+- `core/routing/classifier.py` with deterministic ENTRY/ASK/CLARIFY rules; reuses `parse_diary_entry` for ISO-date detection (A-28).
+- `RouteKind.CLARIFY` added; `InboundMessage.route_source` is now required (`"command"` | `"heuristic"`).
+- Webhook calls the classifier when `parse_command` returns UNKNOWN with non-empty text; logs `route` + `route_source` + `confidence`.
+- Dispatcher gains a CLARIFY handler with a fixed reply naming `/entry` and `/ask`; heuristic-routed ENTRY/ASK replies carry an explicit marker (R-6).
+- `QueryService` strips trailing `?.!,;:` from the query payload before substring search — minimum normalization for plain-text questions to match.
+- E2E smoke (`tests/test_end_to_end_smoke.py`) covers heuristic ENTRY, heuristic ASK, and CLARIFY (latter asserts no persistence).
+- New decision: D-020 (heuristic routing rules + CLARIFY UX), closing A-16 and A-17. New open assumption: A-31 (mock-only per-route persistence).
 
 Closed in the mock diary/query contour packet:
 - Channel-neutral domain dataclasses `SourceMessage`, `DiaryEntry`, `EventChunk`, plus `Evidence`, `IngestResult`, `AnswerResult`, `FallbackMode` in `core/diary/models.py`.

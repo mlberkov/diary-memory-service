@@ -14,6 +14,19 @@ from diary_rag.storage.mock import MockDiaryStore
 
 DEFAULT_TOP_K = 5
 
+_TRAILING_QUERY_PUNCT = "?.!,;:"
+
+
+def _normalize_query(payload: str) -> str:
+    """Trim whitespace and terminal punctuation so ``"recipe?"`` matches ``"recipe"``.
+
+    The mock store does case-insensitive substring match (`MockDiaryStore.search_chunks`);
+    a trailing ``?`` from a plain-text question would otherwise fail to match a chunk that
+    has no punctuation. This is the smallest normalization needed for the heuristic-ASK
+    smoke; semantic expansion and token ranking remain out of scope.
+    """
+    return payload.strip().rstrip(_TRAILING_QUERY_PUNCT).strip()
+
 
 class QueryService:
     """Answers an ``InboundMessage`` carrying an ``/ask`` payload."""
@@ -27,7 +40,7 @@ class QueryService:
         if not family_id:
             raise ValueError("InboundMessage.external_chat_id is required (R-3)")
 
-        query_text = message.payload.strip()
+        query_text = _normalize_query(message.payload)
 
         if not query_text:
             return AnswerResult(fallback=FallbackMode.NO_EVIDENCE, query_text=query_text)

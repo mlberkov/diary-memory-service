@@ -109,3 +109,47 @@ def test_ask_before_any_entry_returns_no_evidence() -> None:
     assert resp.json()["text"] == (
         "No memories matched 'anything'. (no_evidence — mock retrieval only.)"
     )
+
+
+def test_dated_plain_text_is_ingested_as_entry_via_heuristic() -> None:
+    client, store = _client_with_fresh_store()
+
+    resp = _post(client, _update("2026-05-10\nLearned a new recipe\nWalked 5km", update_id=1))
+
+    assert resp.status_code == 200
+    assert resp.json()["text"] == (
+        "Saved 2 events for 2026-05-10.\n"
+        "(routed as entry — send /entry next time to be explicit)"
+    )
+    assert store.len_chunks() == 2
+
+
+def test_question_plain_text_returns_grounded_reply_via_heuristic() -> None:
+    client, _ = _client_with_fresh_store()
+
+    _post(client, _update("/entry 2026-05-10\nLearned a new recipe\nWalked 5km", update_id=1))
+    resp = _post(client, _update("recipe?", update_id=2, message_id=2))
+
+    assert resp.status_code == 200
+    assert resp.json()["text"] == (
+        "Found 1 memory:\n"
+        "- [2026-05-10] Learned a new recipe\n"
+        "(mock retrieval — substring match)\n"
+        "(routed as question — send /ask next time to be explicit)"
+    )
+
+
+def test_ambiguous_plain_text_returns_clarify_and_does_not_persist() -> None:
+    client, store = _client_with_fresh_store()
+
+    resp = _post(client, _update("recipe yesterday", update_id=1))
+
+    assert resp.status_code == 200
+    assert resp.json()["text"] == (
+        "I couldn't tell if that's a diary entry or a question. "
+        "Send /entry <YYYY-MM-DD> on the first line then your events to record it, "
+        "or /ask <your question> to query."
+    )
+    assert store.len_sources() == 0
+    assert store.len_entries() == 0
+    assert store.len_chunks() == 0
