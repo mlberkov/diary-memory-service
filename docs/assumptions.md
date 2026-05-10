@@ -47,8 +47,8 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 - **A-30. Mock state is process-local and non-idempotent**: `MockDiaryStore` (the default `STORAGE_BACKEND=memory` backend) lives only inside one running `make run` process; webhook retries with the same `update_id` create duplicate `SourceMessage` rows. Precursor to slice 2.4 (idempotent webhook handling) and Phase 2 durable persistence.
 - **A-31. Mock per-route persistence**: in the current in-memory contour, only ENTRY messages persist a `SourceMessage`; ASK and CLARIFY do not. This describes mock behavior only — it is not an architectural rule about durable storage. Per-route persistence semantics are an open design question for Phase 2 and are not bound by this assumption.
 
-## Local SQLite contour (current)
-- **A-32. Local SQLite as the dev-only durable seam**: with `STORAGE_BACKEND=sqlite`, the service writes through `SqliteDiaryStore` to a single file at `SQLITE_PATH` (default `./data/diary.db`). Schema is bootstrapped on each boot via `CREATE TABLE IF NOT EXISTS`; no migration tool is wired in this slice. Retrieval reuses the same case-insensitive substring contract as the mock (A-29), now executed in SQL with `lower(chunk_text) LIKE ?`. Webhook idempotency (R-2) is unchanged: duplicate `update_id` retries still produce duplicate `SourceMessage` rows. This is a dev-only contour; the canonical durable target remains PostgreSQL (D-007). The Postgres swap is a follow-up packet behind the same `DiaryRepository` Protocol.
+## Local Postgres contour (current)
+- **A-33. Local Postgres durable contour**: with `STORAGE_BACKEND=postgres`, the service writes through `PostgresDiaryStore` (psycopg3 sync + `psycopg_pool.ConnectionPool`) to the Postgres provided by `docker-compose.yml`. Schema is bootstrapped at process start from `src/diary_rag/storage/postgres/schema.sql` via `CREATE TABLE / CREATE INDEX IF NOT EXISTS`; no migration tool is wired in this slice. Retrieval reuses the same case-insensitive substring contract as the mock (A-29), now executed against Postgres with `lower(chunk_text) LIKE %s`. Webhook idempotency (R-2) is unchanged: duplicate `update_id` retries still produce duplicate `SourceMessage` rows. SQLite remains opt-in for offline dev; the canonical durable target is Postgres (D-007 / D-022).
 
 ---
 
@@ -59,3 +59,4 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 - A-4 → D-019 (Telegram webhook transport, dev via tunnel).
 - A-16 → D-020 (heuristic routing rule set with explicit confidence labels).
 - A-17 → D-020 (CLARIFY reply naming both `/entry` and `/ask`).
+- A-32 → D-022 (Postgres replaces SQLite as the canonical durable backend; SQLite stays opt-in).

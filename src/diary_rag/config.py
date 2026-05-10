@@ -43,11 +43,17 @@ class Settings(BaseSettings):
     postgres_user: str = Field(default="postgres")
     postgres_password: str = Field(default="postgres")
 
-    storage_backend: Literal["memory", "sqlite"] = Field(default="memory")
+    storage_backend: Literal["memory", "sqlite", "postgres"] = Field(default="memory")
     sqlite_path: str = Field(default="./data/diary.db")
 
     embedding_model: str = Field(default="")
     chat_model: str = Field(default="")
+
+    def postgres_dsn(self) -> str:
+        return (
+            f"postgresql://{self.postgres_user}:{self.postgres_password}"
+            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+        )
 
 
 @lru_cache(maxsize=1)

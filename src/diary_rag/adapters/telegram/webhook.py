@@ -36,6 +36,10 @@ _dispatcher: Dispatcher | None = None
 
 
 def _build_store(settings: Settings) -> DiaryRepository:
+    if settings.storage_backend == "postgres":
+        from diary_rag.storage.postgres import PostgresDiaryStore
+
+        return PostgresDiaryStore(settings.postgres_dsn())
     if settings.storage_backend == "sqlite":
         from diary_rag.storage.sqlite import SqliteDiaryStore
 

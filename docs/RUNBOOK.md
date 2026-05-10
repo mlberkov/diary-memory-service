@@ -46,6 +46,9 @@ The toolchain is **Python 3.11 + uv + Ruff + Mypy + Pytest** (D-016 / D-017 / D-
 - `make tree` — show the top of the repo tree.
 - `make clean` — remove caches and build artifacts.
 
+### Local Postgres
+The canonical durable backend (D-022) runs via `docker compose up -d postgres`. Set `STORAGE_BACKEND=postgres` and the standard `POSTGRES_*` env vars. See `QUICKSTART.md` "Durable local store (Postgres)" for the full smoke flow.
+
 ### Telegram in local development
 Webhook only (D-019). Expose the local process via a tunnel (e.g. `ngrok`, `cloudflared`) and register the tunnel URL with the bot. There is no polling fallback.
 

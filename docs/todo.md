@@ -42,6 +42,15 @@ Closed in the heuristic-routing packet:
 - E2E smoke (`tests/test_end_to_end_smoke.py`) covers heuristic ENTRY, heuristic ASK, and CLARIFY (latter asserts no persistence).
 - New decision: D-020 (heuristic routing rules + CLARIFY UX), closing A-16 and A-17. New open assumption: A-31 (mock-only per-route persistence).
 
+Closed in the canonical local Postgres backend packet:
+- `src/diary_rag/storage/postgres/{__init__,store}.py` — `PostgresDiaryStore` implementing `DiaryRepository` via psycopg3 sync + `psycopg_pool.ConnectionPool`; deterministic `close()` for tests/local use.
+- `src/diary_rag/storage/postgres/schema.sql` — single canonical DDL loaded via `importlib.resources`; CREATE TABLE / CREATE INDEX IF NOT EXISTS; `detected_route` CHECK covers all `RouteKind` values.
+- `docker-compose.yml` — single `postgres:16-alpine` service with `${VAR:-default}` env, named volume `diary_pg_data`, `pg_isready` healthcheck.
+- `tests/test_postgres_store.py` — gated by `DIARY_RAG_PG_TEST_DSN`; mirrors SQLite cases (round-trip, family scoping, top-k, case-insensitive, empty inputs, R-3, restart survival).
+- `config.Settings.postgres_dsn()` helper; `storage_backend` Literal extended to include `"postgres"`; `_build_store` adds a postgres branch with lazy import.
+- `pyproject.toml`: `psycopg[binary]` and `psycopg-pool` runtime deps; hatch force-include for `schema.sql`.
+- Docs: D-022 in `decision-log.md`; A-32 closed and A-33 opened in `assumptions.md`; row 2.0 added to `execution-map.md`; Postgres section in `QUICKSTART.md`; pointer in `RUNBOOK.md`; comment in `.env.example`.
+
 Closed in the mock diary/query contour packet:
 - Channel-neutral domain dataclasses `SourceMessage`, `DiaryEntry`, `EventChunk`, plus `Evidence`, `IngestResult`, `AnswerResult`, `FallbackMode` in `core/diary/models.py`.
 - Strict ISO-only date parser in `core/diary/parser.py`.

@@ -21,6 +21,7 @@ Files listed are *targets*. Most do not exist yet. Each row will be split into o
 ## Phase 2 — Durable Backend Core
 | Slice | Files / artifacts |
 | --- | --- |
+| 2.0 canonical local Postgres backend | `src/diary_rag/storage/postgres/{__init__,store}.py`, `src/diary_rag/storage/postgres/schema.sql`, `docker-compose.yml`, `tests/test_postgres_store.py`; `_build_store` postgres branch in `adapters/telegram/webhook.py`; `Settings.postgres_dsn()` (D-022) |
 | 2.1 schema (identities) | initial migration: `users`, `families`, `children`, `telegram_chats`, `source_messages` |
 | 2.2 schema (entries) | migration: `diary_entries`, `event_chunks` with lineage |
 | 2.3 ingestion pipeline | parser (`parse_version`), event splitter, chunk creation; raw persisted first (I-3, R-1) |

@@ -132,9 +132,61 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
 # → text: "I couldn't tell if that's a diary entry or a question. Send /entry <YYYY-MM-DD> on the first line then your events to record it, or /ask <your question> to query."
 ```
 
-#### Durable local store (SQLite)
+#### Durable local store (Postgres)
 
-The default backend is the in-memory mock (`STORAGE_BACKEND=memory`). For a local run that survives an app restart, switch to the SQLite backend. Schema is bootstrapped on first boot via `CREATE TABLE IF NOT EXISTS`; there is no migration tool yet. SQLite is a dev-only choice — PostgreSQL remains the canonical durable target (D-007 / D-021).
+`STORAGE_BACKEND=postgres` is the canonical durable backend (D-007 / D-022). It writes through `PostgresDiaryStore` to the local Postgres provided by `docker-compose.yml`. Schema is bootstrapped on first boot from `src/diary_rag/storage/postgres/schema.sql` via `CREATE TABLE / CREATE INDEX IF NOT EXISTS`. Default backend is still `memory`; SQLite (below) remains an opt-in non-default backend.
+
+```bash
+# 0. Bring up Postgres (compose defaults work without a custom .env)
+docker compose up -d postgres
+docker compose ps             # wait until "healthy"
+
+# 1. Point the app at it
+export TELEGRAM_WEBHOOK_SECRET=dev-secret
+export STORAGE_BACKEND=postgres
+export POSTGRES_HOST=localhost
+export POSTGRES_PORT=5432
+export POSTGRES_DB=theygrow_diary_rag
+export POSTGRES_USER=postgres
+export POSTGRES_PASSWORD=postgres
+
+make run                      # uvicorn boots; first call bootstraps schema
+
+# 2. Ingest a multi-line dated entry
+curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
+  -d '{"update_id":1,"message":{"message_id":1,"date":1715300000,"chat":{"id":42},"from":{"id":7},"text":"/entry 2026-05-09\nWalked the dog\nTried a new book"}}'
+# → text: "Saved 2 events for 2026-05-09."
+
+# 3. Verify rows landed in Postgres
+docker compose exec -T postgres psql -U postgres -d theygrow_diary_rag -c \
+  "SELECT
+     (SELECT count(*) FROM source_messages) AS sources,
+     (SELECT count(*) FROM diary_entries)   AS entries,
+     (SELECT count(*) FROM event_chunks)    AS chunks;"
+# → sources=1 entries=1 chunks=2
+
+# 4. Stop uvicorn (Ctrl+C); rerun `make run` with the same env
+#    (the docker-compose volume keeps the DB across app restarts)
+
+# 5. Ask after restart — evidence survives
+curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
+  -d '{"update_id":2,"message":{"message_id":2,"date":1715300100,"chat":{"id":42},"from":{"id":7},"text":"/ask book"}}'
+# → text: "Found 1 memory:\n- [2026-05-09] Tried a new book\n(mock retrieval — substring match)"
+
+# Cleanup
+docker compose down           # stop, keep volume
+docker compose down -v        # also drop diary_pg_data
+```
+
+The reply still says "mock retrieval — substring match" because retrieval semantics remain case-insensitive substring (A-29); only the durable backend changed.
+
+#### Durable local store (SQLite — opt-in)
+
+`STORAGE_BACKEND=sqlite` writes through `SqliteDiaryStore` to a single file at `SQLITE_PATH` (default `./data/diary.db`). Schema is bootstrapped on first boot via `CREATE TABLE IF NOT EXISTS`. Useful for offline dev / tests; the canonical durable path is Postgres (D-022).
 
 ```bash
 export TELEGRAM_WEBHOOK_SECRET=dev-secret
