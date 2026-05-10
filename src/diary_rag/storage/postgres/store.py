@@ -1,4 +1,4 @@
-"""Local PostgreSQL store implementing ``DiaryRepository`` (D-022).
+"""Local PostgreSQL store implementing ``DiaryRepository`` (D-022, D-023).
 
 Schema is bootstrapped at construction by executing ``schema.sql`` (loaded
 via :mod:`importlib.resources` so it works whether the package is run from
@@ -6,11 +6,18 @@ source or installed). Connections are managed by a small
 :class:`psycopg_pool.ConnectionPool`. Native Postgres types are used for
 ``TIMESTAMPTZ`` and ``DATE``; ``detected_route`` is TEXT with a CHECK
 listing every :class:`RouteKind` value.
+
+Idempotency (R-2 / D-023) is enforced by the
+``UNIQUE (external_chat_id, external_message_id, edit_seq)`` constraint on
+``source_messages`` plus ``INSERT ... ON CONFLICT DO NOTHING`` in
+``get_or_create_source_message``: the DB is the source of truth for "this
+message-state has already been ingested," not a SELECT-then-INSERT race.
 """
 
 from __future__ import annotations
 
 from importlib import resources
+from typing import Any
 
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
@@ -57,20 +64,65 @@ class PostgresDiaryStore:
             cur.execute(
                 "INSERT INTO source_messages "
                 "(source_message_id, family_id, author_user_id, external_chat_id, "
-                " external_user_id, raw_text, detected_route, created_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                " external_user_id, external_message_id, edit_seq, raw_text, "
+                " detected_route, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (
                     source.source_message_id,
                     source.family_id,
                     source.author_user_id,
                     source.external_chat_id,
                     source.external_user_id,
+                    source.external_message_id,
+                    source.edit_seq,
                     source.raw_text,
                     source.detected_route.value,
                     source.created_at,
                 ),
             )
             conn.commit()
+
+    def get_or_create_source_message(self, source: SourceMessage) -> tuple[SourceMessage, bool]:
+        with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                "INSERT INTO source_messages "
+                "(source_message_id, family_id, author_user_id, external_chat_id, "
+                " external_user_id, external_message_id, edit_seq, raw_text, "
+                " detected_route, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (external_chat_id, external_message_id, edit_seq) "
+                "DO NOTHING",
+                (
+                    source.source_message_id,
+                    source.family_id,
+                    source.author_user_id,
+                    source.external_chat_id,
+                    source.external_user_id,
+                    source.external_message_id,
+                    source.edit_seq,
+                    source.raw_text,
+                    source.detected_route.value,
+                    source.created_at,
+                ),
+            )
+            inserted = cur.rowcount == 1
+            if inserted:
+                conn.commit()
+                return source, False
+            cur.execute(
+                "SELECT source_message_id, family_id, author_user_id, "
+                "       external_chat_id, external_user_id, external_message_id, "
+                "       edit_seq, raw_text, detected_route, created_at "
+                "  FROM source_messages "
+                " WHERE external_chat_id = %s "
+                "   AND external_message_id = %s "
+                "   AND edit_seq = %s",
+                (source.external_chat_id, source.external_message_id, source.edit_seq),
+            )
+            row = cur.fetchone()
+            conn.commit()
+        assert row is not None
+        return _row_to_source(row), True
 
     def save_diary_entry(self, entry: DiaryEntry) -> None:
         with self._pool.connection() as conn, conn.cursor() as cur:
@@ -122,8 +174,8 @@ class PostgresDiaryStore:
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT source_message_id, family_id, author_user_id, "
-                "       external_chat_id, external_user_id, raw_text, "
-                "       detected_route, created_at "
+                "       external_chat_id, external_user_id, external_message_id, "
+                "       edit_seq, raw_text, detected_route, created_at "
                 "  FROM source_messages "
                 " WHERE source_message_id = %s",
                 (source_message_id,),
@@ -131,16 +183,41 @@ class PostgresDiaryStore:
             row = cur.fetchone()
         if row is None:
             return None
-        return SourceMessage(
+        return _row_to_source(row)
+
+    def get_diary_entry_by_source_message_id(self, source_message_id: str) -> DiaryEntry | None:
+        with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                "SELECT diary_entry_id, source_message_id, family_id, author_user_id, "
+                "       entry_date, entry_text, created_at "
+                "  FROM diary_entries "
+                " WHERE source_message_id = %s "
+                " LIMIT 1",
+                (source_message_id,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return DiaryEntry(
+            diary_entry_id=row["diary_entry_id"],
             source_message_id=row["source_message_id"],
             family_id=row["family_id"],
             author_user_id=row["author_user_id"],
-            external_chat_id=row["external_chat_id"],
-            external_user_id=row["external_user_id"],
-            raw_text=row["raw_text"],
-            detected_route=RouteKind(row["detected_route"]),
+            entry_date=row["entry_date"],
+            entry_text=row["entry_text"],
             created_at=row["created_at"],
         )
+
+    def count_event_chunks_for_source(self, source_message_id: str) -> int:
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM event_chunks WHERE source_message_id = %s",
+                (source_message_id,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return 0
+        return int(row[0])
 
     def search_chunks(self, family_id: str, query_text: str, top_k: int) -> list[EventChunk]:
         if not family_id:
@@ -177,6 +254,21 @@ class PostgresDiaryStore:
             )
             for r in rows
         ]
+
+
+def _row_to_source(row: dict[str, Any]) -> SourceMessage:
+    return SourceMessage(
+        source_message_id=row["source_message_id"],
+        family_id=row["family_id"],
+        author_user_id=row["author_user_id"],
+        external_chat_id=row["external_chat_id"],
+        external_user_id=row["external_user_id"],
+        external_message_id=row["external_message_id"],
+        edit_seq=int(row["edit_seq"]),
+        raw_text=row["raw_text"],
+        detected_route=RouteKind(row["detected_route"]),
+        created_at=row["created_at"],
+    )
 
 
 __all__ = ["PostgresDiaryStore"]

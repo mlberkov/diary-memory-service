@@ -25,7 +25,7 @@ Files listed are *targets*. Most do not exist yet. Each row will be split into o
 | 2.1 schema (identities) | initial migration: `users`, `families`, `children`, `telegram_chats`, `source_messages` |
 | 2.2 schema (entries) | migration: `diary_entries`, `event_chunks` with lineage |
 | 2.3 ingestion pipeline | parser (`parse_version`), event splitter, chunk creation; raw persisted first (I-3, R-1) |
-| 2.4 idempotent webhook | replay-safe handler keyed on `(telegram_chat_id, telegram_message_id, edit_seq)` |
+| 2.4 idempotent webhook | `DiaryRepository.get_or_create_source_message` keyed on `(external_chat_id, external_message_id, edit_seq)`; `UNIQUE` constraint + `INSERT ... ON CONFLICT DO NOTHING` (Postgres) / `INSERT OR IGNORE` (SQLite) / dict dedupe (mock); `DiaryService.ingest` short-circuits on replay; webhook logs `effective_path=fresh|replay`; D-023 |
 | 2.5 edit/delete strategy | implementation of the decision recorded for TechSpec §12 (assumption A-10) |
 | 2.6 stage status tracking | per-record `parse_status`, `embedding_status`, `index_status` |
 

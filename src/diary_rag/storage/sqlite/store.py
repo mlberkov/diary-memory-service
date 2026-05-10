@@ -1,10 +1,15 @@
 """Local-disk SQLite store implementing ``DiaryRepository``.
 
-Schema is bootstrapped at construction via ``CREATE TABLE IF NOT EXISTS``
-and a single ``CREATE INDEX``. A fresh ``sqlite3.Connection`` is opened
-per public method call, so the store is safe under FastAPI's threadpool
-without shared-connection care. Dates and timestamps are serialized as
-ISO-8601 TEXT at the boundary; no ``detect_types`` magic.
+Schema is bootstrapped at construction via ``CREATE TABLE IF NOT EXISTS``.
+A fresh ``sqlite3.Connection`` is opened per public method call, so the
+store is safe under FastAPI's threadpool without shared-connection care.
+Dates and timestamps are serialized as ISO-8601 TEXT at the boundary;
+no ``detect_types`` magic.
+
+Idempotency (R-2 / D-023) is enforced by the
+``UNIQUE (external_chat_id, external_message_id, edit_seq)`` constraint
+plus ``INSERT OR IGNORE`` in ``get_or_create_source_message``: the DB is
+the source of truth for dedupe, not a SELECT-then-INSERT race.
 """
 
 from __future__ import annotations
@@ -18,14 +23,17 @@ from diary_rag.core.routing import RouteKind
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS source_messages (
-    source_message_id TEXT PRIMARY KEY,
-    family_id         TEXT NOT NULL,
-    author_user_id    TEXT NOT NULL,
-    external_chat_id  TEXT NOT NULL,
-    external_user_id  TEXT NOT NULL,
-    raw_text          TEXT NOT NULL,
-    detected_route    TEXT NOT NULL,
-    created_at        TEXT NOT NULL
+    source_message_id   TEXT PRIMARY KEY,
+    family_id           TEXT NOT NULL,
+    author_user_id      TEXT NOT NULL,
+    external_chat_id    TEXT NOT NULL,
+    external_user_id    TEXT NOT NULL,
+    external_message_id TEXT NOT NULL,
+    edit_seq            INTEGER NOT NULL DEFAULT 0,
+    raw_text            TEXT NOT NULL,
+    detected_route      TEXT NOT NULL,
+    created_at          TEXT NOT NULL,
+    UNIQUE (external_chat_id, external_message_id, edit_seq)
 );
 
 CREATE TABLE IF NOT EXISTS diary_entries (
@@ -37,6 +45,9 @@ CREATE TABLE IF NOT EXISTS diary_entries (
     entry_text        TEXT NOT NULL,
     created_at        TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_diary_entries_source_message_id
+    ON diary_entries(source_message_id);
 
 CREATE TABLE IF NOT EXISTS event_chunks (
     chunk_id          TEXT PRIMARY KEY,
@@ -52,6 +63,9 @@ CREATE TABLE IF NOT EXISTS event_chunks (
 
 CREATE INDEX IF NOT EXISTS idx_event_chunks_family_id
     ON event_chunks(family_id);
+
+CREATE INDEX IF NOT EXISTS idx_event_chunks_source_message_id
+    ON event_chunks(source_message_id);
 """
 
 
@@ -77,20 +91,62 @@ class SqliteDiaryStore:
             conn.execute(
                 "INSERT INTO source_messages "
                 "(source_message_id, family_id, author_user_id, external_chat_id, "
-                " external_user_id, raw_text, detected_route, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                " external_user_id, external_message_id, edit_seq, raw_text, "
+                " detected_route, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     source.source_message_id,
                     source.family_id,
                     source.author_user_id,
                     source.external_chat_id,
                     source.external_user_id,
+                    source.external_message_id,
+                    source.edit_seq,
                     source.raw_text,
                     source.detected_route.value,
                     source.created_at.isoformat(),
                 ),
             )
             conn.commit()
+
+    def get_or_create_source_message(self, source: SourceMessage) -> tuple[SourceMessage, bool]:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO source_messages "
+                "(source_message_id, family_id, author_user_id, external_chat_id, "
+                " external_user_id, external_message_id, edit_seq, raw_text, "
+                " detected_route, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    source.source_message_id,
+                    source.family_id,
+                    source.author_user_id,
+                    source.external_chat_id,
+                    source.external_user_id,
+                    source.external_message_id,
+                    source.edit_seq,
+                    source.raw_text,
+                    source.detected_route.value,
+                    source.created_at.isoformat(),
+                ),
+            )
+            inserted = cur.rowcount == 1
+            if inserted:
+                conn.commit()
+                return source, False
+            row = conn.execute(
+                "SELECT source_message_id, family_id, author_user_id, "
+                "       external_chat_id, external_user_id, external_message_id, "
+                "       edit_seq, raw_text, detected_route, created_at "
+                "  FROM source_messages "
+                " WHERE external_chat_id = ? "
+                "   AND external_message_id = ? "
+                "   AND edit_seq = ?",
+                (source.external_chat_id, source.external_message_id, source.edit_seq),
+            ).fetchone()
+            conn.commit()
+        assert row is not None
+        return _row_to_source(row), True
 
     def save_diary_entry(self, entry: DiaryEntry) -> None:
         with self._connect() as conn:
@@ -141,24 +197,47 @@ class SqliteDiaryStore:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT source_message_id, family_id, author_user_id, "
-                "       external_chat_id, external_user_id, raw_text, "
-                "       detected_route, created_at "
+                "       external_chat_id, external_user_id, external_message_id, "
+                "       edit_seq, raw_text, detected_route, created_at "
                 "  FROM source_messages "
                 " WHERE source_message_id = ?",
                 (source_message_id,),
             ).fetchone()
         if row is None:
             return None
-        return SourceMessage(
+        return _row_to_source(row)
+
+    def get_diary_entry_by_source_message_id(self, source_message_id: str) -> DiaryEntry | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT diary_entry_id, source_message_id, family_id, author_user_id, "
+                "       entry_date, entry_text, created_at "
+                "  FROM diary_entries "
+                " WHERE source_message_id = ? "
+                " LIMIT 1",
+                (source_message_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return DiaryEntry(
+            diary_entry_id=row["diary_entry_id"],
             source_message_id=row["source_message_id"],
             family_id=row["family_id"],
             author_user_id=row["author_user_id"],
-            external_chat_id=row["external_chat_id"],
-            external_user_id=row["external_user_id"],
-            raw_text=row["raw_text"],
-            detected_route=RouteKind(row["detected_route"]),
+            entry_date=date.fromisoformat(row["entry_date"]),
+            entry_text=row["entry_text"],
             created_at=datetime.fromisoformat(row["created_at"]),
         )
+
+    def count_event_chunks_for_source(self, source_message_id: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT count(*) FROM event_chunks WHERE source_message_id = ?",
+                (source_message_id,),
+            ).fetchone()
+        if row is None:
+            return 0
+        return int(row[0])
 
     def search_chunks(self, family_id: str, query_text: str, top_k: int) -> list[EventChunk]:
         if not family_id:
@@ -194,3 +273,18 @@ class SqliteDiaryStore:
             )
             for r in rows
         ]
+
+
+def _row_to_source(row: sqlite3.Row) -> SourceMessage:
+    return SourceMessage(
+        source_message_id=row["source_message_id"],
+        family_id=row["family_id"],
+        author_user_id=row["author_user_id"],
+        external_chat_id=row["external_chat_id"],
+        external_user_id=row["external_user_id"],
+        external_message_id=row["external_message_id"],
+        edit_seq=int(row["edit_seq"]),
+        raw_text=row["raw_text"],
+        detected_route=RouteKind(row["detected_route"]),
+        created_at=datetime.fromisoformat(row["created_at"]),
+    )

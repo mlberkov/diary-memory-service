@@ -7,8 +7,10 @@ isolated from the module-level singleton in ``webhook.py``.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from diary_rag.adapters.telegram.webhook import get_dispatcher
@@ -39,17 +41,25 @@ def _post(client: TestClient, payload: dict[str, Any]) -> Any:
 
 
 def _update(
-    text: str, *, update_id: int = 1, message_id: int = 1, chat_id: int = 42
+    text: str,
+    *,
+    update_id: int = 1,
+    message_id: int = 1,
+    chat_id: int = 42,
+    edit_date: int | None = None,
 ) -> dict[str, Any]:
+    msg: dict[str, Any] = {
+        "message_id": message_id,
+        "date": 1715300000 + update_id,
+        "chat": {"id": chat_id},
+        "from": {"id": 7},
+        "text": text,
+    }
+    if edit_date is not None:
+        msg["edit_date"] = edit_date
     return {
         "update_id": update_id,
-        "message": {
-            "message_id": message_id,
-            "date": 1715300000 + update_id,
-            "chat": {"id": chat_id},
-            "from": {"id": 7},
-            "text": text,
-        },
+        "message": msg,
     }
 
 
@@ -153,3 +163,54 @@ def test_ambiguous_plain_text_returns_clarify_and_does_not_persist() -> None:
     assert store.len_sources() == 0
     assert store.len_entries() == 0
     assert store.len_chunks() == 0
+
+
+def test_replayed_entry_returns_same_reply_and_does_not_duplicate(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client, store = _client_with_fresh_store()
+    payload = _update(
+        "/entry 2026-05-09\nHad a calm morning\nTried a new book",
+        update_id=1,
+        message_id=99,
+    )
+
+    with caplog.at_level(logging.INFO, logger="diary_rag.adapters.telegram.webhook"):
+        first = _post(client, payload)
+        second = _post(client, payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json() == second.json()
+    assert second.json()["text"] == "Saved 2 events for 2026-05-09."
+    assert store.len_sources() == 1
+    assert store.len_entries() == 1
+    assert store.len_chunks() == 2
+
+    paths = [line for line in caplog.text.splitlines() if "telegram.webhook" in line]
+    assert any("effective_path=fresh" in line for line in paths)
+    assert any("effective_path=replay" in line for line in paths)
+
+
+def test_edited_message_is_distinct_state_from_original() -> None:
+    client, store = _client_with_fresh_store()
+
+    first = _post(
+        client,
+        _update("/entry 2026-05-09\nA\nB", update_id=1, message_id=99),
+    )
+    edited = _post(
+        client,
+        _update(
+            "/entry 2026-05-09\nA\nB\nC",
+            update_id=2,
+            message_id=99,
+            edit_date=1715300100,
+        ),
+    )
+
+    assert first.status_code == 200
+    assert edited.status_code == 200
+    assert store.len_sources() == 2
+    assert store.len_entries() == 2
+    assert store.len_chunks() == 5

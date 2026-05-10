@@ -131,3 +131,19 @@ def test_webhook_returns_200_with_empty_body_for_non_message_update() -> None:
     assert response.status_code == 200
     assert response.json() == {}
     assert fake.calls == []
+
+
+def test_dispatch_edit_seq_defaults_to_zero_when_no_edit_date() -> None:
+    client, fake = _client_with_fake()
+    response = _post(client, _message_update("/start"))
+    assert response.status_code == 200
+    assert fake.calls[0].edit_seq == 0
+
+
+def test_dispatch_edit_seq_is_edit_date_when_present() -> None:
+    client, fake = _client_with_fake()
+    payload = _message_update("/entry 2026-05-09\nFoo")
+    payload["message"]["edit_date"] = 1715300100
+    response = _post(client, payload)
+    assert response.status_code == 200
+    assert fake.calls[0].edit_seq == 1715300100

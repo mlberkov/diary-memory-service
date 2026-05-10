@@ -6,7 +6,7 @@ These must hold while the service is running. Violations are alerts, not warning
 Within a single inbound-message handler, the `SourceMessage` row is committed before any parse, chunk, embed, or index call is initiated.
 
 ## R-2. Idempotent ingest
-Replaying the same channel update (same channel id, message id, and edit sequence) produces no new state. Webhook retries are safe.
+Replaying the same channel message-state produces no new persisted state. The idempotency key is the triple `(external_chat_id, external_message_id, edit_seq)` (D-023); for Telegram, `edit_seq` is `0` for an original delivery and the `edit_date` epoch seconds for an edited state. Each backend enforces the key via DB-native conflict handling on `source_messages`; `DiaryService.ingest` short-circuits parse and chunking on replay and returns the same functional `IngestResult`. Webhook retries are safe and observable: the log line records `effective_path=fresh|replay`.
 
 ## R-3. Family scoping on every read
 Every retrieval call carries a non-null `family_id`. The retriever rejects calls without it. There is no admin path that bypasses scoping in MVP.

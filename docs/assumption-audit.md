@@ -32,4 +32,5 @@ When an item is decided, move it to `docs/decision-log.md` (next D-### id) and r
 | A-26 | Webhook fails closed when `TELEGRAM_WEBHOOK_SECRET` is unset or mismatched | Open webhook accepts spoofed traffic | Verified in Slice 1.2 secret-header tests | agent | end of Phase 1 |
 | A-28 | Mock `/entry` accepts ISO-only `YYYY-MM-DD` on first line | Demos misclassify locale dates / relative dates as invalid | Replaced by A-12 decision (Phase 2.3) | agent | Phase 2.3 |
 | A-29 | Mock retrieval is case-insensitive substring match | Wrong recall/precision shape sets bad expectations | Replaced by hybrid retrieval (A-5/A-6) | agent | Phase 3 |
-| A-30 | Mock state is process-local and non-idempotent | Webhook retries duplicate state; restart loses data | Replaced by Phase 2 durable persistence + slice 2.4 idempotency | agent | Phase 2 |
+| ~~A-30~~ | ~~Mock state is process-local and non-idempotent~~ | — | — | — | Closed → D-023 |
+| A-34 | No migration tool; local schema upgrades are destructive | Production schema evolution unsafe; dev volume drops feel like data loss | Document destructive upgrade in RUNBOOK; revisit before non-local deploy | agent | before prod |

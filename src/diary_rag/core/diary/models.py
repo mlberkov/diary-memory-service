@@ -31,13 +31,22 @@ class FallbackMode(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class SourceMessage:
-    """Raw inbound message, persisted before any enrichment (I-3, R-1)."""
+    """Raw inbound message, persisted before any enrichment (I-3, R-1).
+
+    ``external_message_id`` and ``edit_seq`` together with ``external_chat_id``
+    form the idempotency key required by Runtime invariant R-2 (D-023):
+    repeated delivery of the same message-state must not create duplicate rows.
+    ``edit_seq`` is ``0`` for an original message and the Telegram ``edit_date``
+    epoch seconds for an edited state, so each distinct edit gets its own key.
+    """
 
     source_message_id: str
     family_id: str
     author_user_id: str
     external_chat_id: str
     external_user_id: str
+    external_message_id: str
+    edit_seq: int
     raw_text: str
     detected_route: RouteKind
     created_at: datetime
@@ -82,13 +91,20 @@ class Evidence:
 
 @dataclass(frozen=True, slots=True)
 class IngestResult:
-    """Outcome of ``DiaryService.ingest``."""
+    """Outcome of ``DiaryService.ingest``.
+
+    ``replayed`` is ``True`` when the inbound message hit a previously
+    persisted ``(external_chat_id, external_message_id, edit_seq)`` row
+    (R-2 / D-023): no new state was created and the result was rebuilt
+    from the existing source / entry / chunks.
+    """
 
     fallback: FallbackMode
     source_message_id: str
     entry_date: date | None = None
     events_count: int = 0
     invalid_first_line: str | None = None
+    replayed: bool = False
 
 
 @dataclass(frozen=True, slots=True)

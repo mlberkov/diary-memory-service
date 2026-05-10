@@ -26,7 +26,13 @@ class RouteKind(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class InboundMessage:
-    """A channel-neutral inbound message ready for dispatch."""
+    """A channel-neutral inbound message ready for dispatch.
+
+    ``edit_seq`` carries the Telegram-derived edit-state marker (D-023):
+    ``0`` for an original delivery, the ``edit_date`` epoch seconds for an
+    edited state. Together with ``external_chat_id`` and ``external_message_id``
+    it forms the idempotency key for R-2.
+    """
 
     external_message_id: str
     external_chat_id: str
@@ -36,6 +42,7 @@ class InboundMessage:
     received_at: datetime
     route_source: RouteSource
     payload: str = ""
+    edit_seq: int = 0
 
 
 @dataclass(frozen=True, slots=True)

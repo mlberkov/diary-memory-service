@@ -25,6 +25,7 @@ class TelegramMessage(BaseModel):
 
     message_id: int
     date: int
+    edit_date: int | None = None
     chat: TelegramChat
     from_: TelegramUser = Field(alias="from")
     text: str | None = None

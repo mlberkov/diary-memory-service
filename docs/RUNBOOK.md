@@ -49,6 +49,19 @@ The toolchain is **Python 3.11 + uv + Ruff + Mypy + Pytest** (D-016 / D-017 / D-
 ### Local Postgres
 The canonical durable backend (D-022) runs via `docker compose up -d postgres`. Set `STORAGE_BACKEND=postgres` and the standard `POSTGRES_*` env vars. See `QUICKSTART.md` "Durable local store (Postgres)" for the full smoke flow.
 
+#### Destructive local schema upgrades
+There is no migration tool yet (A-34). `schema.sql` is bootstrapped via `CREATE TABLE / CREATE INDEX IF NOT EXISTS`, which does **not** apply changes to columns or constraints on tables that already exist in a stale volume. When pulling a packet that adds or alters columns (e.g. D-023's `external_message_id`, `edit_seq`, and the `UNIQUE` idempotency constraint), reset the local Postgres volume:
+
+```
+docker compose down -v
+docker compose up -d postgres
+```
+
+This drops `diary_pg_data` along with any locally-ingested rows. Production schema evolution must be solved before any non-local deployment.
+
+### Webhook idempotency (R-2 / D-023)
+Repeated delivery of the same Telegram message-state — same `(external_chat_id, external_message_id, edit_seq)` — does not create duplicate rows. The webhook returns the same functional 200 reply and logs `effective_path=replay` instead of `fresh`. Operationally, `effective_path=replay` is normal; investigate only if the *first* call for a given key never appears with `effective_path=fresh`.
+
 ### Telegram in local development
 Webhook only (D-019). Expose the local process via a tunnel (e.g. `ngrok`, `cloudflared`) and register the tunnel URL with the bot. There is no polling fallback.
 

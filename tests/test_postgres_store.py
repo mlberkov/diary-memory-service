@@ -3,7 +3,7 @@
 Skipped unless ``DIARY_RAG_PG_TEST_DSN`` is set, so the offline test
 flow stays green. Mirrors the case set in ``tests/test_sqlite_store.py``
 (round-trip, family scoping, top-k, case-insensitive, empty inputs,
-R-3 guard, restart survival).
+R-3 guard, restart survival, R-2 idempotency / D-023).
 """
 
 from __future__ import annotations
@@ -53,13 +53,21 @@ def _now() -> datetime:
     return datetime(2026, 5, 9, 12, 0, 0, tzinfo=UTC)
 
 
-def _source(*, sid: str = "s1", family_id: str = "fam-A") -> SourceMessage:
+def _source(
+    *,
+    sid: str = "s1",
+    family_id: str = "fam-A",
+    external_message_id: str | None = None,
+    edit_seq: int = 0,
+) -> SourceMessage:
     return SourceMessage(
         source_message_id=sid,
         family_id=family_id,
         author_user_id="u1",
         external_chat_id=family_id,
         external_user_id="u1",
+        external_message_id=external_message_id if external_message_id is not None else sid,
+        edit_seq=edit_seq,
         raw_text="2026-05-09\nWalked the dog",
         detected_route=RouteKind.ENTRY,
         created_at=_now(),
@@ -191,3 +199,82 @@ def test_restart_survival() -> None:
         assert [h.chunk_id for h in hits] == ["c1"]
     finally:
         second.close()
+
+
+def test_get_or_create_source_message_returns_false_on_first_insert(
+    store: PostgresDiaryStore,
+) -> None:
+    src = _source(sid="s1", external_message_id="42", edit_seq=0)
+
+    persisted, replayed = store.get_or_create_source_message(src)
+
+    assert replayed is False
+    assert persisted == src
+    assert store.get_source_message("s1") == src
+
+
+def test_get_or_create_source_message_returns_true_on_replay(
+    store: PostgresDiaryStore,
+) -> None:
+    original = _source(sid="s1", external_message_id="42", edit_seq=0)
+    duplicate = _source(sid="different-uuid", external_message_id="42", edit_seq=0)
+
+    store.get_or_create_source_message(original)
+    persisted, replayed = store.get_or_create_source_message(duplicate)
+
+    assert replayed is True
+    assert persisted.source_message_id == "s1"
+    assert persisted == original
+
+
+def test_get_or_create_source_message_distinguishes_edit_seq(
+    store: PostgresDiaryStore,
+) -> None:
+    original = _source(sid="s1", external_message_id="42", edit_seq=0)
+    edited = _source(sid="s2", external_message_id="42", edit_seq=1715300100)
+
+    _, replayed_a = store.get_or_create_source_message(original)
+    _, replayed_b = store.get_or_create_source_message(edited)
+
+    assert replayed_a is False
+    assert replayed_b is False
+    assert store.get_source_message("s1") is not None
+    assert store.get_source_message("s2") is not None
+
+
+def test_save_source_message_raises_on_duplicate_triple(store: PostgresDiaryStore) -> None:
+    import psycopg.errors
+
+    store.save_source_message(_source(sid="s1", external_message_id="42", edit_seq=0))
+
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        store.save_source_message(_source(sid="s2", external_message_id="42", edit_seq=0))
+
+
+def test_get_diary_entry_by_source_message_id(store: PostgresDiaryStore) -> None:
+    store.save_source_message(_source(sid="s1"))
+    store.save_diary_entry(_entry(eid="e1", sid="s1"))
+
+    fetched = store.get_diary_entry_by_source_message_id("s1")
+    assert fetched is not None
+    assert fetched.diary_entry_id == "e1"
+
+
+def test_get_diary_entry_by_source_message_id_missing_returns_none(
+    store: PostgresDiaryStore,
+) -> None:
+    assert store.get_diary_entry_by_source_message_id("nope") is None
+
+
+def test_count_event_chunks_for_source(store: PostgresDiaryStore) -> None:
+    store.save_source_message(_source(sid="s1"))
+    store.save_diary_entry(_entry(eid="e1", sid="s1"))
+    store.save_event_chunks(
+        [
+            _chunk(cid="c1", eid="e1", sid="s1", idx=0),
+            _chunk(cid="c2", eid="e1", sid="s1", text="Read a book", idx=1),
+        ]
+    )
+
+    assert store.count_event_chunks_for_source("s1") == 2
+    assert store.count_event_chunks_for_source("nope") == 0

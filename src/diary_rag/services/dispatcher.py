@@ -86,6 +86,7 @@ class Dispatcher:
                 metadata={
                     "fallback": ingest.fallback.value,
                     "route_source": message.route_source,
+                    "effective_path": "replay" if ingest.replayed else "fresh",
                 },
             )
         if route is RouteKind.ASK:

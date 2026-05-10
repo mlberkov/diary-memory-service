@@ -44,11 +44,14 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 ## Mock contour (current)
 - **A-28. Mock `/entry` accepts ISO-only dates**: the date parser in `core/diary/parser.py` recognizes only `YYYY-MM-DD` on the first non-empty line. Anything else returns `INVALID_INPUT`. Precursor to A-12 (date parsing scope).
 - **A-29. Mock retrieval is case-insensitive substring match**: `MockDiaryStore.search_chunks` is the only retrieval surface; results are scoped to one `family_id` and returned in insertion order. Precursor to A-5/A-6 (hybrid retrieval design) and to the eventual `SearchRepository` interface.
-- **A-30. Mock state is process-local and non-idempotent**: `MockDiaryStore` (the default `STORAGE_BACKEND=memory` backend) lives only inside one running `make run` process; webhook retries with the same `update_id` create duplicate `SourceMessage` rows. Precursor to slice 2.4 (idempotent webhook handling) and Phase 2 durable persistence.
+*A-30 → D-023.*
 - **A-31. Mock per-route persistence**: in the current in-memory contour, only ENTRY messages persist a `SourceMessage`; ASK and CLARIFY do not. This describes mock behavior only — it is not an architectural rule about durable storage. Per-route persistence semantics are an open design question for Phase 2 and are not bound by this assumption.
 
 ## Local Postgres contour (current)
-- **A-33. Local Postgres durable contour**: with `STORAGE_BACKEND=postgres`, the service writes through `PostgresDiaryStore` (psycopg3 sync + `psycopg_pool.ConnectionPool`) to the Postgres provided by `docker-compose.yml`. Schema is bootstrapped at process start from `src/diary_rag/storage/postgres/schema.sql` via `CREATE TABLE / CREATE INDEX IF NOT EXISTS`; no migration tool is wired in this slice. Retrieval reuses the same case-insensitive substring contract as the mock (A-29), now executed against Postgres with `lower(chunk_text) LIKE %s`. Webhook idempotency (R-2) is unchanged: duplicate `update_id` retries still produce duplicate `SourceMessage` rows. SQLite remains opt-in for offline dev; the canonical durable target is Postgres (D-007 / D-022).
+- **A-33. Local Postgres durable contour**: with `STORAGE_BACKEND=postgres`, the service writes through `PostgresDiaryStore` (psycopg3 sync + `psycopg_pool.ConnectionPool`) to the Postgres provided by `docker-compose.yml`. Schema is bootstrapped at process start from `src/diary_rag/storage/postgres/schema.sql` via `CREATE TABLE / CREATE INDEX IF NOT EXISTS`; no migration tool is wired. Retrieval reuses the same case-insensitive substring contract as the mock (A-29), now executed against Postgres with `lower(chunk_text) LIKE %s`. Webhook idempotency (R-2) is enforced by `UNIQUE (external_chat_id, external_message_id, edit_seq)` plus `INSERT ... ON CONFLICT DO NOTHING` in `get_or_create_source_message` (D-023). SQLite remains opt-in for offline dev; the canonical durable target is Postgres (D-007 / D-022).
+
+## Schema evolution
+- **A-34. Local schema upgrades are destructive**: with no migration tool in place, schema changes that add or alter columns require resetting the local Postgres volume (`docker compose down -v`) before the bootstrap DDL applies cleanly. SQLite picks up the new schema on a fresh DB file. Production schema evolution must be solved before the first non-local deployment; a future packet may introduce Alembic.
 
 ---
 
@@ -59,4 +62,5 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 - A-4 → D-019 (Telegram webhook transport, dev via tunnel).
 - A-16 → D-020 (heuristic routing rule set with explicit confidence labels).
 - A-17 → D-020 (CLARIFY reply naming both `/entry` and `/ask`).
+- A-30 → D-023 (mock non-idempotent state; idempotency now enforced across all backends).
 - A-32 → D-022 (Postgres replaces SQLite as the canonical durable backend; SQLite stays opt-in).

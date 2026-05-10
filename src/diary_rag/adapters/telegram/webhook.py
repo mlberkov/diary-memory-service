@@ -91,6 +91,7 @@ def register_telegram_webhook(app: FastAPI) -> None:
             return {}
 
         route, payload, route_source, confidence = _resolve_route(message.text)
+        edit_seq = message.edit_date if message.edit_date is not None else 0
         inbound = InboundMessage(
             external_message_id=str(message.message_id),
             external_chat_id=str(message.chat.id),
@@ -100,14 +101,19 @@ def register_telegram_webhook(app: FastAPI) -> None:
             received_at=datetime.fromtimestamp(message.date, tz=UTC),
             route_source=route_source,
             payload=payload,
+            edit_seq=edit_seq,
         )
 
         result = dispatcher.dispatch(inbound)
+        effective_path = result.metadata.get("effective_path", "n/a")
         log.info(
-            "telegram.webhook update_id=%s route=%s route_source=%s confidence=%s",
+            "telegram.webhook update_id=%s route=%s route_source=%s "
+            "confidence=%s edit_seq=%s effective_path=%s",
             update.update_id,
             result.route.value,
             route_source,
             confidence or "n/a",
+            edit_seq,
+            effective_path,
         )
         return build_send_message_payload(inbound.external_chat_id, result.reply_text)

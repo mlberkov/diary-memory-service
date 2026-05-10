@@ -92,8 +92,10 @@ If routing confidence is low, the system should ask for clarification rather tha
 ### SourceMessage
 Fields:
 - source_message_id
-- telegram_chat_id
-- telegram_user_id
+- external_chat_id
+- external_user_id
+- external_message_id
+- edit_seq
 - family_id
 - author_user_id
 - raw_text
@@ -105,6 +107,13 @@ Fields:
 - deleted_at
 - parse_status
 - parse_version
+
+`external_chat_id` and `external_user_id` replace the channel-specific
+`telegram_chat_id` / `telegram_user_id` so the channel-of-origin stays in the
+adapter layer (Invariant I-1). The triple `(external_chat_id,
+external_message_id, edit_seq)` is the idempotency key enforced by Runtime
+invariant R-2 (D-023): for Telegram, `edit_seq` is `0` for an original
+delivery and the `edit_date` epoch seconds for an edited state.
 
 ### DiaryEntry
 Fields:

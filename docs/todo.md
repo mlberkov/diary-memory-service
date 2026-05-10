@@ -7,10 +7,20 @@ Top of list = pick next. Each item maps to a row in `docs/execution-map.md`. Whe
 - Map: execution-map 1.3
 - Concrete: `MockEmbeddingClient` and `MockChatClient` once the interfaces they will mirror are sketched in slice 3.1 / 4.1. Hold until those interfaces are clearer; mock provider clients ahead of their real shape locks the wrong contract.
 
-## TechSpec field-name reconciliation
-- `core/diary/models.SourceMessage` uses `external_chat_id` / `external_user_id` to keep the channel-of-origin out of core (Invariant I-1). TechSpec §5 still names these fields `telegram_chat_id` / `telegram_user_id`. Reconcile before Phase 2.1 schema lands — either rename the spec fields, or introduce a `channel_kind` + `external_*` pair.
+## Schema evolution before non-local deployment
+- No migration tool is wired yet (A-34). Local Postgres schema upgrades are destructive: pull a packet that changes columns and you must `docker compose down -v` to reset `diary_pg_data` before the bootstrap DDL applies. This is acceptable for the single-dev contour but must be replaced (Alembic or equivalent) before the first non-local deployment. Consider a dedicated packet once the next production-shaped slice is on the horizon.
 
 ---
+
+Closed in the webhook idempotency packet (D-023, slice 2.4):
+- `SourceMessage` and `InboundMessage` now carry `external_message_id` and `edit_seq`; the idempotency key is `(external_chat_id, external_message_id, edit_seq)`.
+- `DiaryRepository.get_or_create_source_message` returns `(SourceMessage, bool)` where the bool indicates replay/existing-row; mock, sqlite, and postgres backends all enforce uniqueness via DB-native conflict handling (`INSERT ... ON CONFLICT DO NOTHING` / `INSERT OR IGNORE` / dict-keyed dedupe).
+- `DiaryRepository` gains `get_diary_entry_by_source_message_id` and `count_event_chunks_for_source` so `DiaryService.ingest` can reconstruct the original `IngestResult` on replay without re-parsing or re-chunking.
+- `IngestResult.replayed: bool` flag propagates through `Dispatcher` metadata; the Telegram webhook log line now includes `edit_seq=…` and `effective_path=fresh|replay`.
+- `TelegramMessage` accepts an optional `edit_date`; the webhook derives `edit_seq = edit_date if present else 0`.
+- TechSpec §5 reconciled: `telegram_chat_id` / `telegram_user_id` → `external_chat_id` / `external_user_id`, plus `external_message_id` and `edit_seq`.
+- Closed A-30 (mock non-idempotent state). Updated A-33 (Postgres contour). Opened A-34 (destructive local schema upgrades — no migration tool yet).
+- New tests across all backends and the E2E webhook layer assert: replay short-circuits with no duplicate rows, edited state coexists as a distinct row, replay log line carries `effective_path=replay`.
 
 Closed in Slice 0.3: A-1 → D-016, A-2 → D-017, A-3 → D-018, A-4 → D-019.
 
