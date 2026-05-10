@@ -28,14 +28,28 @@ from diary_rag.core.routing.classifier import classify_plain_text
 from diary_rag.logging import get_logger
 from diary_rag.services import DiaryService, Dispatcher, QueryService
 from diary_rag.storage.mock import MockDiaryStore
+from diary_rag.storage.repository import DiaryRepository
 
 log = get_logger(__name__)
 
-_store = MockDiaryStore()
-_dispatcher = Dispatcher(DiaryService(_store), QueryService(_store))
+_dispatcher: Dispatcher | None = None
+
+
+def _build_store(settings: Settings) -> DiaryRepository:
+    if settings.storage_backend == "sqlite":
+        from diary_rag.storage.sqlite import SqliteDiaryStore
+
+        return SqliteDiaryStore(settings.sqlite_path)
+    return MockDiaryStore()
 
 
 def get_dispatcher() -> Dispatcher:
+    global _dispatcher
+    if _dispatcher is None:
+        settings = get_settings()
+        store = _build_store(settings)
+        _dispatcher = Dispatcher(DiaryService(store), QueryService(store))
+        log.info("dispatcher.built storage_backend=%s", settings.storage_backend)
     return _dispatcher
 
 

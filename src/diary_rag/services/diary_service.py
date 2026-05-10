@@ -20,7 +20,7 @@ from diary_rag.core.diary import (
     parse_diary_entry,
 )
 from diary_rag.core.routing import InboundMessage
-from diary_rag.storage.mock import MockDiaryStore
+from diary_rag.storage.repository import DiaryRepository
 
 
 def _family_id_for(message: InboundMessage) -> str:
@@ -31,7 +31,7 @@ def _family_id_for(message: InboundMessage) -> str:
 class DiaryService:
     """Ingests an ``InboundMessage`` carrying a ``/entry`` payload."""
 
-    def __init__(self, store: MockDiaryStore) -> None:
+    def __init__(self, store: DiaryRepository) -> None:
         self._store = store
 
     def ingest(self, message: InboundMessage) -> IngestResult:

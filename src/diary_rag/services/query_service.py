@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from diary_rag.core.diary import AnswerResult, Evidence, FallbackMode
 from diary_rag.core.routing import InboundMessage
-from diary_rag.storage.mock import MockDiaryStore
+from diary_rag.storage.repository import DiaryRepository
 
 DEFAULT_TOP_K = 5
 
@@ -31,7 +31,7 @@ def _normalize_query(payload: str) -> str:
 class QueryService:
     """Answers an ``InboundMessage`` carrying an ``/ask`` payload."""
 
-    def __init__(self, store: MockDiaryStore, top_k: int = DEFAULT_TOP_K) -> None:
+    def __init__(self, store: DiaryRepository, top_k: int = DEFAULT_TOP_K) -> None:
         self._store = store
         self._top_k = top_k
 

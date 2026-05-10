@@ -132,6 +132,46 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
 # → text: "I couldn't tell if that's a diary entry or a question. Send /entry <YYYY-MM-DD> on the first line then your events to record it, or /ask <your question> to query."
 ```
 
+#### Durable local store (SQLite)
+
+The default backend is the in-memory mock (`STORAGE_BACKEND=memory`). For a local run that survives an app restart, switch to the SQLite backend. Schema is bootstrapped on first boot via `CREATE TABLE IF NOT EXISTS`; there is no migration tool yet. SQLite is a dev-only choice — PostgreSQL remains the canonical durable target (D-007 / D-021).
+
+```bash
+export TELEGRAM_WEBHOOK_SECRET=dev-secret
+export STORAGE_BACKEND=sqlite
+export SQLITE_PATH=./data/diary.db   # default; override anywhere writable
+
+mkdir -p data
+make run    # boots uvicorn, creates ./data/diary.db on first call
+
+# 1. Ingest — same payload shape as the mock smoke above
+curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
+  -d '{"update_id":1,"message":{"message_id":1,"date":1715300000,"chat":{"id":42},"from":{"id":7},"text":"/entry 2026-05-09\nWalked the dog\nTried a new book"}}'
+# → text: "Saved 2 events for 2026-05-09."
+
+# 2. Verify rows landed in the SQLite file
+python -c "import sqlite3; c=sqlite3.connect('./data/diary.db'); \
+  print('sources:', c.execute('select count(*) from source_messages').fetchone()[0]); \
+  print('entries:', c.execute('select count(*) from diary_entries').fetchone()[0]); \
+  print('chunks:',  c.execute('select count(*) from event_chunks').fetchone()[0])"
+# → sources: 1 / entries: 1 / chunks: 2
+
+# 3. Stop uvicorn (Ctrl+C), then `make run` again with the same env
+#    (a fresh process re-opens the same ./data/diary.db).
+
+# 4. Ask after restart — evidence is grounded in the surviving chunks
+curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
+  -d '{"update_id":2,"message":{"message_id":2,"date":1715300100,"chat":{"id":42},"from":{"id":7},"text":"/ask book"}}'
+# → text: "Found 1 memory:\n- [2026-05-09] Tried a new book\n(mock retrieval — substring match)"
+
+# Cleanup
+rm -f ./data/diary.db ./data/diary.db-shm ./data/diary.db-wal
+```
+
 #### Registering the webhook with Telegram (when using a real bot)
 
 ```bash

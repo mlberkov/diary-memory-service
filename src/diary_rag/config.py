@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     postgres_user: str = Field(default="postgres")
     postgres_password: str = Field(default="postgres")
 
+    storage_backend: Literal["memory", "sqlite"] = Field(default="memory")
+    sqlite_path: str = Field(default="./data/diary.db")
+
     embedding_model: str = Field(default="")
     chat_model: str = Field(default="")
 

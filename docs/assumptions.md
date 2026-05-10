@@ -44,8 +44,11 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 ## Mock contour (current)
 - **A-28. Mock `/entry` accepts ISO-only dates**: the date parser in `core/diary/parser.py` recognizes only `YYYY-MM-DD` on the first non-empty line. Anything else returns `INVALID_INPUT`. Precursor to A-12 (date parsing scope).
 - **A-29. Mock retrieval is case-insensitive substring match**: `MockDiaryStore.search_chunks` is the only retrieval surface; results are scoped to one `family_id` and returned in insertion order. Precursor to A-5/A-6 (hybrid retrieval design) and to the eventual `SearchRepository` interface.
-- **A-30. Mock state is process-local and non-idempotent**: `MockDiaryStore` lives only inside one running `make run` process; webhook retries with the same `update_id` create duplicate `SourceMessage` rows. Precursor to slice 2.4 (idempotent webhook handling) and Phase 2 durable persistence.
+- **A-30. Mock state is process-local and non-idempotent**: `MockDiaryStore` (the default `STORAGE_BACKEND=memory` backend) lives only inside one running `make run` process; webhook retries with the same `update_id` create duplicate `SourceMessage` rows. Precursor to slice 2.4 (idempotent webhook handling) and Phase 2 durable persistence.
 - **A-31. Mock per-route persistence**: in the current in-memory contour, only ENTRY messages persist a `SourceMessage`; ASK and CLARIFY do not. This describes mock behavior only — it is not an architectural rule about durable storage. Per-route persistence semantics are an open design question for Phase 2 and are not bound by this assumption.
+
+## Local SQLite contour (current)
+- **A-32. Local SQLite as the dev-only durable seam**: with `STORAGE_BACKEND=sqlite`, the service writes through `SqliteDiaryStore` to a single file at `SQLITE_PATH` (default `./data/diary.db`). Schema is bootstrapped on each boot via `CREATE TABLE IF NOT EXISTS`; no migration tool is wired in this slice. Retrieval reuses the same case-insensitive substring contract as the mock (A-29), now executed in SQL with `lower(chunk_text) LIKE ?`. Webhook idempotency (R-2) is unchanged: duplicate `update_id` retries still produce duplicate `SourceMessage` rows. This is a dev-only contour; the canonical durable target remains PostgreSQL (D-007). The Postgres swap is a follow-up packet behind the same `DiaryRepository` Protocol.
 
 ---
 
