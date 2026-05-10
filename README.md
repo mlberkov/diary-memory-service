@@ -57,7 +57,8 @@ Core rules (from `AGENTS.md` and the canonical docs):
 - **Slice 1.1 done:** toolchain wired, package skeleton in place, `make check` green, FastAPI `/health` smokeable via `make run`.
 - **Slice 1.2 done:** `POST /telegram/webhook` accepts a Telegram update, fails closed without the secret header (A-26), parses `/start` `/help` `/entry` `/ask`, and returns a `sendMessage`-shaped payload.
 - **Mock diary/query contour done:** `core/diary` dataclasses + ISO date parser, `MockDiaryStore`, `DiaryService` and `QueryService`, `Dispatcher` wires `ENTRY` / `ASK` to those services. `/entry` records the raw `SourceMessage` before parsing (I-3, R-1); `/ask` returns explicit `NO_EVIDENCE` when nothing matches (I-9, R-5/R-6). New open assumptions: A-28 (ISO-only mock dates), A-29 (substring-match retrieval), A-30 (process-local mock state).
-- Next gate: Slice 1.4 — heuristic plain-text routing (`docs/todo.md`).
+- **Phase 3.1+3.2 done (D-024):** `EmbeddingClient` seam, `OpenAIEmbeddingClient` (`text-embedding-3-large` @ 3072 dim, passes `dimensions=3072` explicitly), `MockEmbeddingClient` (honest `model_name="mock"`). Sync indexing on ingest writes one `embedding_records` row per chunk; `event_chunks.embedding_status ∈ {pending, ready, failed}`. Postgres backend uses `pgvector(3072)` (compose image swapped to `pgvector/pgvector:pg16`). Boot gate refuses to start with the wrong dimension, the wrong OpenAI model, or pgvector missing. Replay (R-2) does not re-embed; failed embeddings stay failed (A-35). Hybrid retrieval / read-path change is **not** in this packet — `QueryService` still uses substring (A-29); 3.3 lands next and must resolve the 3072-dim ANN-index fork (A-36).
+- Next gate: Slice 3.3 — hybrid retrieval (`docs/todo.md`).
 
 ## How to start
 

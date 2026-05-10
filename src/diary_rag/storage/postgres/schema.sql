@@ -7,10 +7,18 @@
 -- enforces the R-2 idempotency contract (D-023): repeated delivery of the
 -- same channel message-state cannot create a second source row.
 --
+-- Phase 3.1+3.2 (D-024): pgvector is the dense-vector seam. ``vector(3072)``
+-- matches the production embedding contour (``text-embedding-3-large``,
+-- 3072 dim). No HNSW / IVFFlat index on the vector column — pgvector caps
+-- those at 2000 dim; the 3072-dim ANN strategy is deferred to the Phase-3.3
+-- packet (A-36).
+--
 -- Bootstrapped by PostgresDiaryStore at __init__; safe to re-run on a fresh
--- database. Note: there is no migration tool yet (D-022/D-023), so existing
--- local volumes that pre-date these columns must be reset (drop the named
--- volume) before this DDL applies cleanly. See RUNBOOK.md.
+-- database. Note: there is no migration tool yet (D-022/D-023/D-024), so
+-- existing local volumes that pre-date these columns must be reset (drop the
+-- named volume) before this DDL applies cleanly. See RUNBOOK.md.
+
+CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS source_messages (
     source_message_id   TEXT PRIMARY KEY,
@@ -49,7 +57,9 @@ CREATE TABLE IF NOT EXISTS event_chunks (
     entry_date        DATE NOT NULL,
     event_index       INTEGER NOT NULL CHECK (event_index >= 0),
     chunk_text        TEXT NOT NULL,
-    created_at        TIMESTAMPTZ NOT NULL
+    created_at        TIMESTAMPTZ NOT NULL,
+    embedding_status  TEXT NOT NULL DEFAULT 'pending'
+        CHECK (embedding_status IN ('pending','ready','failed'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_event_chunks_family_id
@@ -57,3 +67,24 @@ CREATE INDEX IF NOT EXISTS idx_event_chunks_family_id
 
 CREATE INDEX IF NOT EXISTS idx_event_chunks_source_message_id
     ON event_chunks(source_message_id);
+
+CREATE TABLE IF NOT EXISTS embedding_records (
+    embedding_record_id TEXT PRIMARY KEY,
+    chunk_id            TEXT NOT NULL REFERENCES event_chunks(chunk_id),
+    source_message_id   TEXT NOT NULL REFERENCES source_messages(source_message_id),
+    family_id           TEXT NOT NULL,
+    model_name          TEXT NOT NULL,
+    dimension           INTEGER NOT NULL,
+    embedding           vector(3072) NOT NULL,
+    created_at          TIMESTAMPTZ NOT NULL,
+    UNIQUE (chunk_id, model_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_embedding_records_chunk_id
+    ON embedding_records(chunk_id);
+
+CREATE INDEX IF NOT EXISTS idx_embedding_records_source_message_id
+    ON embedding_records(source_message_id);
+
+CREATE INDEX IF NOT EXISTS idx_embedding_records_family_id
+    ON embedding_records(family_id);

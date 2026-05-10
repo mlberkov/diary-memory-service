@@ -6,7 +6,9 @@ from datetime import UTC, date, datetime
 
 import pytest
 
+from diary_rag.adapters.embeddings import MockEmbeddingClient
 from diary_rag.core.diary import EventChunk, FallbackMode
+from diary_rag.core.embeddings import EmbeddingStatus
 from diary_rag.core.routing import InboundMessage, RouteKind
 from diary_rag.services import DiaryService
 from diary_rag.storage.mock import MockDiaryStore
@@ -172,3 +174,93 @@ def test_ingest_distinct_edit_seq_creates_separate_state() -> None:
 
 def _all_chunks(store: MockDiaryStore) -> list[EventChunk]:
     return list(store._chunks.values())
+
+
+class _RaisingEmbeddingClient:
+    """Forces the embedding step to fail so failure semantics can be asserted."""
+
+    model_name = "boom"
+    dimension = 3072
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        raise RuntimeError("provider down")
+
+
+def test_ingest_without_embedding_client_leaves_chunks_pending() -> None:
+    store = MockDiaryStore()
+    service = DiaryService(store)
+
+    service.ingest(_entry_message("2026-05-09\nA\nB"))
+
+    assert {c.embedding_status for c in _all_chunks(store)} == {EmbeddingStatus.PENDING}
+    assert store.len_embeddings() == 0
+
+
+def test_ingest_with_embedding_client_persists_embeddings_and_flips_status() -> None:
+    store = MockDiaryStore()
+    client = MockEmbeddingClient(dimension=64)
+    service = DiaryService(store, embedding_client=client)
+
+    result = service.ingest(_entry_message("2026-05-09\nA\nB"))
+
+    assert result.fallback is FallbackMode.NONE
+    assert store.len_embeddings() == 2
+    assert {c.embedding_status for c in _all_chunks(store)} == {EmbeddingStatus.READY}
+    assert store.count_embedding_records_for_source(result.source_message_id) == 2
+
+
+def test_ingest_embedding_failure_marks_chunks_failed_and_keeps_lineage() -> None:
+    store = MockDiaryStore()
+    service = DiaryService(store, embedding_client=_RaisingEmbeddingClient())
+
+    result = service.ingest(_entry_message("2026-05-09\nA\nB"))
+
+    assert result.fallback is FallbackMode.NONE  # raw + chunks survived (I-2, I-3)
+    assert result.events_count == 2
+    assert store.len_embeddings() == 0
+    assert {c.embedding_status for c in _all_chunks(store)} == {EmbeddingStatus.FAILED}
+    assert store.count_embedding_records_for_source(result.source_message_id) == 0
+
+
+def test_ingest_replay_does_not_call_embedding_client() -> None:
+    store = MockDiaryStore()
+
+    class _CountingClient:
+        model_name = "mock"
+        dimension = 64
+        calls = 0
+
+        def embed(self, texts: list[str]) -> list[list[float]]:
+            type(self).calls += 1
+            return [[0.0] * 64 for _ in texts]
+
+    client = _CountingClient()
+    service = DiaryService(store, embedding_client=client)
+    msg = _entry_message("2026-05-09\nA\nB", message_id="m1")
+
+    service.ingest(msg)
+    service.ingest(msg)
+
+    assert _CountingClient.calls == 1
+    assert store.len_embeddings() == 2
+
+
+def test_ingest_with_invalid_payload_does_not_call_embedding_client() -> None:
+    store = MockDiaryStore()
+
+    class _CountingClient:
+        model_name = "mock"
+        dimension = 64
+        calls = 0
+
+        def embed(self, texts: list[str]) -> list[list[float]]:
+            type(self).calls += 1
+            return [[0.0] * 64 for _ in texts]
+
+    client = _CountingClient()
+    service = DiaryService(store, embedding_client=client)
+
+    service.ingest(_entry_message("not-a-date\nstray line"))
+
+    assert _CountingClient.calls == 0
+    assert store.len_embeddings() == 0

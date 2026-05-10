@@ -8,8 +8,19 @@ are carried through (I-6, I-7).
 Idempotency (R-2 / D-023): the source row is committed via
 ``DiaryRepository.get_or_create_source_message`` keyed on
 ``(external_chat_id, external_message_id, edit_seq)``. A replay short-
-circuits parse and chunking and reconstructs the original ``IngestResult``
-from persisted state.
+circuits parse, chunking, and the embedding step (D-024) and
+reconstructs the original ``IngestResult`` from persisted state.
+
+Phase 3.1+3.2 embedding step (D-024): after the chunk rows are
+committed, the configured ``EmbeddingClient`` is called once per
+ingest with the chunk texts. On success, one ``EmbeddingRecord`` per
+chunk is persisted and the chunk ``embedding_status`` flips to
+``ready``. On any provider exception, chunks remain intact, their
+status flips to ``failed``, zero embedding rows are written for that
+source, and the ingest result remains ``FallbackMode.NONE`` — raw and
+chunk lineage survived; embedding is downstream enrichment (I-2, I-3).
+Failed chunks stay failed until a future Phase-6 reconciliation job
+(A-35); replay does not retry.
 """
 
 from __future__ import annotations
@@ -25,8 +36,12 @@ from diary_rag.core.diary import (
     SourceMessage,
     parse_diary_entry,
 )
+from diary_rag.core.embeddings import EmbeddingClient, EmbeddingRecord, EmbeddingStatus
 from diary_rag.core.routing import InboundMessage
+from diary_rag.logging import get_logger
 from diary_rag.storage.repository import DiaryRepository
+
+log = get_logger(__name__)
 
 
 def _family_id_for(message: InboundMessage) -> str:
@@ -41,8 +56,13 @@ def _first_line(text: str) -> str:
 class DiaryService:
     """Ingests an ``InboundMessage`` carrying a ``/entry`` payload."""
 
-    def __init__(self, store: DiaryRepository) -> None:
+    def __init__(
+        self,
+        store: DiaryRepository,
+        embedding_client: EmbeddingClient | None = None,
+    ) -> None:
         self._store = store
+        self._embedding_client = embedding_client
 
     def ingest(self, message: InboundMessage) -> IngestResult:
         now = datetime.now(tz=UTC)
@@ -104,11 +124,61 @@ class DiaryService:
         ]
         self._store.save_event_chunks(chunks)
 
+        if chunks and self._embedding_client is not None:
+            self._embed_chunks(chunks, source_message_id, family_id, now)
+
         return IngestResult(
             fallback=FallbackMode.NONE,
             source_message_id=source_message_id,
             entry_date=parsed.entry_date,
             events_count=len(chunks),
+        )
+
+    def _embed_chunks(
+        self,
+        chunks: list[EventChunk],
+        source_message_id: str,
+        family_id: str,
+        now: datetime,
+    ) -> None:
+        client = self._embedding_client
+        assert client is not None
+        try:
+            vectors = client.embed([c.chunk_text for c in chunks])
+        except Exception as exc:
+            log.warning(
+                "embedding.failed source_message_id=%s model=%s chunks=%d error_class=%s",
+                source_message_id,
+                client.model_name,
+                len(chunks),
+                exc.__class__.__name__,
+            )
+            for chunk in chunks:
+                self._store.set_chunk_embedding_status(chunk.chunk_id, EmbeddingStatus.FAILED)
+            return
+
+        records = [
+            EmbeddingRecord(
+                embedding_record_id=str(uuid4()),
+                chunk_id=chunk.chunk_id,
+                source_message_id=source_message_id,
+                family_id=family_id,
+                model_name=client.model_name,
+                dimension=client.dimension,
+                embedding=vec,
+                created_at=now,
+            )
+            for chunk, vec in zip(chunks, vectors, strict=True)
+        ]
+        self._store.save_embedding_records(records)
+        for chunk in chunks:
+            self._store.set_chunk_embedding_status(chunk.chunk_id, EmbeddingStatus.READY)
+        log.info(
+            "embedding.ok source_message_id=%s model=%s chunks=%d dim=%d",
+            source_message_id,
+            client.model_name,
+            len(chunks),
+            client.dimension,
         )
 
     def _reconstruct_result(self, source: SourceMessage) -> IngestResult:

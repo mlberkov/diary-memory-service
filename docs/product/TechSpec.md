@@ -297,7 +297,7 @@ The system must log:
 - message routing decision,
 - parse result,
 - chunk creation result,
-- embedding/index status,
+- embedding/index status (D-024: `embedding.ok` carries provider model + chunk count + dimension; `embedding.failed` carries provider model + chunk count + exception class),
 - retrieval trace,
 - answer generation trace,
 - fallback requested vs effective path,

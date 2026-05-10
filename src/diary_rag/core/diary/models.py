@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import StrEnum
 
+from diary_rag.core.embeddings.models import EmbeddingStatus
 from diary_rag.core.routing import RouteKind
 
 
@@ -67,7 +68,14 @@ class DiaryEntry:
 
 @dataclass(frozen=True, slots=True)
 class EventChunk:
-    """One event line; chunk → entry → source lineage preserved (I-4, I-5)."""
+    """One event line; chunk → entry → source lineage preserved (I-4, I-5).
+
+    ``embedding_status`` records the per-chunk progress of the Phase-3
+    embedding step (D-024). A freshly-saved chunk is ``pending`` until
+    the embedding provider call returns; it flips to ``ready`` once an
+    ``EmbeddingRecord`` is persisted or to ``failed`` if the provider
+    call raised. The chunk row itself is always intact (I-3, R-1).
+    """
 
     chunk_id: str
     diary_entry_id: str
@@ -78,6 +86,7 @@ class EventChunk:
     event_index: int
     chunk_text: str
     created_at: datetime
+    embedding_status: EmbeddingStatus = EmbeddingStatus.PENDING
 
 
 @dataclass(frozen=True, slots=True)

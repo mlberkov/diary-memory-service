@@ -30,7 +30,15 @@ Prompt assembly never mixes chunks from more than one `family_id`. This is asser
 Provider calls have explicit timeouts and bounded retries. There is no unbounded wait or unbounded retry loop in any handler.
 
 ## R-10. Health gates on boot
-Startup verifies PostgreSQL connectivity, schema version, and the configured embedding model dimension. Failure aborts boot rather than serving partial functionality.
+Startup verifies the boot-time constraints that are load-bearing for the current phase. Failure aborts boot rather than serving partial functionality.
+
+Phase 3.1+3.2 contour (D-024):
+- `settings.embedding_dimension` must equal `3072` (the canonical pgvector column dimension).
+- `settings.embedding_backend == "openai"` ⇒ `settings.embedding_model` must equal `text-embedding-3-large`; building `OpenAIEmbeddingClient` requires `OPENAI_API_KEY`.
+- The configured `EmbeddingClient`'s reported `dimension` must agree with `settings.embedding_dimension`.
+- `storage_backend == "postgres"` ⇒ the connected database must have the `vector` extension installed.
+
+Full PostgreSQL connectivity, schema version, and provider reachability checks land with the migration packet.
 
 ## R-11. Routing is recorded
 Every inbound message records its routing decision (`detected_route`) and whether it came from an explicit command or from heuristic routing. Low-confidence routing asks for clarification rather than guessing.

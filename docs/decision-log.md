@@ -330,3 +330,34 @@ R-2 has been a documented runtime invariant since the toolchain bootstrapped, bu
 - Adds `external_message_id` and `edit_seq` to TechSpec §5 `SourceMessage` (and to `core/diary/models.SourceMessage`, `core/routing/models.InboundMessage`).
 - Opens a new operational note: schema evolution before production needs a real migration story (see `docs/todo.md`); local dev upgrades are destructive (drop volume) until then.
 - Out of scope (unchanged): A-10 (edit content semantics — only the *key* dimension is committed here), embeddings (A-5/A-6/A-7/A-8), `/health` boot gates beyond what already exists (R-10), AnswerTrace persistence (Phase 4), per-record stage status columns (Phase 2.6).
+
+---
+
+## D-024 — Quality-first Phase 3.1+3.2 contour: pgvector + `text-embedding-3-large` (3072 dim, f32) + sync indexing on ingest
+
+### Decision
+Phase 3.1 (embedding adapter) and Phase 3.2 (indexing pipeline) ship as a single packet under a fixed quality-first contour:
+
+- **Dense vector storage:** pgvector. Local Postgres runs the `pgvector/pgvector:pg16` image; `embedding_records.embedding` is `vector(3072)` at full f32 precision. SQLite stores the same payload as a little-endian f32 `BLOB` for the opt-in dev backend; the mock holds `list[float]` in memory.
+- **Embedding model:** `text-embedding-3-large` at **3072 dimensions**. The OpenAI request passes `dimensions=3072` explicitly even though it is the native default — the request contract is self-documenting.
+- **Indexing path:** synchronous, inline after `save_event_chunks`. No async queue, no background worker.
+- **Provider seam:** `EmbeddingClient` Protocol in `core/embeddings`; concrete adapters live in `adapters/embeddings` (Invariant I-11). The mock client is honestly named `model_name="mock"` — provider provenance in persisted rows and logs must stay observably distinct from production even though the dimension is the same (3072).
+- **Per-chunk state:** `event_chunks.embedding_status ∈ {pending, ready, failed}` lands now (the only Slice 2.6 status column added by this packet). Status is observable by plain SQL inspection.
+- **Failure semantics:** any exception in the embedding step leaves chunks intact and flips their status to `failed`; zero `embedding_records` are written for that source; the ingest result stays `FallbackMode.NONE` (raw + chunks survived — I-2, I-3); the failure is logged with provider / model / chunk count / exception class. No retry. No dead-letter. Failed chunks become inputs for a future Phase-6 reconciliation job (A-35).
+- **Replay (R-2 / D-023) extension:** replay short-circuits before the embedding step, so a previously-failed embedding stays failed on replay. Retry-on-replay is explicitly out of scope.
+- **Boot gate (R-10 partial):** `create_app` asserts `settings.embedding_dimension == 3072` (the canonical pgvector column dimension), and when `embedding_backend == "openai"` it also asserts `settings.embedding_model == "text-embedding-3-large"`; when `storage_backend == "postgres"` it probes `pg_extension` to confirm pgvector is installed. Mismatch aborts boot rather than serving partial functionality.
+- **Service wiring:** `DiaryService.__init__` gains an optional `embedding_client: EmbeddingClient`; `build_embedding_client(settings)` is the single factory used by both the boot gate and the webhook dispatcher so the two paths cannot disagree.
+
+### Why
+D-007 names PostgreSQL as the durable system of record; the Phase-3 BuildPlan entry requires a dense+sparse-capable retrieval seam before grounded answers can land. This packet stands up the *ingest half* of that seam — every committed chunk gets an embedding row keyed on `(chunk_id, model_name)` — without committing to the read path. The full-precision `vector(3072)` keeps every downstream ANN choice open (exact scan, halfvec + HNSW, or other) for the Phase-3.3 retrieval packet; pgvector caps HNSW / IVFFlat at 2000 dim, so the 3072-dim ANN strategy is a separate decision (A-36).
+
+Quality-first is an explicit founder choice: per-token cost for `text-embedding-3-large` is ~6.5× `text-embedding-3-small` and per-vector storage is ~12 KB at f32, but the lift in retrieval quality is worth the cost for a diary-scale corpus. The mock client deliberately reports `model_name="mock"` rather than mirroring production, so SQL inspection alone tells the operator which rows came from which provider.
+
+### Consequence
+- Closes A-5 (pgvector chosen for dense storage), A-7 (sync indexing on ingest), A-8 (`text-embedding-3-large` @ 3072).
+- Opens **A-35** (sync indexing, no auto-retry: failed embeddings stay failed until a future Phase-6 reconciliation job) and **A-36** (3072-dim ANN-index strategy for Phase 3.3: pgvector's HNSW / IVFFlat cap at 2000 dim, so the read path will pick among exact scan, `halfvec(3072)` + HNSW, or other when 3.3 lands).
+- Refines R-10 wording in `docs/RUNTIME-INVARIANTS.md` to name the boot-time dimension and pgvector-presence checks.
+- Adds `EmbeddingStatus` to TechSpec §5 (on `EventChunk`); `EmbeddingRecord` materialised against the field set already listed there.
+- Docker image swap (`postgres:16-alpine` → `pgvector/pgvector:pg16`) plus the new table / new column means existing local volumes must be reset (`docker compose down -v`) before the bootstrap DDL applies — same destructive-upgrade contour as D-022 / D-023 (A-34 unchanged).
+- New runtime dependencies: `openai` (official SDK), `pgvector` (psycopg integration package).
+- Out of scope (unchanged): Phase 3.3 hybrid retrieval / `SearchRepository` / sparse FTS / 3072-dim ANN index, Phase 3.4 metadata filters, Phase 3.5 retrieval traces, Phase 6 provider hardening (timeouts, retries, dead-letter), AnswerTrace persistence (Phase 4), schema migrations (A-34), `parse_status` / `index_status` columns (Slice 2.6), edit-content semantics (A-10).

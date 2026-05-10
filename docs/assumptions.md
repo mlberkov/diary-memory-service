@@ -5,10 +5,8 @@ Not yet locked. Each item must either be promoted to `docs/decision-log.md` (wit
 Add new items here the moment one is identified. Do not let assumptions live only in code or chat.
 
 ## Storage & search
-- **A-5. PostgreSQL extensions**: pgvector for dense vectors is the leading candidate but not locked. The sparse retrieval mechanism (Postgres FTS, ParadeDB, external) is also not locked. Required before Phase 3.
-- **A-6. Hybrid retrieval implementation**: where dense and sparse signals merge (DB-side, app-side, or external) is undecided. Required before Phase 3.
-- **A-7. Indexing path (sync vs async)**: BuildPlan §Phase 3 mentions "indexing queue or async job". Whether MVP uses sync indexing on ingest or a background queue is undecided.
-- **A-8. Embedding model & dimension**: `EMBEDDING_MODEL` env var is empty. Specific model and vector dimension undecided. Required before Phase 3.
+*A-5 → D-024. A-7 → D-024. A-8 → D-024.*
+- **A-6. Hybrid retrieval implementation**: where dense and sparse signals merge (DB-side, app-side, or external) is undecided. Required before Phase 3.3 (Phase 3.1+3.2 ship without a read-path change — D-024).
 - **A-9. Chat model**: `CHAT_MODEL` env var is empty. Specific model undecided. Required before Phase 4.
 
 ## Domain semantics
@@ -53,6 +51,10 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 ## Schema evolution
 - **A-34. Local schema upgrades are destructive**: with no migration tool in place, schema changes that add or alter columns require resetting the local Postgres volume (`docker compose down -v`) before the bootstrap DDL applies cleanly. SQLite picks up the new schema on a fresh DB file. Production schema evolution must be solved before the first non-local deployment; a future packet may introduce Alembic.
 
+## Phase 3.1+3.2 indexing contour (current)
+- **A-35. Sync indexing, no auto-retry**: `DiaryService.ingest` calls the `EmbeddingClient` synchronously after `save_event_chunks` commits (D-024). On provider failure the chunks remain persisted, `embedding_status` flips to `failed`, and zero `embedding_records` are written for that source; the ingest result still returns `FallbackMode.NONE` (raw + chunks survived — I-2, I-3). Failed embeddings stay failed; replay (R-2) does not retry. Reconciliation for failed rows is deferred to a future Phase-6 packet that will introduce bounded retries and a dead-letter strategy. The SQL probe `SELECT chunk_id FROM event_chunks WHERE embedding_status='failed'` is the operator inspection surface until then.
+- **A-36. 3072-dim ANN-index strategy is open**: pgvector's HNSW and IVFFlat indexes are capped at 2000 dimensions, so the canonical `vector(3072)` column committed by D-024 cannot be ANN-indexed in pgvector ≥ 0.7. This is acceptable for Phase 3.1+3.2 because the read path does not change (substring `LIKE`, A-29). The Phase-3.3 hybrid-retrieval packet must pick among: exact (sequential) dense scan within family-scoped candidate sets; `halfvec(3072)` + HNSW (pgvector ≥ 0.7) with a small precision loss; or another approach. External vector DBs are rejected on I-2 grounds.
+
 ---
 
 ## Recently closed
@@ -64,3 +66,6 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 - A-17 → D-020 (CLARIFY reply naming both `/entry` and `/ask`).
 - A-30 → D-023 (mock non-idempotent state; idempotency now enforced across all backends).
 - A-32 → D-022 (Postgres replaces SQLite as the canonical durable backend; SQLite stays opt-in).
+- A-5 → D-024 (pgvector chosen for dense storage).
+- A-7 → D-024 (sync indexing on ingest).
+- A-8 → D-024 (`text-embedding-3-large` @ 3072 dim).

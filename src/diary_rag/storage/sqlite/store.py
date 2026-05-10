@@ -10,15 +10,23 @@ Idempotency (R-2 / D-023) is enforced by the
 ``UNIQUE (external_chat_id, external_message_id, edit_seq)`` constraint
 plus ``INSERT OR IGNORE`` in ``get_or_create_source_message``: the DB is
 the source of truth for dedupe, not a SELECT-then-INSERT race.
+
+Phase 3.1+3.2 (D-024): SQLite is the opt-in dev backend and has no
+pgvector. Embeddings are stored as little-endian ``f32`` ``BLOB``
+payloads — correctness only; no ANN, no search optimisation.
+``embedding_status`` lives on ``event_chunks`` so the column is visible
+to plain SQL inspection.
 """
 
 from __future__ import annotations
 
+import array
 import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
 from diary_rag.core.diary.models import DiaryEntry, EventChunk, SourceMessage
+from diary_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
 from diary_rag.core.routing import RouteKind
 
 _DDL = """
@@ -58,7 +66,9 @@ CREATE TABLE IF NOT EXISTS event_chunks (
     entry_date        TEXT NOT NULL,
     event_index       INTEGER NOT NULL CHECK (event_index >= 0),
     chunk_text        TEXT NOT NULL,
-    created_at        TEXT NOT NULL
+    created_at        TEXT NOT NULL,
+    embedding_status  TEXT NOT NULL DEFAULT 'pending'
+        CHECK (embedding_status IN ('pending','ready','failed'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_event_chunks_family_id
@@ -66,7 +76,37 @@ CREATE INDEX IF NOT EXISTS idx_event_chunks_family_id
 
 CREATE INDEX IF NOT EXISTS idx_event_chunks_source_message_id
     ON event_chunks(source_message_id);
+
+CREATE TABLE IF NOT EXISTS embedding_records (
+    embedding_record_id TEXT PRIMARY KEY,
+    chunk_id            TEXT NOT NULL REFERENCES event_chunks(chunk_id),
+    source_message_id   TEXT NOT NULL REFERENCES source_messages(source_message_id),
+    family_id           TEXT NOT NULL,
+    model_name          TEXT NOT NULL,
+    dimension           INTEGER NOT NULL,
+    embedding           BLOB NOT NULL,
+    created_at          TEXT NOT NULL,
+    UNIQUE (chunk_id, model_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_embedding_records_chunk_id
+    ON embedding_records(chunk_id);
+
+CREATE INDEX IF NOT EXISTS idx_embedding_records_source_message_id
+    ON embedding_records(source_message_id);
 """
+
+
+def _encode_vector(vec: list[float]) -> bytes:
+    return array.array("f", vec).tobytes()
+
+
+def _decode_vector(blob: bytes, dimension: int) -> list[float]:
+    arr = array.array("f")
+    arr.frombytes(blob)
+    if len(arr) != dimension:
+        raise ValueError(f"embedding BLOB has {len(arr)} floats, expected {dimension}")
+    return list(arr)
 
 
 class SqliteDiaryStore:
@@ -174,8 +214,9 @@ class SqliteDiaryStore:
             conn.executemany(
                 "INSERT INTO event_chunks "
                 "(chunk_id, diary_entry_id, source_message_id, family_id, "
-                " author_user_id, entry_date, event_index, chunk_text, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " author_user_id, entry_date, event_index, chunk_text, created_at, "
+                " embedding_status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
                         c.chunk_id,
@@ -187,6 +228,7 @@ class SqliteDiaryStore:
                         c.event_index,
                         c.chunk_text,
                         c.created_at.isoformat(),
+                        c.embedding_status.value,
                     )
                     for c in chunks
                 ],
@@ -252,27 +294,60 @@ class SqliteDiaryStore:
             rows = conn.execute(
                 "SELECT chunk_id, diary_entry_id, source_message_id, family_id, "
                 "       author_user_id, entry_date, event_index, chunk_text, "
-                "       created_at "
+                "       created_at, embedding_status "
                 "  FROM event_chunks "
                 " WHERE family_id = ? AND lower(chunk_text) LIKE ? "
                 " ORDER BY created_at, event_index "
                 " LIMIT ?",
                 (family_id, like, top_k),
             ).fetchall()
-        return [
-            EventChunk(
-                chunk_id=r["chunk_id"],
-                diary_entry_id=r["diary_entry_id"],
-                source_message_id=r["source_message_id"],
-                family_id=r["family_id"],
-                author_user_id=r["author_user_id"],
-                entry_date=date.fromisoformat(r["entry_date"]),
-                event_index=r["event_index"],
-                chunk_text=r["chunk_text"],
-                created_at=datetime.fromisoformat(r["created_at"]),
+        return [_row_to_chunk(r) for r in rows]
+
+    def save_embedding_records(self, records: list[EmbeddingRecord]) -> None:
+        if not records:
+            return
+        params = [
+            (
+                r.embedding_record_id,
+                r.chunk_id,
+                r.source_message_id,
+                r.family_id,
+                r.model_name,
+                r.dimension,
+                _encode_vector(r.embedding),
+                r.created_at.isoformat(),
             )
-            for r in rows
+            for r in records
         ]
+        with self._connect() as conn:
+            conn.executemany(
+                "INSERT INTO embedding_records "
+                "(embedding_record_id, chunk_id, source_message_id, family_id, "
+                " model_name, dimension, embedding, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                params,
+            )
+            conn.commit()
+
+    def count_embedding_records_for_source(self, source_message_id: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT count(*) FROM embedding_records WHERE source_message_id = ?",
+                (source_message_id,),
+            ).fetchone()
+        if row is None:
+            return 0
+        return int(row[0])
+
+    def set_chunk_embedding_status(self, chunk_id: str, status: EmbeddingStatus) -> None:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE event_chunks SET embedding_status = ? WHERE chunk_id = ?",
+                (status.value, chunk_id),
+            )
+            if cur.rowcount != 1:
+                raise KeyError(f"unknown chunk_id={chunk_id}")
+            conn.commit()
 
 
 def _row_to_source(row: sqlite3.Row) -> SourceMessage:
@@ -287,4 +362,19 @@ def _row_to_source(row: sqlite3.Row) -> SourceMessage:
         raw_text=row["raw_text"],
         detected_route=RouteKind(row["detected_route"]),
         created_at=datetime.fromisoformat(row["created_at"]),
+    )
+
+
+def _row_to_chunk(row: sqlite3.Row) -> EventChunk:
+    return EventChunk(
+        chunk_id=row["chunk_id"],
+        diary_entry_id=row["diary_entry_id"],
+        source_message_id=row["source_message_id"],
+        family_id=row["family_id"],
+        author_user_id=row["author_user_id"],
+        entry_date=date.fromisoformat(row["entry_date"]),
+        event_index=row["event_index"],
+        chunk_text=row["chunk_text"],
+        created_at=datetime.fromisoformat(row["created_at"]),
+        embedding_status=EmbeddingStatus(row["embedding_status"]),
     )

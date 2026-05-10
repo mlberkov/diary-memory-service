@@ -32,9 +32,8 @@ Files listed are *targets*. Most do not exist yet. Each row will be split into o
 ## Phase 3 — Embeddings and Hybrid Retrieval
 | Slice | Files / artifacts |
 | --- | --- |
-| 3.1 embedding adapter | `EmbeddingClient`, OpenAI implementation, dimension check at boot (R-10) |
-| 3.2 indexing pipeline | sync or async path (assumption A-7); `embedding_records` storage |
-| 3.3 hybrid retrieval | `SearchRepository` with dense + sparse (assumption A-5/A-6) |
+| 3.1+3.2 embedding adapter + sync indexing | `core/embeddings/{client,models}.py` (`EmbeddingClient` Protocol, `EmbeddingRecord`, `EmbeddingStatus`); `adapters/embeddings/{mock,openai_client,factory}.py`; `event_chunks.embedding_status` column + `embedding_records` table with `vector(3072)`; pgvector image swap in `docker-compose.yml`; boot dimension + pgvector probe (R-10); `DiaryService` calls embedding client after `save_event_chunks`; failure → `embedding_status='failed'`; replay short-circuits before embedding. Closes A-5 / A-7 / A-8 via D-024; opens A-35 / A-36 |
+| 3.3 hybrid retrieval | `SearchRepository` with dense + sparse (assumption A-6); 3072-dim ANN strategy fork (A-36) |
 | 3.4 metadata filtering | family / child / visibility / date filters (I-7) |
 | 3.5 retrieval traces | `RetrievalHit` rows; debug command for inspecting top-k |
 

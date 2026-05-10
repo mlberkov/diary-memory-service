@@ -38,15 +38,17 @@ See `.env.example` for the full list. Currently used:
 
 - `TELEGRAM_BOT_TOKEN` — bot identity (Phase 1.2+)
 - `TELEGRAM_WEBHOOK_SECRET` — required for `/telegram/webhook` to accept any call (A-26)
-- `OPENAI_API_KEY`
+- `OPENAI_API_KEY` — required when `EMBEDDING_BACKEND=openai` (D-024)
 - `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
-- `EMBEDDING_MODEL` (value not yet chosen — see `docs/assumptions.md` A-8)
+- `EMBEDDING_BACKEND` — `mock` (default) or `openai` (D-024)
+- `EMBEDDING_MODEL` — `text-embedding-3-large` (D-024)
+- `EMBEDDING_DIMENSION` — `3072` (D-024); boot gate refuses any other value
 - `CHAT_MODEL` (value not yet chosen — see `docs/assumptions.md` A-9)
 
 ### Required services
 
-- **(Phase 2+)** PostgreSQL with vector + sparse-search capabilities. The exact extension/strategy is open — see `docs/assumptions.md` A-5/A-6.
-- **(Phase 3+)** Outbound network access to the chosen LLM/embedding provider.
+- **PostgreSQL with pgvector** — `docker-compose.yml` runs `pgvector/pgvector:pg16` (D-024). The dense `embedding_records.embedding` column is `vector(3072)`. Sparse retrieval is still open (A-6, Phase 3.3).
+- **Outbound network access to OpenAI** — required only when `EMBEDDING_BACKEND=openai`. The mock backend has no external dependencies and is the default everywhere except production.
 
 ### Telegram transport
 
@@ -162,10 +164,22 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
 # 3. Verify rows landed in Postgres
 docker compose exec -T postgres psql -U postgres -d theygrow_diary_rag -c \
   "SELECT
-     (SELECT count(*) FROM source_messages) AS sources,
-     (SELECT count(*) FROM diary_entries)   AS entries,
-     (SELECT count(*) FROM event_chunks)    AS chunks;"
-# → sources=1 entries=1 chunks=2
+     (SELECT count(*) FROM source_messages)   AS sources,
+     (SELECT count(*) FROM diary_entries)     AS entries,
+     (SELECT count(*) FROM event_chunks)      AS chunks,
+     (SELECT count(*) FROM embedding_records) AS embeddings;"
+# → sources=1 entries=1 chunks=2 embeddings=2
+
+# 3a. Verify embedding contour (D-024): status flipped to 'ready',
+#     model_name and vector dimension are correct.
+docker compose exec -T postgres psql -U postgres -d theygrow_diary_rag -c \
+  "SELECT ec.chunk_id, ec.event_index, ec.embedding_status,
+          er.model_name, er.dimension, vector_dims(er.embedding) AS vec_dim
+     FROM event_chunks ec
+     LEFT JOIN embedding_records er USING (chunk_id)
+    ORDER BY ec.event_index;"
+# → embedding_status=ready, model_name=mock, dimension=3072, vec_dim=3072
+#   (model_name='text-embedding-3-large' when EMBEDDING_BACKEND=openai)
 
 # 4. Stop uvicorn (Ctrl+C); rerun `make run` with the same env
 #    (the docker-compose volume keeps the DB across app restarts)

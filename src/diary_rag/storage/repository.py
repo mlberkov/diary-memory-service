@@ -12,6 +12,13 @@ a second one. Backends use DB-native conflict handling
 (``INSERT ... ON CONFLICT DO NOTHING`` on Postgres, ``INSERT OR IGNORE``
 on SQLite, dict-keyed dedupe in the mock) so the unique constraint is
 part of the correctness model rather than a safety net.
+
+Phase 3.1+3.2 (D-024) adds three embedding-related methods. The Postgres
+backend persists ``embedding`` as a ``vector(3072)`` (pgvector); SQLite
+stores the same payload as little-endian f32 ``BLOB``; the mock keeps it
+as a ``list[float]``. ``embedding_status`` is a per-chunk column so a
+SQL inspection alone tells the operator which chunks succeeded or
+failed.
 """
 
 from __future__ import annotations
@@ -19,6 +26,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from diary_rag.core.diary.models import DiaryEntry, EventChunk, SourceMessage
+from diary_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
 
 
 class DiaryRepository(Protocol):
@@ -38,7 +46,8 @@ class DiaryRepository(Protocol):
         Returns ``(persisted, replayed)``. ``replayed`` is ``True`` when a
         row keyed on ``(external_chat_id, external_message_id, edit_seq)``
         already existed; the returned ``SourceMessage`` is the existing row
-        in that case, so callers can short-circuit re-parse / re-chunk.
+        in that case, so callers can short-circuit re-parse / re-chunk /
+        re-embed (D-024).
         """
 
     def get_diary_entry_by_source_message_id(self, source_message_id: str) -> DiaryEntry | None:
@@ -52,3 +61,23 @@ class DiaryRepository(Protocol):
         """Count event chunks persisted for a given source."""
 
     def search_chunks(self, family_id: str, query_text: str, top_k: int) -> list[EventChunk]: ...
+
+    def save_embedding_records(self, records: list[EmbeddingRecord]) -> None:
+        """Persist one embedding row per chunk per model (D-024).
+
+        Backends enforce ``UNIQUE (chunk_id, model_name)`` so a future
+        model migration writes a second row rather than mutating the old
+        one; this call must not be invoked twice for the same pair under
+        a single ingest.
+        """
+
+    def count_embedding_records_for_source(self, source_message_id: str) -> int:
+        """Count embedding rows persisted for a given source."""
+
+    def set_chunk_embedding_status(self, chunk_id: str, status: EmbeddingStatus) -> None:
+        """Transition a single chunk's ``embedding_status`` (D-024).
+
+        ``ready`` after the embedding row is persisted; ``failed`` if the
+        provider call raised. The chunk row itself is always intact
+        (I-3, R-1).
+        """

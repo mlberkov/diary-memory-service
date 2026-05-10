@@ -1,4 +1,4 @@
-"""Local PostgreSQL store implementing ``DiaryRepository`` (D-022, D-023).
+"""Local PostgreSQL store implementing ``DiaryRepository`` (D-022, D-023, D-024).
 
 Schema is bootstrapped at construction by executing ``schema.sql`` (loaded
 via :mod:`importlib.resources` so it works whether the package is run from
@@ -12,6 +12,13 @@ Idempotency (R-2 / D-023) is enforced by the
 ``source_messages`` plus ``INSERT ... ON CONFLICT DO NOTHING`` in
 ``get_or_create_source_message``: the DB is the source of truth for "this
 message-state has already been ingested," not a SELECT-then-INSERT race.
+
+Phase 3.1+3.2 (D-024): the pgvector ``vector(3072)`` column on
+``embedding_records`` matches the production embedding contour
+(``text-embedding-3-large``, 3072 dim). The ``pgvector`` Python package
+is registered on each pooled connection so list[float] writes and reads
+go through native binding. ``embedding_status`` on ``event_chunks`` is
+the per-chunk observable state (``pending`` / ``ready`` / ``failed``).
 """
 
 from __future__ import annotations
@@ -19,10 +26,13 @@ from __future__ import annotations
 from importlib import resources
 from typing import Any
 
+from pgvector.psycopg import register_vector
+from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from diary_rag.core.diary.models import DiaryEntry, EventChunk, SourceMessage
+from diary_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
 from diary_rag.core.routing import RouteKind
 
 
@@ -34,26 +44,45 @@ def _load_schema_sql() -> str:
     )
 
 
+def _configure_connection(conn: Connection[Any]) -> None:
+    """Register the pgvector codec on every pooled connection."""
+    register_vector(conn)
+
+
 class PostgresDiaryStore:
     """Local Postgres implementation of ``DiaryRepository``."""
 
     def __init__(self, dsn: str, *, min_size: int = 1, max_size: int = 4) -> None:
+        # Bootstrap pass: a tiny pool with no codec config so `CREATE EXTENSION`
+        # can run before pgvector is registered. The real pool below registers
+        # the codec on every connection it opens.
+        boot_pool = ConnectionPool(
+            conninfo=dsn,
+            min_size=1,
+            max_size=1,
+            timeout=10,
+            open=False,
+        )
+        boot_pool.open()
+        boot_pool.wait(timeout=10)
+        try:
+            ddl = _load_schema_sql()
+            with boot_pool.connection() as conn, conn.cursor() as cur:
+                cur.execute(ddl)
+                conn.commit()
+        finally:
+            boot_pool.close()
+
         self._pool: ConnectionPool = ConnectionPool(
             conninfo=dsn,
             min_size=min_size,
             max_size=max_size,
             timeout=10,
             open=False,
+            configure=_configure_connection,
         )
         self._pool.open()
         self._pool.wait(timeout=10)
-        self._bootstrap_schema()
-
-    def _bootstrap_schema(self) -> None:
-        ddl = _load_schema_sql()
-        with self._pool.connection() as conn, conn.cursor() as cur:
-            cur.execute(ddl)
-            conn.commit()
 
     def close(self) -> None:
         """Release pool resources. Safe to call multiple times."""
@@ -157,6 +186,7 @@ class PostgresDiaryStore:
                 c.event_index,
                 c.chunk_text,
                 c.created_at,
+                c.embedding_status.value,
             )
             for c in chunks
         ]
@@ -164,8 +194,9 @@ class PostgresDiaryStore:
             cur.executemany(
                 "INSERT INTO event_chunks "
                 "(chunk_id, diary_entry_id, source_message_id, family_id, "
-                " author_user_id, entry_date, event_index, chunk_text, created_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                " author_user_id, entry_date, event_index, chunk_text, created_at, "
+                " embedding_status) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 params,
             )
             conn.commit()
@@ -232,7 +263,7 @@ class PostgresDiaryStore:
             cur.execute(
                 "SELECT chunk_id, diary_entry_id, source_message_id, family_id, "
                 "       author_user_id, entry_date, event_index, chunk_text, "
-                "       created_at "
+                "       created_at, embedding_status "
                 "  FROM event_chunks "
                 " WHERE family_id = %s AND lower(chunk_text) LIKE %s "
                 " ORDER BY created_at, event_index "
@@ -240,20 +271,54 @@ class PostgresDiaryStore:
                 (family_id, like, top_k),
             )
             rows = cur.fetchall()
-        return [
-            EventChunk(
-                chunk_id=r["chunk_id"],
-                diary_entry_id=r["diary_entry_id"],
-                source_message_id=r["source_message_id"],
-                family_id=r["family_id"],
-                author_user_id=r["author_user_id"],
-                entry_date=r["entry_date"],
-                event_index=r["event_index"],
-                chunk_text=r["chunk_text"],
-                created_at=r["created_at"],
+        return [_row_to_chunk(r) for r in rows]
+
+    def save_embedding_records(self, records: list[EmbeddingRecord]) -> None:
+        if not records:
+            return
+        params = [
+            (
+                r.embedding_record_id,
+                r.chunk_id,
+                r.source_message_id,
+                r.family_id,
+                r.model_name,
+                r.dimension,
+                r.embedding,
+                r.created_at,
             )
-            for r in rows
+            for r in records
         ]
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO embedding_records "
+                "(embedding_record_id, chunk_id, source_message_id, family_id, "
+                " model_name, dimension, embedding, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                params,
+            )
+            conn.commit()
+
+    def count_embedding_records_for_source(self, source_message_id: str) -> int:
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM embedding_records WHERE source_message_id = %s",
+                (source_message_id,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return 0
+        return int(row[0])
+
+    def set_chunk_embedding_status(self, chunk_id: str, status: EmbeddingStatus) -> None:
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE event_chunks SET embedding_status = %s WHERE chunk_id = %s",
+                (status.value, chunk_id),
+            )
+            if cur.rowcount != 1:
+                raise KeyError(f"unknown chunk_id={chunk_id}")
+            conn.commit()
 
 
 def _row_to_source(row: dict[str, Any]) -> SourceMessage:
@@ -268,6 +333,21 @@ def _row_to_source(row: dict[str, Any]) -> SourceMessage:
         raw_text=row["raw_text"],
         detected_route=RouteKind(row["detected_route"]),
         created_at=row["created_at"],
+    )
+
+
+def _row_to_chunk(row: dict[str, Any]) -> EventChunk:
+    return EventChunk(
+        chunk_id=row["chunk_id"],
+        diary_entry_id=row["diary_entry_id"],
+        source_message_id=row["source_message_id"],
+        family_id=row["family_id"],
+        author_user_id=row["author_user_id"],
+        entry_date=row["entry_date"],
+        event_index=row["event_index"],
+        chunk_text=row["chunk_text"],
+        created_at=row["created_at"],
+        embedding_status=EmbeddingStatus(row["embedding_status"]),
     )
 
 

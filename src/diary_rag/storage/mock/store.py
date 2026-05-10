@@ -1,19 +1,29 @@
 """In-memory mock store for the diary domain.
 
-Holds raw source messages, parsed diary entries, and per-event chunks
-in process-local dicts. Search is a deterministic case-insensitive
-substring match over chunk text, scoped to ``family_id``.
+Holds raw source messages, parsed diary entries, per-event chunks, and
+per-chunk embedding records in process-local dicts. Search is a
+deterministic case-insensitive substring match over chunk text, scoped
+to ``family_id``.
 
 ``get_or_create_source_message`` enforces R-2 (D-023) by keying on the
 ``(external_chat_id, external_message_id, edit_seq)`` triple in a side
 index; replays return the originally-persisted row.
+
+Phase 3.1+3.2 (D-024): chunks carry an ``embedding_status`` field and
+the store keeps ``EmbeddingRecord`` rows keyed on
+``(chunk_id, model_name)``; ``EventChunk`` instances are reconstituted
+on read with their current status so callers see the same shape as the
+durable backends.
 
 Not thread-safe. State lives only as long as the process.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from diary_rag.core.diary.models import DiaryEntry, EventChunk, SourceMessage
+from diary_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
 
 
 class MockDiaryStore:
@@ -24,6 +34,7 @@ class MockDiaryStore:
         self._idempotency: dict[tuple[str, str, int], str] = {}
         self._entries: dict[str, DiaryEntry] = {}
         self._chunks: dict[str, EventChunk] = {}
+        self._embeddings: dict[tuple[str, str], EmbeddingRecord] = {}
 
     def save_source_message(self, source: SourceMessage) -> None:
         key = (source.external_chat_id, source.external_message_id, source.edit_seq)
@@ -91,6 +102,29 @@ class MockDiaryStore:
                     break
         return hits
 
+    def save_embedding_records(self, records: list[EmbeddingRecord]) -> None:
+        for record in records:
+            key = (record.chunk_id, record.model_name)
+            if key in self._embeddings:
+                raise ValueError(
+                    f"duplicate embedding for chunk_id={record.chunk_id} "
+                    f"model={record.model_name}"
+                )
+            self._embeddings[key] = record
+
+    def count_embedding_records_for_source(self, source_message_id: str) -> int:
+        return sum(
+            1
+            for record in self._embeddings.values()
+            if record.source_message_id == source_message_id
+        )
+
+    def set_chunk_embedding_status(self, chunk_id: str, status: EmbeddingStatus) -> None:
+        existing = self._chunks.get(chunk_id)
+        if existing is None:
+            raise KeyError(f"unknown chunk_id={chunk_id}")
+        self._chunks[chunk_id] = replace(existing, embedding_status=status)
+
     def len_sources(self) -> int:
         return len(self._sources)
 
@@ -100,8 +134,12 @@ class MockDiaryStore:
     def len_chunks(self) -> int:
         return len(self._chunks)
 
+    def len_embeddings(self) -> int:
+        return len(self._embeddings)
+
     def clear(self) -> None:
         self._sources.clear()
         self._idempotency.clear()
         self._entries.clear()
         self._chunks.clear()
+        self._embeddings.clear()

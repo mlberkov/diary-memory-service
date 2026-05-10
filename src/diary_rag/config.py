@@ -3,6 +3,14 @@
 Fields are intentionally optional at Slice 1.1 so that tests and a smoke
 boot do not require real provider credentials. Each field becomes required
 in the slice that depends on it (see docs/execution-map.md).
+
+Phase 3.1+3.2 (D-024) makes the embedding contour load-bearing:
+``embedding_backend`` selects ``mock`` (default — used by every
+automated test and by any boot without an OpenAI key) or ``openai``.
+``embedding_model`` and ``embedding_dimension`` default to the canonical
+quality-first contour (``text-embedding-3-large``, 3072). The boot gate
+in ``app.py`` cross-checks these against the live ``EmbeddingClient``;
+a mismatch aborts startup (R-10).
 """
 
 from __future__ import annotations
@@ -46,7 +54,9 @@ class Settings(BaseSettings):
     storage_backend: Literal["memory", "sqlite", "postgres"] = Field(default="memory")
     sqlite_path: str = Field(default="./data/diary.db")
 
-    embedding_model: str = Field(default="")
+    embedding_backend: Literal["mock", "openai"] = Field(default="mock")
+    embedding_model: str = Field(default="text-embedding-3-large")
+    embedding_dimension: int = Field(default=3072)
     chat_model: str = Field(default="")
 
     def postgres_dsn(self) -> str:

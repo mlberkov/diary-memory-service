@@ -2,15 +2,32 @@
 
 Top of list = pick next. Each item maps to a row in `docs/execution-map.md`. When a slice is done, remove it and add the next downstream slice.
 
-## Slice 1.3 — Remaining mock services (next)
+## Slice 3.3 — Hybrid retrieval (next)
 - Owner: agent
-- Map: execution-map 1.3
-- Concrete: `MockEmbeddingClient` and `MockChatClient` once the interfaces they will mirror are sketched in slice 3.1 / 4.1. Hold until those interfaces are clearer; mock provider clients ahead of their real shape locks the wrong contract.
+- Map: execution-map 3.3
+- Concrete: introduce `SearchRepository` (channel-neutral) with hybrid (dense + sparse) retrieval. Resolve A-36 (3072-dim ANN strategy): pick exact sequential scan, `halfvec(3072)` + HNSW (pgvector ≥ 0.7), or another approach. Resolve A-6 (where dense / sparse signals merge). Swap `QueryService` from substring (A-29) to the new search seam. Add family-scoped filters that already match I-7. Keep retrieval traces minimal — `RetrievalHit` row writes can land in 3.5.
 
 ## Schema evolution before non-local deployment
-- No migration tool is wired yet (A-34). Local Postgres schema upgrades are destructive: pull a packet that changes columns and you must `docker compose down -v` to reset `diary_pg_data` before the bootstrap DDL applies. This is acceptable for the single-dev contour but must be replaced (Alembic or equivalent) before the first non-local deployment. Consider a dedicated packet once the next production-shaped slice is on the horizon.
+- No migration tool is wired yet (A-34). Local Postgres schema upgrades are destructive: pull a packet that changes columns and you must `docker compose down -v` to reset `diary_pg_data` before the bootstrap DDL applies. This is acceptable for the single-dev contour but must be replaced (Alembic or equivalent) before the first non-local deployment. D-024 added the pgvector image, `embedding_records`, and the `embedding_status` column — all of which required a destructive upgrade. Consider a dedicated packet once the next production-shaped slice is on the horizon.
+
+## Reconciliation for failed embeddings (Phase 6 candidate)
+- A-35 leaves failed embeddings sticky: a chunk with `embedding_status='failed'` stays that way until manual intervention. Once Phase 6 (provider hardening) is on the horizon, ship a reconciliation job that retries `failed` chunks with bounded backoff and a dead-letter strategy, plus the corresponding observability (logs / metrics on retry success/failure).
 
 ---
+
+Closed in the Phase 3.1+3.2 embedding-adapter + sync-indexing packet (D-024):
+- `core/embeddings/{client,models}.py` — `EmbeddingClient` Protocol, `EmbeddingRecord`, `EmbeddingStatus`.
+- `adapters/embeddings/{mock,openai_client,factory}.py` — `MockEmbeddingClient` (honest `model_name="mock"`, dimension=3072), `OpenAIEmbeddingClient` (`text-embedding-3-large`, passes `dimensions=3072` explicitly), and the single `build_embedding_client(settings)` factory used by both the boot gate and the dispatcher.
+- `DiaryRepository` Protocol gains `save_embedding_records`, `count_embedding_records_for_source`, `set_chunk_embedding_status`; all three backends (mock / sqlite / postgres) implement them.
+- Postgres schema: `CREATE EXTENSION vector`, `embedding_records` with `vector(3072)`, `event_chunks.embedding_status TEXT NOT NULL DEFAULT 'pending'` with CHECK on the StrEnum. No ANN index — pgvector's HNSW/IVFFlat cap at 2000 dim (A-36 deferred to Slice 3.3).
+- SQLite: `embedding_records` with little-endian f32 `BLOB`; same `embedding_status` column and CHECK.
+- `DiaryService.ingest` calls the embedding client after `save_event_chunks` commits; success → `EmbeddingRecord` rows + `embedding_status='ready'`; failure → `embedding_status='failed'` + zero records + `FallbackMode.NONE` (I-2, I-3); replay short-circuits before the embedding step (R-2 extension).
+- `create_app` boot gate (R-10 partial): refuses to start when `EMBEDDING_DIMENSION ≠ 3072`, when `EMBEDDING_BACKEND=openai` with the wrong model or no API key, or when `STORAGE_BACKEND=postgres` and the connected database lacks the `vector` extension.
+- `docker-compose.yml`: `postgres:16-alpine` → `pgvector/pgvector:pg16`. Destructive volume reset required (A-34).
+- `pyproject.toml`: `openai` and `pgvector` runtime deps; mypy `ignore_missing_imports` for `pgvector.*`.
+- `.env.example`: new `EMBEDDING_BACKEND`, default `EMBEDDING_MODEL=text-embedding-3-large`, `EMBEDDING_DIMENSION=3072`.
+- New tests: `test_embedding_client_mock.py`, `test_indexing_pipeline.py` (parametrised across mock / sqlite / postgres backends), `test_boot_dimension_gate.py`. Optional/manual: `test_embedding_client_openai.py` (gated by `DIARY_RAG_OPENAI_TEST_KEY`; **not** in the standard packet gate). Extended `test_diary_service.py` for fresh-ingest / replay / failure paths.
+- Docs: D-024 in `decision-log.md`. Closed A-5 / A-7 / A-8; opened A-35 (sync indexing, no auto-retry) and A-36 (3072-dim ANN strategy is open). R-10 wording tightened in `RUNTIME-INVARIANTS.md`. RUNBOOK, QUICKSTART, README, execution-map updated.
 
 Closed in the webhook idempotency packet (D-023, slice 2.4):
 - `SourceMessage` and `InboundMessage` now carry `external_message_id` and `edit_seq`; the idempotency key is `(external_chat_id, external_message_id, edit_seq)`.
