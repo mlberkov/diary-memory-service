@@ -42,6 +42,11 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 ## Adapter security
 - **A-26. Webhook secret enforcement**: the `/telegram/webhook` endpoint fails closed when `TELEGRAM_WEBHOOK_SECRET` is unset or mismatched (returns 401). The `X-Telegram-Bot-Api-Secret-Token` header is compared with `secrets.compare_digest`.
 
+## Mock contour (current)
+- **A-28. Mock `/entry` accepts ISO-only dates**: the date parser in `core/diary/parser.py` recognizes only `YYYY-MM-DD` on the first non-empty line. Anything else returns `INVALID_INPUT`. Precursor to A-12 (date parsing scope).
+- **A-29. Mock retrieval is case-insensitive substring match**: `MockDiaryStore.search_chunks` is the only retrieval surface; results are scoped to one `family_id` and returned in insertion order. Precursor to A-5/A-6 (hybrid retrieval design) and to the eventual `SearchRepository` interface.
+- **A-30. Mock state is process-local and non-idempotent**: `MockDiaryStore` lives only inside one running `make run` process; webhook retries with the same `update_id` create duplicate `SourceMessage` rows. Precursor to slice 2.4 (idempotent webhook handling) and Phase 2 durable persistence.
+
 ---
 
 ## Recently closed

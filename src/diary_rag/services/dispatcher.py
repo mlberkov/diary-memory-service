@@ -1,26 +1,59 @@
 """Inbound-message dispatcher.
 
-Turns an :class:`InboundMessage` into a :class:`DispatchResult` carrying
-a reply string. The handlers here return fixed mock replies; persistence
-and retrieval are not part of this layer yet.
+Maps a channel-neutral :class:`InboundMessage` to a
+:class:`DispatchResult` carrying a reply string. ``ENTRY`` and ``ASK``
+delegate to :class:`DiaryService` / :class:`QueryService`; other routes
+return fixed strings appropriate for the current phase.
+
+Reply wording lives next to the dispatcher (channel-neutral) so the
+Telegram adapter remains a transport layer (Invariant I-1).
 """
 
 from __future__ import annotations
 
+from diary_rag.core.diary import AnswerResult, FallbackMode, IngestResult
 from diary_rag.core.routing import DispatchResult, InboundMessage, RouteKind
+from diary_rag.services.diary_service import DiaryService
+from diary_rag.services.query_service import QueryService
 
 _REPLY_START = "Welcome — diary mode. Use /entry to record, /ask to query."
 _REPLY_HELP = (
     "Commands: /start, /help, /entry, /ask. "
     "Diary mode is in setup; durable persistence and retrieval arrive in later phases."
 )
-_REPLY_ENTRY = "Got it. (mock — no durable persistence yet.)"
-_REPLY_ASK = "Mock answer. (no real retrieval yet.)"
 _REPLY_UNKNOWN = "I haven't been taught how to handle plain messages yet — use /entry or /ask."
+
+
+def _format_ingest_reply(result: IngestResult) -> str:
+    if result.fallback is FallbackMode.INVALID_INPUT:
+        got = result.invalid_first_line or ""
+        return f"Mock /entry needs an ISO date (YYYY-MM-DD) on the first line. Got: '{got}'."
+    assert result.entry_date is not None
+    if result.events_count == 0:
+        return f"Saved {result.entry_date.isoformat()} with no event lines."
+    plural = "event" if result.events_count == 1 else "events"
+    return f"Saved {result.events_count} {plural} for {result.entry_date.isoformat()}."
+
+
+def _format_answer_reply(result: AnswerResult) -> str:
+    if result.fallback is FallbackMode.NO_EVIDENCE:
+        if not result.query_text:
+            return "No query text provided. (no_evidence — mock retrieval only.)"
+        return f"No memories matched '{result.query_text}'. (no_evidence — mock retrieval only.)"
+    count = len(result.evidence)
+    plural = "memory" if count == 1 else "memories"
+    lines = [f"Found {count} {plural}:"]
+    lines.extend(f"- [{e.entry_date.isoformat()}] {e.chunk_text}" for e in result.evidence)
+    lines.append("(mock retrieval — substring match)")
+    return "\n".join(lines)
 
 
 class Dispatcher:
     """Maps an :class:`InboundMessage` to a :class:`DispatchResult`."""
+
+    def __init__(self, diary: DiaryService, query: QueryService) -> None:
+        self._diary = diary
+        self._query = query
 
     def dispatch(self, message: InboundMessage) -> DispatchResult:
         route = message.route
@@ -29,7 +62,17 @@ class Dispatcher:
         if route is RouteKind.HELP:
             return DispatchResult(reply_text=_REPLY_HELP, route=route)
         if route is RouteKind.ENTRY:
-            return DispatchResult(reply_text=_REPLY_ENTRY, route=route, metadata={"mock": "true"})
+            ingest = self._diary.ingest(message)
+            return DispatchResult(
+                reply_text=_format_ingest_reply(ingest),
+                route=route,
+                metadata={"fallback": ingest.fallback.value},
+            )
         if route is RouteKind.ASK:
-            return DispatchResult(reply_text=_REPLY_ASK, route=route, metadata={"mock": "true"})
+            answer = self._query.answer(message)
+            return DispatchResult(
+                reply_text=_format_answer_reply(answer),
+                route=route,
+                metadata={"fallback": answer.fallback.value},
+            )
         return DispatchResult(reply_text=_REPLY_UNKNOWN, route=RouteKind.UNKNOWN)

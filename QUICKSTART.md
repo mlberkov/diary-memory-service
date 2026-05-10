@@ -71,6 +71,40 @@ curl -X POST http://127.0.0.1:8000/telegram/webhook \
 # → {"method":"sendMessage","chat_id":42,"text":"Welcome — diary mode. ..."}
 ```
 
+#### Mock diary smoke (`/entry` then `/ask`)
+
+The mock store lives in process memory: state survives across requests within one `make run` and resets on restart.
+
+```bash
+# 1. Ingest a multi-line dated entry
+curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
+  -d '{"update_id":1,"message":{"message_id":1,"date":1715300000,"chat":{"id":42},"from":{"id":7},"text":"/entry 2026-05-09\nHad a calm morning\nTried a new book"}}'
+# → {"method":"sendMessage","chat_id":42,"text":"Saved 2 events for 2026-05-09."}
+
+# 2. Ask — case-insensitive substring match returns the matching line with its date
+curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
+  -d '{"update_id":2,"message":{"message_id":2,"date":1715300100,"chat":{"id":42},"from":{"id":7},"text":"/ask book"}}'
+# → text: "Found 1 memory:\n- [2026-05-09] Tried a new book\n(mock retrieval — substring match)"
+
+# 3. Ask with no match → explicit no-evidence fallback (no fabricated answer)
+curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
+  -d '{"update_id":3,"message":{"message_id":3,"date":1715300200,"chat":{"id":42},"from":{"id":7},"text":"/ask snowstorm"}}'
+# → text: "No memories matched 'snowstorm'. (no_evidence — mock retrieval only.)"
+
+# 4. Non-ISO first line → INVALID_INPUT reply; raw SourceMessage is still recorded
+curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
+  -d '{"update_id":4,"message":{"message_id":4,"date":1715300300,"chat":{"id":42},"from":{"id":7},"text":"/entry not-a-date\nfoo"}}'
+# → text: "Mock /entry needs an ISO date (YYYY-MM-DD) on the first line. Got: 'not-a-date'."
+```
+
 #### Registering the webhook with Telegram (when using a real bot)
 
 ```bash

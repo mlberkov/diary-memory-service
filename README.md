@@ -2,7 +2,7 @@
 
 Diary RAG Service for **TheyGrow** — a low-friction memory system for parents who write family and child observations in Telegram and later ask natural-language questions over them.
 
-> **Status:** early Phase 1 — toolchain wired, FastAPI service shell boots, Telegram webhook adapter shell accepts updates and dispatches to stub handlers. Ingestion, retrieval, and provider integration are still pending.
+> **Status:** early Phase 1 — toolchain wired, FastAPI service shell boots, Telegram webhook adapter accepts updates and dispatches through channel-neutral `DiaryService` / `QueryService` against an in-memory mock store. `/entry` then `/ask` returns a deterministic grounded-style reply with the matched line and its date. Durable persistence, embeddings, real retrieval, and provider integration are still pending.
 
 ## What this is
 
@@ -55,8 +55,9 @@ Core rules (from `AGENTS.md` and the canonical docs):
 - Supporting docs populated; open items surfaced in `docs/assumptions.md`.
 - Phase-1 platform decisions locked: **Python 3.11** (D-016), **`uv`** (D-017), **Ruff + Mypy + Pytest** (D-018), **Telegram webhook transport** (D-019).
 - **Slice 1.1 done:** toolchain wired, package skeleton in place, `make check` green, FastAPI `/health` smokeable via `make run`.
-- **Slice 1.2 done:** `POST /telegram/webhook` accepts a Telegram update, fails closed without the secret header (A-26), parses `/start` `/help` `/entry` `/ask`, dispatches to stub handlers, and returns a `sendMessage`-shaped payload.
-- Next gate: Slice 1.3 — Mock services (`docs/todo.md`).
+- **Slice 1.2 done:** `POST /telegram/webhook` accepts a Telegram update, fails closed without the secret header (A-26), parses `/start` `/help` `/entry` `/ask`, and returns a `sendMessage`-shaped payload.
+- **Mock diary/query contour done:** `core/diary` dataclasses + ISO date parser, `MockDiaryStore`, `DiaryService` and `QueryService`, `Dispatcher` wires `ENTRY` / `ASK` to those services. `/entry` records the raw `SourceMessage` before parsing (I-3, R-1); `/ask` returns explicit `NO_EVIDENCE` when nothing matches (I-9, R-5/R-6). New open assumptions: A-28 (ISO-only mock dates), A-29 (substring-match retrieval), A-30 (process-local mock state).
+- Next gate: Slice 1.4 — heuristic plain-text routing (`docs/todo.md`).
 
 ## How to start
 

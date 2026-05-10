@@ -1,10 +1,9 @@
-"""In-memory mock storage for Phase 1 slices.
+"""In-memory mock storage.
 
-Mocks are intentionally minimal stand-ins. Real repositories
-(`MockSourceMessageRepository`, `MockSearchRepository`, ...) with the
-shape from TechSpec §5 land in Slice 1.3.
+Mocks stand in for the durable PostgreSQL repositories that arrive in
+Phase 2. They are intentionally minimal and process-local.
 """
 
-from diary_rag.storage.mock.in_memory import InMemorySourceMessageStore
+from diary_rag.storage.mock.store import MockDiaryStore
 
-__all__ = ["InMemorySourceMessageStore"]
+__all__ = ["MockDiaryStore"]

@@ -20,11 +20,13 @@ from diary_rag.adapters.telegram.reply import build_send_message_payload
 from diary_rag.config import Settings, get_settings
 from diary_rag.core.routing import InboundMessage
 from diary_rag.logging import get_logger
-from diary_rag.services import Dispatcher
+from diary_rag.services import DiaryService, Dispatcher, QueryService
+from diary_rag.storage.mock import MockDiaryStore
 
 log = get_logger(__name__)
 
-_dispatcher = Dispatcher()
+_store = MockDiaryStore()
+_dispatcher = Dispatcher(DiaryService(_store), QueryService(_store))
 
 
 def get_dispatcher() -> Dispatcher:

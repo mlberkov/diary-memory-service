@@ -12,11 +12,11 @@ Files listed are *targets*. Most do not exist yet. Each row will be split into o
 ## Phase 1 — Telegram Shell and Mock Flow
 | Slice | Files / artifacts |
 | --- | --- |
-| 1.1 language & toolchain | `pyproject.toml` (Py 3.11, D-016), `.python-version`, `uv` lockfile (D-017), Ruff + Mypy + Pytest configs (D-018); `Makefile` `format`/`lint`/`typecheck`/`test`/`check`/`run`; `src/diary_rag/{config,logging,app,__main__}.py`; placeholders `adapters/telegram/`, `core/routing/`, `services/`, `storage/mock/` (with `InMemorySourceMessageStore` stub); FastAPI `/health` smoke; `tests/test_smoke.py`, `test_config.py`, `test_app_health.py`, `test_mock_store.py` |
+| 1.1 language & toolchain | `pyproject.toml` (Py 3.11, D-016), `.python-version`, `uv` lockfile (D-017), Ruff + Mypy + Pytest configs (D-018); `Makefile` `format`/`lint`/`typecheck`/`test`/`check`/`run`; `src/diary_rag/{config,logging,app,__main__}.py`; placeholders `adapters/telegram/`, `core/routing/`, `services/`, `storage/mock/`; FastAPI `/health` smoke; `tests/test_smoke.py`, `test_config.py`, `test_app_health.py` |
 | 1.2 Telegram adapter shell | `POST /telegram/webhook` (D-019) with secret-token gating; `adapters/telegram/{webhook,models,commands,reply}.py`; channel-neutral `core/routing/models.py` (`RouteKind`, `InboundMessage`, `DispatchResult`); `services/dispatcher.py` with stub handlers; tests `test_telegram_{commands,models,reply,webhook_secret,dispatch}.py`; dev-tunnel docs in `QUICKSTART.md` |
-| 1.3 mock services | `MockSourceMessageRepository`, `MockSearchRepository`, `MockEmbeddingClient`, `MockChatClient` (replaces 1.1 stub) |
-| 1.4 routing | command + heuristic routing, low-confidence clarification path |
-| 1.5 mock end-to-end | smoke run exercising `/entry` and `/ask` against mocks |
+| 1.3 mock services | `core/diary/{models,parser}.py` (channel-neutral dataclasses + ISO date parser); `storage/mock/store.py` (`MockDiaryStore` with deterministic substring search); `services/{diary_service,query_service}.py`; `Dispatcher` wires `ENTRY`/`ASK` to those services. `MockEmbeddingClient` / `MockChatClient` deferred until 3.1/4.1 sketch the real shapes |
+| 1.4 routing | heuristic plain-text routing, low-confidence clarification path |
+| 1.5 mock end-to-end | webhook smoke: `/entry` then `/ask` returns grounded-style reply with date and matched line; `tests/test_end_to_end_smoke.py` plus the curl recipe in `QUICKSTART.md` |
 
 ## Phase 2 — Durable Backend Core
 | Slice | Files / artifacts |
