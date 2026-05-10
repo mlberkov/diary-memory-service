@@ -8,10 +8,10 @@ When an item is decided, move it to `docs/decision-log.md` (next D-### id) and r
 | ~~A-2~~ | ~~Dependency manager TBD~~ | — | — | — | Closed → D-017 |
 | ~~A-3~~ | ~~Test/format/type toolchain TBD~~ | — | — | — | Closed → D-018 |
 | ~~A-4~~ | ~~Telegram transport: webhook (local-dev TBD)~~ | — | — | — | Closed → D-019 |
-| A-5 | pgvector + Postgres FTS for hybrid | Wrong scale ceiling; rework cost | Benchmark on synthetic 10k chunks | agent | Phase 3 |
-| A-6 | Hybrid merge location (DB vs app) | Latency + correctness | Prototype merge in code vs SQL | agent | Phase 3 |
-| A-7 | Sync vs async indexing | UX latency vs system complexity | Measure ingest latency on Phase 2 data | agent | Phase 3 |
-| A-8 | Embedding model & dim | Retrieval quality + storage | Eval on RU/EN diary samples | agent | Phase 3 |
+| ~~A-5~~ | ~~pgvector + Postgres FTS for hybrid~~ | — | — | — | Closed → D-024 (dense via pgvector; sparse remains A-6) |
+| A-6 | Hybrid merge location (DB vs app) | Latency + correctness | Prototype merge in code vs SQL | agent | Phase 3.3 |
+| ~~A-7~~ | ~~Sync vs async indexing~~ | — | — | — | Closed → D-024 (sync on ingest) |
+| ~~A-8~~ | ~~Embedding model & dim~~ | — | — | — | Closed → D-024 (`text-embedding-3-large` @ 3072) |
 | A-9 | Chat model | Quality, cost, fallback compatibility | Smoke + eval in Phase 4 | agent | Phase 4 |
 | A-10 | Edit/delete strategy | Data loss / duplication | Spec + small prototype | human + agent | Phase 2.5 |
 | A-11 | Entry grouping rule | Wrong split/merge of entries | Walk 10 sample sessions | human | Phase 2.3 |

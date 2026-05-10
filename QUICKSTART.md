@@ -1,7 +1,9 @@
 # Quickstart
 
-> The repository is in **early Phase 1**. The toolchain is wired and the FastAPI shell boots.
-> Telegram, ingestion, retrieval, and provider integration are still pending — see `docs/todo.md`.
+> **Milestone 1 complete.** Telegram webhook + ingest, durable PostgreSQL backend behind `DiaryRepository` (D-022),
+> idempotent ingest on `(external_chat_id, external_message_id, edit_seq)` (D-023), and sync chunk embedding
+> indexing on pgvector with `text-embedding-3-large` @ 3072 dim (D-024) are all wired. The read path still uses
+> substring match (A-29); hybrid retrieval lands in the next milestone. See `docs/todo.md` for what's next.
 
 ## Read first
 

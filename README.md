@@ -2,7 +2,7 @@
 
 Diary RAG Service for **TheyGrow** — a low-friction memory system for parents who write family and child observations in Telegram and later ask natural-language questions over them.
 
-> **Status:** early Phase 1 — toolchain wired, FastAPI service shell boots, Telegram webhook adapter accepts updates and dispatches through channel-neutral `DiaryService` / `QueryService` against an in-memory mock store. `/entry` then `/ask` returns a deterministic grounded-style reply with the matched line and its date. Durable persistence, embeddings, real retrieval, and provider integration are still pending.
+> **Status:** Milestone 1 complete (Phase 1 + Phase 2 + Phase 3.1/3.2). Telegram webhook adapter, channel-neutral `DiaryService` / `QueryService`, durable PostgreSQL backend behind `DiaryRepository` (D-022), idempotent webhook + ingest keyed on `(external_chat_id, external_message_id, edit_seq)` (D-023), and sync per-chunk embedding indexing on pgvector with `text-embedding-3-large` @ 3072 dim (D-024). The read path still uses case-insensitive substring (A-29) — hybrid retrieval, the grounded-answer pipeline, and provider hardening land in later milestones.
 
 ## What this is
 
