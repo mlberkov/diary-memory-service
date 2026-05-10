@@ -35,3 +35,8 @@ htmlcov/
 # local artifacts
 .workspaces/
 .artifacts/
+
+# Local runtime SQLite artifacts
+data/*.db
+data/*.db-shm
+data/*.db-wal
