@@ -2,7 +2,7 @@
 
 Diary RAG Service for **TheyGrow** — a low-friction memory system for parents who write family and child observations in Telegram and later ask natural-language questions over them.
 
-> **Status:** Phase 0 / early Phase 1 — source-of-truth establishment mode. Canonical docs are in place; no application code yet.
+> **Status:** early Phase 1 — toolchain wired, FastAPI service shell boots, Telegram webhook adapter accepts updates and dispatches through channel-neutral `DiaryService` / `QueryService` against an in-memory mock store. `/entry` then `/ask` returns a deterministic grounded-style reply with the matched line and its date. Durable persistence, embeddings, real retrieval, and provider integration are still pending.
 
 ## What this is
 
@@ -41,7 +41,10 @@ Core rules (from `AGENTS.md` and the canonical docs):
 - `docs/todo.md` — ordered backlog of the next slices.
 
 ### Scaffold
-- `Makefile` — placeholder targets, no real commands yet.
+- `pyproject.toml`, `.python-version`, `uv.lock` — Python 3.11 + uv project (D-016, D-017).
+- `Makefile` — `format`, `lint`, `typecheck`, `test`, `check`, `run` (D-018).
+- `src/diary_rag/` — package skeleton (`config`, `logging`, `app`, `__main__`) plus placeholder packages for `adapters/telegram`, `core/routing`, `services`, `storage/mock`.
+- `tests/` — Slice 1.1 smoke tests.
 - `.env.example` — config keys we expect to need.
 - `.gitignore` — local artifacts and secrets.
 
@@ -51,11 +54,14 @@ Core rules (from `AGENTS.md` and the canonical docs):
 - Operating contract (AGENTS, CLAUDE) populated.
 - Supporting docs populated; open items surfaced in `docs/assumptions.md`.
 - Phase-1 platform decisions locked: **Python 3.11** (D-016), **`uv`** (D-017), **Ruff + Mypy + Pytest** (D-018), **Telegram webhook transport** (D-019).
-- No application code yet.
-- Next gate: Slice 1.1 — wire the toolchain (`docs/todo.md`).
+- **Slice 1.1 done:** toolchain wired, package skeleton in place, `make check` green, FastAPI `/health` smokeable via `make run`.
+- **Slice 1.2 done:** `POST /telegram/webhook` accepts a Telegram update, fails closed without the secret header (A-26), parses `/start` `/help` `/entry` `/ask`, and returns a `sendMessage`-shaped payload.
+- **Mock diary/query contour done:** `core/diary` dataclasses + ISO date parser, `MockDiaryStore`, `DiaryService` and `QueryService`, `Dispatcher` wires `ENTRY` / `ASK` to those services. `/entry` records the raw `SourceMessage` before parsing (I-3, R-1); `/ask` returns explicit `NO_EVIDENCE` when nothing matches (I-9, R-5/R-6). New open assumptions: A-28 (ISO-only mock dates), A-29 (substring-match retrieval), A-30 (process-local mock state).
+- Next gate: Slice 1.4 — heuristic plain-text routing (`docs/todo.md`).
 
 ## How to start
 
 1. Read `AGENTS.md`, then `CLAUDE.md`.
 2. Read canonical docs in the order listed in `CLAUDE.md`.
-3. Pick the top item from `docs/todo.md` and follow `docs/RUNBOOK.md`.
+3. `uv sync --all-extras && make check` (see `QUICKSTART.md`).
+4. Pick the top item from `docs/todo.md` and follow `docs/RUNBOOK.md`.

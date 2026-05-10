@@ -20,8 +20,7 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 - **A-15. Visibility scopes**: enumerated values for `visibility_scope` are undefined. Required before Phase 8.
 
 ## Routing & UX
-- **A-16. Routing confidence threshold**: TechSpec §4 says low-confidence routing should ask for clarification. The threshold and the clarification UX are unspecified.
-- **A-17. Clarification fallback UX**: the exact Telegram interaction model for clarification is unspecified.
+*A-16 → D-020. A-17 → D-020.*
 
 ## Privacy & lifecycle
 - **A-18. Data residency**: not stated.
@@ -35,6 +34,22 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 - **A-22. Hosting target**: where the service runs (local-only MVP? managed PaaS? self-hosted VM?). Required before Phase 6.
 - **A-23. Backup strategy**: not stated. Required before Phase 7/8.
 
+## Naming & layout
+- **A-24. Python package name**: Slice 1.1 introduced `diary_rag` (PyPI distribution name `diary-rag`) as the import root. Rationale: short, channel-neutral, matches "Diary Memory Service" naming. Not yet promoted to a decision-log entry. If a different name is preferred before Phase 9 (TheyGrow integration surface, A-21), rename now while the cost is low.
+- **A-25. Health endpoint contract**: `/health` currently returns `{status, version, env}`. The full set of boot health checks (PostgreSQL connectivity, schema version, embedding-model dimension — see R-10) lands in Phase 2/3. The Slice 1.1 endpoint is a liveness probe only.
+
+## Adapter security
+- **A-26. Webhook secret enforcement**: the `/telegram/webhook` endpoint fails closed when `TELEGRAM_WEBHOOK_SECRET` is unset or mismatched (returns 401). The `X-Telegram-Bot-Api-Secret-Token` header is compared with `secrets.compare_digest`.
+
+## Mock contour (current)
+- **A-28. Mock `/entry` accepts ISO-only dates**: the date parser in `core/diary/parser.py` recognizes only `YYYY-MM-DD` on the first non-empty line. Anything else returns `INVALID_INPUT`. Precursor to A-12 (date parsing scope).
+- **A-29. Mock retrieval is case-insensitive substring match**: `MockDiaryStore.search_chunks` is the only retrieval surface; results are scoped to one `family_id` and returned in insertion order. Precursor to A-5/A-6 (hybrid retrieval design) and to the eventual `SearchRepository` interface.
+- **A-30. Mock state is process-local and non-idempotent**: `MockDiaryStore` (the default `STORAGE_BACKEND=memory` backend) lives only inside one running `make run` process; webhook retries with the same `update_id` create duplicate `SourceMessage` rows. Precursor to slice 2.4 (idempotent webhook handling) and Phase 2 durable persistence.
+- **A-31. Mock per-route persistence**: in the current in-memory contour, only ENTRY messages persist a `SourceMessage`; ASK and CLARIFY do not. This describes mock behavior only — it is not an architectural rule about durable storage. Per-route persistence semantics are an open design question for Phase 2 and are not bound by this assumption.
+
+## Local SQLite contour (current)
+- **A-32. Local SQLite as the dev-only durable seam**: with `STORAGE_BACKEND=sqlite`, the service writes through `SqliteDiaryStore` to a single file at `SQLITE_PATH` (default `./data/diary.db`). Schema is bootstrapped on each boot via `CREATE TABLE IF NOT EXISTS`; no migration tool is wired in this slice. Retrieval reuses the same case-insensitive substring contract as the mock (A-29), now executed in SQL with `lower(chunk_text) LIKE ?`. Webhook idempotency (R-2) is unchanged: duplicate `update_id` retries still produce duplicate `SourceMessage` rows. This is a dev-only contour; the canonical durable target remains PostgreSQL (D-007). The Postgres swap is a follow-up packet behind the same `DiaryRepository` Protocol.
+
 ---
 
 ## Recently closed
@@ -42,3 +57,5 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 - A-2 → D-017 (`uv` as dependency and environment manager).
 - A-3 → D-018 (Ruff + Mypy + Pytest as baseline toolchain).
 - A-4 → D-019 (Telegram webhook transport, dev via tunnel).
+- A-16 → D-020 (heuristic routing rule set with explicit confidence labels).
+- A-17 → D-020 (CLARIFY reply naming both `/entry` and `/ask`).
