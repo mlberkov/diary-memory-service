@@ -264,6 +264,12 @@ class SqliteDiaryStore:
             "postgres is the canonical durable backend (D-022, D-029)"
         )
 
+    def list_recent_drafts(self, family_id: str, *, limit: int) -> list[SourceMessage]:
+        raise NotImplementedError(
+            "sqlite drafts recall not supported; "
+            "postgres is the canonical durable backend (D-022, D-030)"
+        )
+
     def get_diary_entry_by_source_message_id(self, source_message_id: str) -> DiaryEntry | None:
         with self._connect() as conn:
             row = conn.execute(

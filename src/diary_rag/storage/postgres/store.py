@@ -251,6 +251,25 @@ class PostgresDiaryStore:
             rows = cur.fetchall()
         return [_row_to_source(row) for row in rows]
 
+    def list_recent_drafts(self, family_id: str, *, limit: int) -> list[SourceMessage]:
+        if not family_id:
+            raise ValueError("family_id is required (Runtime invariant R-3)")
+        if limit < 1:
+            raise ValueError("limit must be >= 1")
+        with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                "SELECT source_message_id, family_id, author_user_id, "
+                "       external_chat_id, external_user_id, external_message_id, "
+                "       edit_seq, raw_text, detected_route, created_at "
+                "  FROM source_messages "
+                " WHERE family_id = %s AND detected_route = 'draft' "
+                " ORDER BY created_at DESC, source_message_id DESC "
+                " LIMIT %s",
+                (family_id, limit),
+            )
+            rows = cur.fetchall()
+        return [_row_to_source(row) for row in rows]
+
     def get_diary_entry_by_source_message_id(self, source_message_id: str) -> DiaryEntry | None:
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(

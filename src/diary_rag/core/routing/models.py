@@ -13,6 +13,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
+    from diary_rag.core.diary.models import SourceMessage
     from diary_rag.core.export.models import ExportPayload
 
 RouteSource = Literal["command", "heuristic"]
@@ -24,6 +25,7 @@ class RouteKind(StrEnum):
     ENTRY = "entry"
     ASK = "ask"
     DRAFT = "draft"
+    DRAFTS = "drafts"
     EXPORT = "export"
     CLARIFY = "clarify"
     UNKNOWN = "unknown"
@@ -75,11 +77,15 @@ class DispatchResult:
 
     ``document`` is set when a handler produces a channel-neutral file
     payload that the adapter should deliver out-of-band (e.g. Telegram
-    ``sendDocument``). When ``document`` is ``None`` the adapter delivers
-    ``reply_text`` only.
+    ``sendDocument``). ``drafts`` carries a list of source messages that
+    the adapter should render as a combined ordered response (one
+    transport message by default; multi-message split only when forced
+    by the transport size cap). When both are ``None`` the adapter
+    delivers ``reply_text`` only.
     """
 
     reply_text: str
     route: RouteKind
     metadata: Mapping[str, str] = field(default_factory=dict)
     document: ExportPayload | None = None
+    drafts: list[SourceMessage] | None = None

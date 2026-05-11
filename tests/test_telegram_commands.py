@@ -13,9 +13,9 @@ from diary_rag.core.routing import RouteKind
     [
         ("/start", RouteKind.START),
         ("/help", RouteKind.HELP),
-        ("/entry", RouteKind.ENTRY),
-        ("/draft", RouteKind.DRAFT),
+        ("/note", RouteKind.ENTRY),
         ("/ask", RouteKind.ASK),
+        ("/drafts", RouteKind.DRAFTS),
     ],
 )
 def test_parse_command_recognizes_each_supported_command(
@@ -26,14 +26,32 @@ def test_parse_command_recognizes_each_supported_command(
     assert payload == ""
 
 
-def test_parse_command_returns_payload_after_draft() -> None:
+def test_parse_command_drafts_returns_integer_payload() -> None:
+    route, payload = parse_command("/drafts 5")
+    assert route is RouteKind.DRAFTS
+    assert payload == "5"
+
+
+def test_parse_command_drafts_without_argument_yields_empty_payload() -> None:
+    route, payload = parse_command("/drafts")
+    assert route is RouteKind.DRAFTS
+    assert payload == ""
+
+
+def test_parse_command_old_draft_token_no_longer_maps_to_draft_route() -> None:
     route, payload = parse_command("/draft groceries: milk, bread")
-    assert route is RouteKind.DRAFT
-    assert payload == "groceries: milk, bread"
+    assert route is RouteKind.UNKNOWN
+    assert payload == "/draft groceries: milk, bread"
+
+
+def test_parse_command_old_entry_token_no_longer_maps_to_entry_route() -> None:
+    route, payload = parse_command("/entry 2026-05-09\nFoo")
+    assert route is RouteKind.UNKNOWN
+    assert payload == "/entry 2026-05-09\nFoo"
 
 
 def test_parse_command_returns_payload_after_command() -> None:
-    route, payload = parse_command("/entry 2026-05-09\nFoo")
+    route, payload = parse_command("/note 2026-05-09\nFoo")
     assert route is RouteKind.ENTRY
     assert payload == "2026-05-09\nFoo"
 
@@ -45,7 +63,7 @@ def test_parse_command_strips_bot_username_suffix() -> None:
 
 
 def test_parse_command_handles_newline_after_command() -> None:
-    route, payload = parse_command("/entry\n2026-05-09\nFoo")
+    route, payload = parse_command("/note\n2026-05-09\nFoo")
     assert route is RouteKind.ENTRY
     assert payload == "2026-05-09\nFoo"
 

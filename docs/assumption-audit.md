@@ -30,7 +30,7 @@ When an item is decided, move it to `docs/decision-log.md` (next D-### id) and r
 | A-24 | Python package name `diary_rag` | Rename cost grows over time | Confirm before Phase 9 integration surface | human | Phase 9 |
 | A-25 | `/health` is liveness-only at 1.1 | Misleading readiness signal | Replace with R-10 readiness checks | agent | Phase 2/3 |
 | A-26 | Webhook fails closed when `TELEGRAM_WEBHOOK_SECRET` is unset or mismatched | Open webhook accepts spoofed traffic | Verified in Slice 1.2 secret-header tests | agent | end of Phase 1 |
-| A-28 | Mock `/entry` accepts ISO-only `YYYY-MM-DD` on first line | Demos misclassify locale dates / relative dates as invalid | Replaced by A-12 decision (Phase 2.3) | agent | Phase 2.3 |
+| A-28 | Mock `/note` accepts ISO-only `YYYY-MM-DD` on first line | Demos misclassify locale dates / relative dates as invalid | Replaced by A-12 decision (Phase 2.3) | agent | Phase 2.3 |
 | ~~A-29~~ | ~~Mock retrieval is case-insensitive substring match~~ | — | — | — | Closed → D-025 (baseline hybrid retrieval lands) |
 | ~~A-30~~ | ~~Mock state is process-local and non-idempotent~~ | — | — | — | Closed → D-023 |
 | A-34 | No migration tool; local schema upgrades are destructive | Production schema evolution unsafe; dev volume drops feel like data loss | Document destructive upgrade in RUNBOOK; revisit before non-local deploy | agent | before prod |

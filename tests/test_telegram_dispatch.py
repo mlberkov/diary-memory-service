@@ -68,7 +68,7 @@ def test_dispatch_called_with_route_start_for_start_command() -> None:
 
 def test_dispatch_called_with_route_entry_and_payload() -> None:
     client, fake = _client_with_fake()
-    response = _post(client, _message_update("/entry 2026-05-09\nFoo"))
+    response = _post(client, _message_update("/note 2026-05-09\nFoo"))
     assert response.status_code == 200
     assert len(fake.calls) == 1
     assert fake.calls[0].route is RouteKind.ENTRY
@@ -109,18 +109,30 @@ def test_dispatch_called_with_route_draft_for_ambiguous_plain_text() -> None:
     assert fake.calls[0].payload == "recipe yesterday"
 
 
-def test_dispatch_called_with_route_draft_for_explicit_draft_command() -> None:
+def test_dispatch_called_with_route_drafts_for_drafts_command() -> None:
+    client, fake = _client_with_fake()
+    response = _post(client, _message_update("/drafts 3"))
+    assert response.status_code == 200
+    assert fake.calls[0].route is RouteKind.DRAFTS
+    assert fake.calls[0].route_source == "command"
+    assert fake.calls[0].payload == "3"
+
+
+def test_dispatch_old_draft_command_is_treated_as_unknown() -> None:
     client, fake = _client_with_fake()
     response = _post(client, _message_update("/draft groceries: milk, bread"))
     assert response.status_code == 200
+    # ``/draft`` is no longer a recognised command token; with a non-empty body
+    # that doesn't look like an entry or question, the classifier routes to DRAFT
+    # under the no-command-→-draft floor.
     assert fake.calls[0].route is RouteKind.DRAFT
-    assert fake.calls[0].route_source == "command"
-    assert fake.calls[0].payload == "groceries: milk, bread"
+    assert fake.calls[0].route_source == "heuristic"
+    assert fake.calls[0].payload == "/draft groceries: milk, bread"
 
 
 def test_command_routing_wins_over_heuristic_when_command_present() -> None:
     client, fake = _client_with_fake()
-    response = _post(client, _message_update("/entry what is this?"))
+    response = _post(client, _message_update("/note what is this?"))
     assert response.status_code == 200
     assert fake.calls[0].route is RouteKind.ENTRY
     assert fake.calls[0].route_source == "command"
@@ -152,7 +164,7 @@ def test_dispatch_edit_seq_defaults_to_zero_when_no_edit_date() -> None:
 
 def test_dispatch_edit_seq_is_edit_date_when_present() -> None:
     client, fake = _client_with_fake()
-    payload = _message_update("/entry 2026-05-09\nFoo")
+    payload = _message_update("/note 2026-05-09\nFoo")
     payload["message"]["edit_date"] = 1715300100
     response = _post(client, payload)
     assert response.status_code == 200

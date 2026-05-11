@@ -79,7 +79,7 @@ curl -X POST http://127.0.0.1:8000/telegram/webhook \
 # → {"method":"sendMessage","chat_id":42,"text":"Welcome — diary mode. ..."}
 ```
 
-#### Mock diary smoke (`/entry` then `/ask`)
+#### Mock diary smoke (`/note` then `/ask`)
 
 The mock store lives in process memory: state survives across requests within one `make run` and resets on restart.
 
@@ -88,7 +88,7 @@ The mock store lives in process memory: state survives across requests within on
 curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
-  -d '{"update_id":1,"message":{"message_id":1,"date":1715300000,"chat":{"id":42},"from":{"id":7},"text":"/entry 2026-05-09\nHad a calm morning\nTried a new book"}}'
+  -d '{"update_id":1,"message":{"message_id":1,"date":1715300000,"chat":{"id":42},"from":{"id":7},"text":"/note 2026-05-09\nHad a calm morning\nTried a new book"}}'
 # → {"method":"sendMessage","chat_id":42,"text":"Saved 2 events for 2026-05-09."}
 
 # 2. Ask — baseline hybrid retrieval (dense + sparse + RRF) returns the matching line with its date
@@ -109,11 +109,11 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
 curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
-  -d '{"update_id":4,"message":{"message_id":4,"date":1715300300,"chat":{"id":42},"from":{"id":7},"text":"/entry not-a-date\nfoo"}}'
-# → text: "Mock /entry needs an ISO date (YYYY-MM-DD) on the first line. Got: 'not-a-date'."
+  -d '{"update_id":4,"message":{"message_id":4,"date":1715300300,"chat":{"id":42},"from":{"id":7},"text":"/note not-a-date\nfoo"}}'
+# → text: "Mock /note needs an ISO date (YYYY-MM-DD) on the first line. Got: 'not-a-date'."
 ```
 
-#### Heuristic plain-text routing (`/entry` / `/ask` optional)
+#### Heuristic plain-text routing (`/note` / `/ask` optional)
 
 Plain text without a slash command is classified by `core.routing.classifier`: a dated body becomes an entry, a question becomes an ask, anything else gets a clarification reply. Heuristic-routed replies carry an explicit marker so the user can see what happened (D-006, R-6, R-11).
 
@@ -123,7 +123,7 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
   -d '{"update_id":5,"message":{"message_id":5,"date":1715300400,"chat":{"id":42},"from":{"id":7},"text":"2026-05-10\nLearned a new recipe\nWalked 5km"}}'
-# → text: "Saved 2 events for 2026-05-10.\n(routed as entry — send /entry next time to be explicit)"
+# → text: "Saved 2 events for 2026-05-10.\n(routed as note — send /note next time to be explicit)"
 
 # 6. Plain question — heuristic ASK (terminal "?" stripped before hybrid retrieval)
 curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
@@ -137,7 +137,7 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
   -d '{"update_id":7,"message":{"message_id":7,"date":1715300600,"chat":{"id":42},"from":{"id":7},"text":"recipe yesterday"}}'
-# → text: "I couldn't tell if that's a diary entry or a question. Send /entry <YYYY-MM-DD> on the first line then your events to record it, or /ask <your question> to query."
+# → text: "I couldn't tell if that's a diary entry or a question. Send /note <YYYY-MM-DD> on the first line then your events to record it, or /ask <your question> to query."
 ```
 
 #### Durable local store (Postgres)
@@ -164,7 +164,7 @@ make run                      # uvicorn boots; first call bootstraps schema
 curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
-  -d '{"update_id":1,"message":{"message_id":1,"date":1715300000,"chat":{"id":42},"from":{"id":7},"text":"/entry 2026-05-09\nWalked the dog\nTried a new book"}}'
+  -d '{"update_id":1,"message":{"message_id":1,"date":1715300000,"chat":{"id":42},"from":{"id":7},"text":"/note 2026-05-09\nWalked the dog\nTried a new book"}}'
 # → text: "Saved 2 events for 2026-05-09."
 
 # 3. Verify rows landed in Postgres
@@ -220,7 +220,7 @@ make run    # boots uvicorn, creates ./data/diary.db on first call
 curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
-  -d '{"update_id":1,"message":{"message_id":1,"date":1715300000,"chat":{"id":42},"from":{"id":7},"text":"/entry 2026-05-09\nWalked the dog\nTried a new book"}}'
+  -d '{"update_id":1,"message":{"message_id":1,"date":1715300000,"chat":{"id":42},"from":{"id":7},"text":"/note 2026-05-09\nWalked the dog\nTried a new book"}}'
 # → text: "Saved 2 events for 2026-05-09."
 
 # 2. Verify rows landed in the SQLite file

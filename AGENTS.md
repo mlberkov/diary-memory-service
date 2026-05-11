@@ -65,7 +65,7 @@ Core service rule:
 3. Each diary event line becomes a separate chunk.
 4. Answers must be grounded in retrieved evidence.
 5. Hybrid retrieval is required.
-6. Explicit `/entry` and `/ask` commands are preferred over heuristic-only routing.
+6. Explicit `/note` and `/ask` commands are preferred over heuristic-only routing.
 7. Telegram-specific logic must not leak into the core domain model.
 8. Optional AI enrichments must be feature-flagged.
 9. No silent fallback may pretend that retrieval succeeded.

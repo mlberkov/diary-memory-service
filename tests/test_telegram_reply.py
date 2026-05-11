@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from diary_rag.adapters.embeddings import MockEmbeddingClient
 from diary_rag.adapters.telegram.reply import build_send_message_payload
+from diary_rag.config import Settings
 from diary_rag.core.routing import InboundMessage, RouteKind, RouteSource
 from diary_rag.services import DiaryService, Dispatcher, ExportService, QueryService
 from diary_rag.storage.mock import MockDiaryStore
@@ -30,6 +31,10 @@ def _inbound(
     )
 
 
+def _settings() -> Settings:
+    return Settings(_env_file=None)  # type: ignore[call-arg]
+
+
 def _dispatcher() -> Dispatcher:
     store = MockDiaryStore()
     embed = MockEmbeddingClient()
@@ -37,6 +42,7 @@ def _dispatcher() -> Dispatcher:
         DiaryService(store, embedding_client=embed),
         QueryService(store, embed),
         ExportService(store),
+        _settings(),
     )
 
 
@@ -57,27 +63,39 @@ def test_dispatcher_start_reply_mentions_diary_mode() -> None:
 def test_dispatcher_help_reply_lists_supported_commands() -> None:
     result = _dispatcher().dispatch(_inbound(RouteKind.HELP, "/help"))
     text = result.reply_text
-    for token in ("/start", "/help", "/entry", "/draft", "/ask"):
+    for token in ("/start", "/help", "/note", "/ask", "/drafts"):
         assert token in text
+    assert "/draft " not in text  # the explicit /draft command is gone
+    assert "/draft," not in text
+    assert "/entry" not in text  # the old /entry command is gone (D-031)
+
+
+def test_dispatcher_help_reply_does_not_mention_removed_draft_command() -> None:
+    result = _dispatcher().dispatch(_inbound(RouteKind.HELP, "/help"))
+    # ``/draft`` as a standalone command token (not the lifecycle word "draft")
+    # must no longer be advertised in the help text.
+    assert "/draft " not in result.reply_text
+    assert "/draft," not in result.reply_text
 
 
 def test_dispatcher_unknown_reply_points_at_help() -> None:
     result = _dispatcher().dispatch(_inbound(RouteKind.UNKNOWN, "hello"))
     text = result.reply_text
-    assert "/entry" in text or "/ask" in text
+    assert "/note" in text or "/ask" in text or "/drafts" in text
 
 
-def test_dispatcher_draft_reply_states_stored_as_draft() -> None:
+def test_dispatcher_no_command_default_draft_stores_via_heuristic() -> None:
     result = _dispatcher().dispatch(
         _inbound(
             RouteKind.DRAFT,
-            text="/draft just thinking out loud",
+            text="just thinking out loud",
             payload="just thinking out loud",
+            route_source="heuristic",
         )
     )
     assert result.route is RouteKind.DRAFT
     assert result.reply_text.startswith("Stored as draft")
-    assert "/entry" in result.reply_text
+    assert "/note" in result.reply_text
     assert result.metadata["effective_path"] == "fresh"
     assert result.metadata["fallback"] == "none"
 
@@ -86,8 +104,9 @@ def test_dispatcher_draft_reply_marks_replay_on_repeated_delivery() -> None:
     dispatcher = _dispatcher()
     msg = _inbound(
         RouteKind.DRAFT,
-        text="/draft just thinking out loud",
+        text="just thinking out loud",
         payload="just thinking out loud",
+        route_source="heuristic",
     )
     first = dispatcher.dispatch(msg)
     second = dispatcher.dispatch(msg)
@@ -117,7 +136,7 @@ def test_dispatcher_clarify_reply_explains_both_commands() -> None:
         _inbound(RouteKind.CLARIFY, "recipe yesterday", route_source="heuristic")
     )
     assert result.route is RouteKind.CLARIFY
-    assert "/entry" in result.reply_text
+    assert "/note" in result.reply_text
     assert "/ask" in result.reply_text
     assert result.metadata["route_source"] == "heuristic"
 
@@ -131,7 +150,7 @@ def test_dispatcher_appends_heuristic_marker_to_entry_reply() -> None:
             route_source="heuristic",
         )
     )
-    assert result.reply_text.endswith("(routed as entry — send /entry next time to be explicit)")
+    assert result.reply_text.endswith("(routed as note — send /note next time to be explicit)")
     assert result.metadata["route_source"] == "heuristic"
 
 
@@ -160,9 +179,9 @@ def test_command_routed_entry_reply_has_no_heuristic_marker() -> None:
     result = _dispatcher().dispatch(
         _inbound(
             RouteKind.ENTRY,
-            text="/entry 2026-05-10\nA",
+            text="/note 2026-05-10\nA",
             payload="2026-05-10\nA",
         )
     )
-    assert "routed as entry" not in result.reply_text
+    assert "routed as note" not in result.reply_text
     assert result.metadata["route_source"] == "command"

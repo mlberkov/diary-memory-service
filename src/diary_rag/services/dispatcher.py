@@ -8,9 +8,15 @@ fixed strings appropriate for the current phase.
 
 Draft floor (D-027 / R-13): the ``DRAFT`` path persists the inbound
 raw text via ``DiaryService.ingest`` and stops there — no parse,
-chunk, embed, or index. ``DRAFT`` covers both the explicit ``/draft``
-command and the no-command default, so no plain-text message is
-silently discarded.
+chunk, embed, or index. ``DRAFT`` is set by the no-command default for
+plain text, so no plain-text message is silently discarded.
+
+``DRAFTS`` (D-030) recalls the most-recent full raw drafts for the
+family. The dispatcher parses the optional ``N`` argument, clamps it
+to ``drafts_max_limit``, asks the diary service for the rows, and
+returns a header plus the drafts payload. The adapter renders the
+combined response as one transport message by default, splitting only
+when the transport size cap forces it.
 
 Reply wording lives next to the dispatcher (channel-neutral) so the
 Telegram adapter remains a transport layer (Invariant I-1).
@@ -25,6 +31,7 @@ rather than a 500.
 
 from __future__ import annotations
 
+from diary_rag.config import Settings
 from diary_rag.core.diary import AnswerResult, FallbackMode, IngestResult
 from diary_rag.core.export import ExportFormat
 from diary_rag.core.routing import DispatchResult, InboundMessage, RouteKind
@@ -36,32 +43,34 @@ from diary_rag.services.query_service import QueryService
 log = get_logger(__name__)
 
 _REPLY_START = (
-    "Welcome — diary mode. Use /entry to record, /draft to save raw text "
-    "without parsing, or /ask to query."
+    "Welcome — diary mode. Use /note to record, /ask to query, or /drafts to recall "
+    "recent drafts. Plain text without a command is stored as a draft so nothing is lost."
 )
 _REPLY_HELP = (
-    "Commands: /start, /help, /entry, /draft, /ask. Plain text without a "
-    "command is stored as a draft so nothing is lost."
+    "Commands: /start, /help, /note, /ask, /drafts, /export. Plain text without a "
+    "command is stored as a draft."
 )
-_REPLY_UNKNOWN = "I haven't been taught how to handle that yet — use /entry, /draft, or /ask."
+_REPLY_UNKNOWN = "I haven't been taught how to handle that yet — use /note, /ask, or /drafts."
 _REPLY_CLARIFY = (
     "I couldn't tell if that's a diary entry or a question. "
-    "Send /entry <YYYY-MM-DD> on the first line then your events to record it, "
+    "Send /note <YYYY-MM-DD> on the first line then your events to record it, "
     "or /ask <your question> to query."
 )
 _REPLY_EXPORT_USAGE = "Usage: /export json | /export txt — pick a format."
-_HEURISTIC_MARKER_ENTRY = "(routed as entry — send /entry next time to be explicit)"
+_REPLY_DRAFTS_USAGE = "Usage: /drafts [N]. N must be a positive integer."
+_REPLY_DRAFTS_EMPTY = "No drafts to show."
+_HEURISTIC_MARKER_ENTRY = "(routed as note — send /note next time to be explicit)"
 _HEURISTIC_MARKER_ASK = "(routed as question — send /ask next time to be explicit)"
 _DRAFT_REPLY_PREFIX = "Stored as draft"
 _DRAFT_REPLY_HINT = (
-    "Send /entry <YYYY-MM-DD> on the first line to commit it as a note, " "or /ask to query."
+    "Send /note <YYYY-MM-DD> on the first line to commit it as a note, or /ask to query."
 )
 
 
 def _format_ingest_reply(result: IngestResult) -> str:
     if result.fallback is FallbackMode.INVALID_INPUT:
         got = result.invalid_first_line or ""
-        return f"Mock /entry needs an ISO date (YYYY-MM-DD) on the first line. Got: '{got}'."
+        return f"Mock /note needs an ISO date (YYYY-MM-DD) on the first line. Got: '{got}'."
     assert result.entry_date is not None
     if result.events_count == 0:
         return f"Saved {result.entry_date.isoformat()} with no event lines."
@@ -94,6 +103,25 @@ def _append_marker(reply: str, marker: str) -> str:
     return f"{reply}\n{marker}"
 
 
+def _format_drafts_header(*, returned: int, requested: int, explicit: bool, max_limit: int) -> str:
+    plural = "draft" if returned == 1 else "drafts"
+    if not explicit:
+        # No explicit N — user did not assert an expectation; just state what we show.
+        return f"Most recent {returned} {plural}:"
+    if returned == requested:
+        return f"Most recent {returned} {plural}:"
+    if returned < requested:
+        # Either availability is below the request, or the cap is below the
+        # request. The "all available" framing wins when availability is the
+        # binding constraint; otherwise the cap is named.
+        if returned < max_limit:
+            return f"Showing all {returned} {plural} (you asked for {requested})."
+        # returned == max_limit < requested
+        return f"Showing the {returned} most recent {plural} (you asked for {requested})."
+    # returned > requested should not happen — fall back to the simple form.
+    return f"Most recent {returned} {plural}:"
+
+
 class Dispatcher:
     """Maps an :class:`InboundMessage` to a :class:`DispatchResult`."""
 
@@ -102,10 +130,12 @@ class Dispatcher:
         diary: DiaryService,
         query: QueryService,
         export: ExportService,
+        settings: Settings,
     ) -> None:
         self._diary = diary
         self._query = query
         self._export = export
+        self._settings = settings
 
     def dispatch(self, message: InboundMessage) -> DispatchResult:
         route = message.route
@@ -165,6 +195,8 @@ class Dispatcher:
                     "route_source": message.route_source,
                 },
             )
+        if route is RouteKind.DRAFTS:
+            return self._dispatch_drafts(message)
         if route is RouteKind.EXPORT:
             return self._dispatch_export(message)
         if route is RouteKind.CLARIFY:
@@ -174,6 +206,81 @@ class Dispatcher:
                 metadata={"route_source": message.route_source},
             )
         return DispatchResult(reply_text=_REPLY_UNKNOWN, route=RouteKind.UNKNOWN)
+
+    def _dispatch_drafts(self, message: InboundMessage) -> DispatchResult:
+        payload = message.payload.strip()
+        requested: int
+        if not payload:
+            requested = self._settings.drafts_default_limit
+            explicit = False
+        else:
+            try:
+                requested = int(payload)
+            except ValueError:
+                log.info(
+                    "drafts.usage_error chat_id=%s payload=%r",
+                    message.external_chat_id,
+                    message.payload,
+                )
+                return DispatchResult(
+                    reply_text=_REPLY_DRAFTS_USAGE,
+                    route=RouteKind.DRAFTS,
+                    metadata={
+                        "fallback": FallbackMode.INVALID_INPUT.value,
+                        "route_source": message.route_source,
+                    },
+                )
+            if requested < 1:
+                log.info(
+                    "drafts.usage_error chat_id=%s payload=%r",
+                    message.external_chat_id,
+                    message.payload,
+                )
+                return DispatchResult(
+                    reply_text=_REPLY_DRAFTS_USAGE,
+                    route=RouteKind.DRAFTS,
+                    metadata={
+                        "fallback": FallbackMode.INVALID_INPUT.value,
+                        "route_source": message.route_source,
+                    },
+                )
+            explicit = True
+
+        max_limit = self._settings.drafts_max_limit
+        effective_limit = min(requested, max_limit)
+        family_id = message.external_chat_id
+        drafts = self._diary.list_recent_drafts(family_id, limit=effective_limit)
+        returned = len(drafts)
+
+        if returned == 0:
+            return DispatchResult(
+                reply_text=_REPLY_DRAFTS_EMPTY,
+                route=RouteKind.DRAFTS,
+                metadata={
+                    "fallback": FallbackMode.NONE.value,
+                    "route_source": message.route_source,
+                    "requested": str(requested),
+                    "returned": "0",
+                },
+            )
+
+        header = _format_drafts_header(
+            returned=returned,
+            requested=requested,
+            explicit=explicit,
+            max_limit=max_limit,
+        )
+        return DispatchResult(
+            reply_text=header,
+            route=RouteKind.DRAFTS,
+            metadata={
+                "fallback": FallbackMode.NONE.value,
+                "route_source": message.route_source,
+                "requested": str(requested),
+                "returned": str(returned),
+            },
+            drafts=drafts,
+        )
 
     def _dispatch_export(self, message: InboundMessage) -> DispatchResult:
         arg = message.payload.strip().lower()

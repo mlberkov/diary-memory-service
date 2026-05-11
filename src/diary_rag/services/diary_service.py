@@ -7,11 +7,10 @@ per event line (I-5). Authorship and family scope are carried through
 (I-6, I-7).
 
 Draft floor (D-027 / R-13): when the inbound route is
-``RouteKind.DRAFT`` — either an explicit ``/draft`` or the no-command
-default — the source row is committed and the service returns without
-parsing, chunking, or embedding. Drafts can be promoted to notes later
-from the persisted raw text (I-12); promotion mechanics are an open
-follow-up (A-38).
+``RouteKind.DRAFT`` — set by the no-command default for plain text —
+the source row is committed and the service returns without parsing,
+chunking, or embedding. Drafts can be recalled via ``/drafts`` (D-030)
+but are not note-candidates and have no promotion path.
 
 Idempotency (R-2 / D-023): the source row is committed via
 ``DiaryRepository.get_or_create_source_message`` keyed on
@@ -64,7 +63,7 @@ def _first_line(text: str) -> str:
 
 
 class DiaryService:
-    """Ingests an ``InboundMessage`` carrying a ``/entry`` payload."""
+    """Ingests an ``InboundMessage`` carrying a ``/note`` payload."""
 
     def __init__(
         self,
@@ -201,6 +200,24 @@ class DiaryService:
             len(chunks),
             client.dimension,
         )
+
+    def list_recent_drafts(self, family_id: str, *, limit: int) -> list[SourceMessage]:
+        """Return the most recent ``RouteKind.DRAFT`` source messages for a family.
+
+        Family-scoped, ordered most-recent-first, capped at ``limit``.
+        Read-only; no side effects. The dispatcher validates ``limit``;
+        the assert below is defensive.
+        """
+        if limit < 1:
+            raise ValueError("limit must be >= 1")
+        drafts = self._store.list_recent_drafts(family_id, limit=limit)
+        log.info(
+            "drafts.recalled family_id=%s requested=%d returned=%d",
+            family_id,
+            limit,
+            len(drafts),
+        )
+        return drafts
 
     def _reconstruct_result(self, source: SourceMessage) -> IngestResult:
         """Rebuild the original ``IngestResult`` from persisted state (R-2)."""

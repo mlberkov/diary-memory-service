@@ -59,6 +59,16 @@ class DiaryRepository(Protocol):
         ingest-only) raise ``NotImplementedError`` (D-029).
         """
 
+    def list_recent_drafts(self, family_id: str, *, limit: int) -> list[SourceMessage]:
+        """Return the most recent draft source messages for a family.
+
+        Filter: ``detected_route == RouteKind.DRAFT``. Order:
+        ``(created_at DESC, source_message_id DESC)``. Family scoping is
+        mandatory (I-7); ``limit`` must be ``>= 1``. Backends without
+        durable parity (SQLite is opt-in ingest-only) raise
+        ``NotImplementedError``.
+        """
+
     def get_or_create_source_message(self, source: SourceMessage) -> tuple[SourceMessage, bool]:
         """Idempotent persist (R-2, D-023).
 
