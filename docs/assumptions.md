@@ -5,8 +5,7 @@ Not yet locked. Each item must either be promoted to `docs/decision-log.md` (wit
 Add new items here the moment one is identified. Do not let assumptions live only in code or chat.
 
 ## Storage & search
-*A-5 → D-024. A-7 → D-024. A-8 → D-024.*
-- **A-6. Hybrid retrieval implementation**: where dense and sparse signals merge (DB-side, app-side, or external) is undecided. Required before Phase 3.3 (Phase 3.1+3.2 ship without a read-path change — D-024).
+*A-5 → D-024. A-6 → D-025. A-7 → D-024. A-8 → D-024.*
 - **A-9. Chat model**: `CHAT_MODEL` env var is empty. Specific model undecided. Required before Phase 4.
 
 ## Domain semantics
@@ -41,7 +40,7 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 
 ## Mock contour (current)
 - **A-28. Mock `/entry` accepts ISO-only dates**: the date parser in `core/diary/parser.py` recognizes only `YYYY-MM-DD` on the first non-empty line. Anything else returns `INVALID_INPUT`. Precursor to A-12 (date parsing scope).
-- **A-29. Mock retrieval is case-insensitive substring match**: `MockDiaryStore.search_chunks` is the only retrieval surface; results are scoped to one `family_id` and returned in insertion order. Precursor to A-5/A-6 (hybrid retrieval design) and to the eventual `SearchRepository` interface.
+*A-29 → D-025.*
 *A-30 → D-023.*
 - **A-31. Mock per-route persistence**: in the current in-memory contour, only ENTRY messages persist a `SourceMessage`; ASK and CLARIFY do not. This describes mock behavior only — it is not an architectural rule about durable storage. Per-route persistence semantics are an open design question for Phase 2 and are not bound by this assumption.
 
@@ -53,7 +52,11 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 
 ## Phase 3.1+3.2 indexing contour (current)
 - **A-35. Sync indexing, no auto-retry**: `DiaryService.ingest` calls the `EmbeddingClient` synchronously after `save_event_chunks` commits (D-024). On provider failure the chunks remain persisted, `embedding_status` flips to `failed`, and zero `embedding_records` are written for that source; the ingest result still returns `FallbackMode.NONE` (raw + chunks survived — I-2, I-3). Failed embeddings stay failed; replay (R-2) does not retry. Reconciliation for failed rows is deferred to a future Phase-6 packet that will introduce bounded retries and a dead-letter strategy. The SQL probe `SELECT chunk_id FROM event_chunks WHERE embedding_status='failed'` is the operator inspection surface until then.
-- **A-36. 3072-dim ANN-index strategy is open**: pgvector's HNSW and IVFFlat indexes are capped at 2000 dimensions, so the canonical `vector(3072)` column committed by D-024 cannot be ANN-indexed in pgvector ≥ 0.7. This is acceptable for Phase 3.1+3.2 because the read path does not change (substring `LIKE`, A-29). The Phase-3.3 hybrid-retrieval packet must pick among: exact (sequential) dense scan within family-scoped candidate sets; `halfvec(3072)` + HNSW (pgvector ≥ 0.7) with a small precision loss; or another approach. External vector DBs are rejected on I-2 grounds.
+*A-36 → D-025 (replaced by A-36b — see below).*
+
+## Phase 3.3 baseline-hybrid contour (current)
+- **A-36b. 3072-dim ANN-index strategy remains open**: D-025 ships the dense leg as an exact family-scoped sequential scan over `vector(3072)`, which is correct at current diary scale and requires no schema churn. pgvector's HNSW / IVFFlat still cap at 2000 dim, so when corpus size demands ANN the choice is between `halfvec(3072)` + HNSW (small precision loss) or another approach. External vector DBs remain rejected on I-2 grounds. Revisit in the next quality-decision packet alongside BM25 / reranker / Qdrant evaluation.
+- **A-37. Sparse text-search dictionary is `simple`**: the generated `event_chunks.chunk_text_tsv` column uses `to_tsvector('simple', chunk_text)` (D-025). 'simple' avoids stemming and stopword removal — diary content may mix Russian and English, and 'simple' treats both symmetrically without committing to a stemmer that would tokenize one language worse than the other. Multilingual sparse tuning belongs to the next quality-decision packet, not this one.
 
 ---
 
@@ -69,3 +72,6 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 - A-5 → D-024 (pgvector chosen for dense storage).
 - A-7 → D-024 (sync indexing on ingest).
 - A-8 → D-024 (`text-embedding-3-large` @ 3072 dim).
+- A-6 → D-025 (hybrid merge lives at the service layer via RRF).
+- A-29 → D-025 (substring placeholder retired; baseline hybrid retrieval lands).
+- A-36 → D-025 (replaced by A-36b; exact family-scoped scan for now, halfvec/HNSW deferred).

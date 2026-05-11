@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from diary_rag.adapters.embeddings import MockEmbeddingClient
 from diary_rag.adapters.telegram.reply import build_send_message_payload
 from diary_rag.core.routing import InboundMessage, RouteKind, RouteSource
 from diary_rag.services import DiaryService, Dispatcher, QueryService
@@ -31,7 +32,8 @@ def _inbound(
 
 def _dispatcher() -> Dispatcher:
     store = MockDiaryStore()
-    return Dispatcher(DiaryService(store), QueryService(store))
+    embed = MockEmbeddingClient()
+    return Dispatcher(DiaryService(store, embedding_client=embed), QueryService(store, embed))
 
 
 def test_reply_payload_has_send_message_envelope() -> None:

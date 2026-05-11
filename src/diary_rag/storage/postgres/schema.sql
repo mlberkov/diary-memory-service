@@ -10,13 +10,21 @@
 -- Phase 3.1+3.2 (D-024): pgvector is the dense-vector seam. ``vector(3072)``
 -- matches the production embedding contour (``text-embedding-3-large``,
 -- 3072 dim). No HNSW / IVFFlat index on the vector column — pgvector caps
--- those at 2000 dim; the 3072-dim ANN strategy is deferred to the Phase-3.3
--- packet (A-36).
+-- those at 2000 dim; for Slice 3.3 the dense leg is an exact family-scoped
+-- sequential scan against the canonical vector(3072) column. A halfvec /
+-- HNSW migration belongs to a later quality-decision packet (A-36b).
+--
+-- Slice 3.3 (D-025): baseline hybrid retrieval. ``event_chunks`` carries a
+-- generated stored ``chunk_text_tsv`` column built from
+-- ``to_tsvector('simple', chunk_text)`` plus a GIN index so the sparse
+-- (FTS) leg can run with ``websearch_to_tsquery('simple', query)``. The
+-- ``simple`` dictionary avoids a language commitment because diary
+-- content may mix English and Russian.
 --
 -- Bootstrapped by PostgresDiaryStore at __init__; safe to re-run on a fresh
--- database. Note: there is no migration tool yet (D-022/D-023/D-024), so
--- existing local volumes that pre-date these columns must be reset (drop the
--- named volume) before this DDL applies cleanly. See RUNBOOK.md.
+-- database. Note: there is no migration tool yet (D-022/D-023/D-024/D-025),
+-- so existing local volumes that pre-date these columns must be reset
+-- (drop the named volume) before this DDL applies cleanly. See RUNBOOK.md.
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -59,7 +67,9 @@ CREATE TABLE IF NOT EXISTS event_chunks (
     chunk_text        TEXT NOT NULL,
     created_at        TIMESTAMPTZ NOT NULL,
     embedding_status  TEXT NOT NULL DEFAULT 'pending'
-        CHECK (embedding_status IN ('pending','ready','failed'))
+        CHECK (embedding_status IN ('pending','ready','failed')),
+    chunk_text_tsv    tsvector GENERATED ALWAYS AS
+        (to_tsvector('simple', chunk_text)) STORED
 );
 
 CREATE INDEX IF NOT EXISTS idx_event_chunks_family_id
@@ -67,6 +77,9 @@ CREATE INDEX IF NOT EXISTS idx_event_chunks_family_id
 
 CREATE INDEX IF NOT EXISTS idx_event_chunks_source_message_id
     ON event_chunks(source_message_id);
+
+CREATE INDEX IF NOT EXISTS idx_event_chunks_chunk_text_tsv
+    ON event_chunks USING GIN (chunk_text_tsv);
 
 CREATE TABLE IF NOT EXISTS embedding_records (
     embedding_record_id TEXT PRIMARY KEY,

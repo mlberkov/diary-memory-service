@@ -1,9 +1,11 @@
 """Storage seam for the diary domain.
 
 `DiaryRepository` is the channel-neutral persistence Protocol that
-ingestion and query services depend on. The in-memory ``MockDiaryStore``,
-the local ``SqliteDiaryStore``, and the canonical ``PostgresDiaryStore``
-all satisfy it structurally.
+the ingest path depends on. The in-memory ``MockDiaryStore``, the local
+``SqliteDiaryStore``, and the canonical ``PostgresDiaryStore`` all
+satisfy it structurally. Retrieval is a separate seam
+(``SearchRepository`` in ``storage.search_repository``); a single
+backend class can satisfy both Protocols.
 
 ``get_or_create_source_message`` enforces Runtime invariant R-2 (D-023):
 repeated delivery of the same ``(external_chat_id, external_message_id,
@@ -19,6 +21,11 @@ stores the same payload as little-endian f32 ``BLOB``; the mock keeps it
 as a ``list[float]``. ``embedding_status`` is a per-chunk column so a
 SQL inspection alone tells the operator which chunks succeeded or
 failed.
+
+Slice 3.3 (D-025) replaces the substring placeholder ``search_chunks``
+with the dedicated ``SearchRepository`` seam. ``get_event_chunk`` is the
+small chunk-by-id read primitive that supports inspection and test
+assertions after that removal.
 """
 
 from __future__ import annotations
@@ -60,7 +67,13 @@ class DiaryRepository(Protocol):
     def count_event_chunks_for_source(self, source_message_id: str) -> int:
         """Count event chunks persisted for a given source."""
 
-    def search_chunks(self, family_id: str, query_text: str, top_k: int) -> list[EventChunk]: ...
+    def get_event_chunk(self, chunk_id: str) -> EventChunk | None:
+        """Fetch a single chunk by id, or ``None`` if it does not exist.
+
+        Used by the ingest path's status reconciliation and by tests
+        that need to inspect a chunk's ``embedding_status`` without
+        going through retrieval (D-025).
+        """
 
     def save_embedding_records(self, records: list[EmbeddingRecord]) -> None:
         """Persist one embedding row per chunk per model (D-024).

@@ -11,6 +11,11 @@ automated test and by any boot without an OpenAI key) or ``openai``.
 quality-first contour (``text-embedding-3-large``, 3072). The boot gate
 in ``app.py`` cross-checks these against the live ``EmbeddingClient``;
 a mismatch aborts startup (R-10).
+
+Slice 3.3 (D-025) adds two retrieval knobs (``retrieval_top_k``,
+``retrieval_candidate_k``) used by ``QueryService`` to size the dense /
+sparse candidate pools and the final evidence list returned to the
+answer pipeline.
 """
 
 from __future__ import annotations
@@ -58,6 +63,13 @@ class Settings(BaseSettings):
     embedding_model: str = Field(default="text-embedding-3-large")
     embedding_dimension: int = Field(default=3072)
     chat_model: str = Field(default="")
+
+    # Slice 3.3 (D-025) baseline-hybrid retrieval knobs. Defaults are
+    # tuning placeholders, not quality claims; the next quality-decision
+    # packet revisits them alongside BM25 / rerankers / external search
+    # backends.
+    retrieval_top_k: int = Field(default=5, ge=1)
+    retrieval_candidate_k: int = Field(default=20, ge=1)
 
     def postgres_dsn(self) -> str:
         return (

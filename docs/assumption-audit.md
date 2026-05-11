@@ -9,7 +9,7 @@ When an item is decided, move it to `docs/decision-log.md` (next D-### id) and r
 | ~~A-3~~ | ~~Test/format/type toolchain TBD~~ | — | — | — | Closed → D-018 |
 | ~~A-4~~ | ~~Telegram transport: webhook (local-dev TBD)~~ | — | — | — | Closed → D-019 |
 | ~~A-5~~ | ~~pgvector + Postgres FTS for hybrid~~ | — | — | — | Closed → D-024 (dense via pgvector; sparse remains A-6) |
-| A-6 | Hybrid merge location (DB vs app) | Latency + correctness | Prototype merge in code vs SQL | agent | Phase 3.3 |
+| ~~A-6~~ | ~~Hybrid merge location (DB vs app)~~ | — | — | — | Closed → D-025 (service-layer RRF) |
 | ~~A-7~~ | ~~Sync vs async indexing~~ | — | — | — | Closed → D-024 (sync on ingest) |
 | ~~A-8~~ | ~~Embedding model & dim~~ | — | — | — | Closed → D-024 (`text-embedding-3-large` @ 3072) |
 | A-9 | Chat model | Quality, cost, fallback compatibility | Smoke + eval in Phase 4 | agent | Phase 4 |
@@ -31,6 +31,8 @@ When an item is decided, move it to `docs/decision-log.md` (next D-### id) and r
 | A-25 | `/health` is liveness-only at 1.1 | Misleading readiness signal | Replace with R-10 readiness checks | agent | Phase 2/3 |
 | A-26 | Webhook fails closed when `TELEGRAM_WEBHOOK_SECRET` is unset or mismatched | Open webhook accepts spoofed traffic | Verified in Slice 1.2 secret-header tests | agent | end of Phase 1 |
 | A-28 | Mock `/entry` accepts ISO-only `YYYY-MM-DD` on first line | Demos misclassify locale dates / relative dates as invalid | Replaced by A-12 decision (Phase 2.3) | agent | Phase 2.3 |
-| A-29 | Mock retrieval is case-insensitive substring match | Wrong recall/precision shape sets bad expectations | Replaced by hybrid retrieval (A-5/A-6) | agent | Phase 3 |
+| ~~A-29~~ | ~~Mock retrieval is case-insensitive substring match~~ | — | — | — | Closed → D-025 (baseline hybrid retrieval lands) |
 | ~~A-30~~ | ~~Mock state is process-local and non-idempotent~~ | — | — | — | Closed → D-023 |
 | A-34 | No migration tool; local schema upgrades are destructive | Production schema evolution unsafe; dev volume drops feel like data loss | Document destructive upgrade in RUNBOOK; revisit before non-local deploy | agent | before prod |
+| A-36b | 3072-dim ANN index strategy deferred | Latency at scale once corpus grows past exact-scan budget | Next quality-decision packet: halfvec(3072)+HNSW vs other | agent | next quality-decision packet |
+| A-37 | Sparse FTS dictionary `simple` (no stemming) | Recall on inflected forms is lower than `english`/`russian` stemming would give | Revisit alongside multilingual tuning | agent | next quality-decision packet |

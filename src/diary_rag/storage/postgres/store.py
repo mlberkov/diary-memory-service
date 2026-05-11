@@ -1,4 +1,5 @@
-"""Local PostgreSQL store implementing ``DiaryRepository`` (D-022, D-023, D-024).
+"""Local PostgreSQL store implementing ``DiaryRepository`` and
+``SearchRepository`` (D-022, D-023, D-024, D-025).
 
 Schema is bootstrapped at construction by executing ``schema.sql`` (loaded
 via :mod:`importlib.resources` so it works whether the package is run from
@@ -19,6 +20,16 @@ Phase 3.1+3.2 (D-024): the pgvector ``vector(3072)`` column on
 is registered on each pooled connection so list[float] writes and reads
 go through native binding. ``embedding_status`` on ``event_chunks`` is
 the per-chunk observable state (``pending`` / ``ready`` / ``failed``).
+
+Slice 3.3 (D-025): baseline hybrid retrieval. The dense leg is an exact
+family-scoped sequential scan ordered by ``embedding <=> query`` (cosine
+distance) over the canonical ``vector(3072)`` column, joined to
+``event_chunks`` on ``chunk_id`` and filtered to
+``embedding_status='ready'`` and the active ``model_name``. The sparse
+leg uses the generated stored ``chunk_text_tsv`` column built from
+``to_tsvector('simple', chunk_text)`` with a GIN index, ranked by
+``ts_rank_cd``. Fusion is RRF in the service layer; backends do not
+calibrate scores across legs.
 """
 
 from __future__ import annotations
@@ -250,25 +261,80 @@ class PostgresDiaryStore:
             return 0
         return int(row[0])
 
-    def search_chunks(self, family_id: str, query_text: str, top_k: int) -> list[EventChunk]:
-        if not family_id:
-            raise ValueError("family_id is required (Runtime invariant R-3)")
-        if top_k <= 0:
-            return []
-        needle = query_text.strip().lower()
-        if not needle:
-            return []
-        like = f"%{needle}%"
+    def get_event_chunk(self, chunk_id: str) -> EventChunk | None:
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT chunk_id, diary_entry_id, source_message_id, family_id, "
                 "       author_user_id, entry_date, event_index, chunk_text, "
                 "       created_at, embedding_status "
                 "  FROM event_chunks "
-                " WHERE family_id = %s AND lower(chunk_text) LIKE %s "
-                " ORDER BY created_at, event_index "
+                " WHERE chunk_id = %s",
+                (chunk_id,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return _row_to_chunk(row)
+
+    def dense_candidates(
+        self,
+        family_id: str,
+        query_embedding: list[float],
+        model_name: str,
+        limit: int,
+    ) -> list[EventChunk]:
+        if not family_id:
+            raise ValueError("family_id is required (Runtime invariant R-3)")
+        if limit <= 0:
+            return []
+        # Bare list[float] is encoded by psycopg as ``double precision[]``;
+        # pgvector's ``<=>`` operator only accepts ``vector``. The
+        # ``::vector`` cast bridges that without forcing callers to wrap
+        # the embedding in a pgvector-specific type.
+        with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                "SELECT ec.chunk_id, ec.diary_entry_id, ec.source_message_id, "
+                "       ec.family_id, ec.author_user_id, ec.entry_date, "
+                "       ec.event_index, ec.chunk_text, ec.created_at, "
+                "       ec.embedding_status "
+                "  FROM event_chunks ec "
+                "  JOIN embedding_records er "
+                "    ON er.chunk_id = ec.chunk_id AND er.model_name = %s "
+                " WHERE ec.family_id = %s "
+                "   AND ec.embedding_status = 'ready' "
+                " ORDER BY er.embedding <=> %s::vector "
                 " LIMIT %s",
-                (family_id, like, top_k),
+                (model_name, family_id, query_embedding, limit),
+            )
+            rows = cur.fetchall()
+        return [_row_to_chunk(r) for r in rows]
+
+    def sparse_candidates(
+        self,
+        family_id: str,
+        query_text: str,
+        limit: int,
+    ) -> list[EventChunk]:
+        if not family_id:
+            raise ValueError("family_id is required (Runtime invariant R-3)")
+        if limit <= 0:
+            return []
+        if not query_text.strip():
+            return []
+        with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                "WITH q AS (SELECT websearch_to_tsquery('simple', %s) AS tsq) "
+                "SELECT ec.chunk_id, ec.diary_entry_id, ec.source_message_id, "
+                "       ec.family_id, ec.author_user_id, ec.entry_date, "
+                "       ec.event_index, ec.chunk_text, ec.created_at, "
+                "       ec.embedding_status "
+                "  FROM event_chunks ec, q "
+                " WHERE ec.family_id = %s "
+                "   AND ec.chunk_text_tsv @@ q.tsq "
+                " ORDER BY ts_rank_cd(ec.chunk_text_tsv, q.tsq) DESC, "
+                "          ec.created_at, ec.event_index "
+                " LIMIT %s",
+                (query_text, family_id, limit),
             )
             rows = cur.fetchall()
         return [_row_to_chunk(r) for r in rows]

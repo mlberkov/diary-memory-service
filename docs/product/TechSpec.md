@@ -228,26 +228,48 @@ No provider failure may destroy original user input.
 ## 9. Retrieval Contract
 
 ### Retrieval style
-Hybrid retrieval is required.
+Hybrid retrieval is required. Enforced as of D-025 as a **baseline** contour; quality optimizations (BM25, rerankers, external search systems) are explicit follow-ups, not part of the base contract.
 
 ### Retrieval abstraction
-The retrieval backend must be swappable behind an interface such as `SearchRepository`.
+The retrieval backend is the `SearchRepository` Protocol (`src/diary_rag/storage/search_repository.py`), with two independent legs:
+
+- `dense_candidates(family_id, query_embedding, model_name, limit) -> list[EventChunk]`
+- `sparse_candidates(family_id, query_text, limit) -> list[EventChunk]`
+
+The three concrete stores (mock, sqlite, postgres) each satisfy both `DiaryRepository` (ingest) and `SearchRepository` (retrieval); the union is named `HybridDiaryStore`. SQLite raises `NotImplementedError` from the retrieval methods because it is opt-in for ingest only; Postgres is the canonical retrieval backend.
 
 ### Retrieval v1 flow
-1. normalize query,
-2. detect optional date constraints,
-3. run hybrid retrieval,
-4. apply family/visibility/child filters,
-5. merge and deduplicate hits,
-6. select top-k context,
-7. return retrieval trace.
+1. normalize query (strip whitespace + trailing punctuation),
+2. compute the query embedding once via the configured `EmbeddingClient`,
+3. run dense + sparse legs against `SearchRepository`,
+4. fuse the two ranked lists with **service-layer Reciprocal Rank Fusion** (`k=60`),
+5. truncate to `retrieval_top_k` (Settings; default 5),
+6. wrap each chunk as `Evidence(chunk_id, entry_date, chunk_text)`,
+7. log `retrieval.hybrid family_id=… model=… dense_n=… sparse_n=… merged_n=…`.
+
+Date constraints, family/visibility/child filters, dedup, and retrieval-trace persistence belong to Phase 3.4 / 3.5; they are not in the D-025 baseline.
+
+### Dense leg (Postgres)
+- Exact family-scoped sequential scan over the canonical `vector(3072)` column.
+- `ORDER BY embedding <=> %s::vector` (cosine distance), joined to `event_chunks` on `chunk_id`, filtered to `embedding_status='ready'` and the active `model_name`.
+- No HNSW / IVFFlat — pgvector caps those at 2000 dim, so the canonical column cannot use them. Halfvec / HNSW is **A-36b**, deferred to the next quality-decision packet.
+
+### Sparse leg (Postgres)
+- Generated stored column `event_chunks.chunk_text_tsv tsvector GENERATED ALWAYS AS (to_tsvector('simple', chunk_text)) STORED`, with a GIN index `idx_event_chunks_chunk_text_tsv`.
+- Queries use `websearch_to_tsquery('simple', $q)` and order by `ts_rank_cd`. The `'simple'` dictionary avoids stemming so mixed Russian/English content is treated symmetrically (**A-37**).
+- **BM25 is not in this packet.** The next quality-decision packet revisits sparse quality.
+
+### Fusion
+- Reciprocal Rank Fusion at the service layer (`services/retrieval.py`), pure function over ranked lists, `k=60`.
+- No score calibration between cosine distance and `ts_rank` — RRF uses rank position only.
+- No reranker / cross-encoder in this packet; both are deferred.
 
 ### Context policy
-- retrieve top 5 to 12 chunks,
-- prefer diversity across dates,
-- deduplicate near-identical lines,
-- optionally apply recency boost,
-- group by date in final answer prompt when useful.
+- retrieve `retrieval_top_k` chunks (default 5) from a candidate pool of `retrieval_candidate_k` per leg (default 20),
+- prefer diversity across dates — deferred to Phase 3.4,
+- deduplicate near-identical lines — deferred,
+- optionally apply recency boost — deferred,
+- group by date in final answer prompt when useful — deferred to Phase 4.
 
 ## 10. Answer Contract
 

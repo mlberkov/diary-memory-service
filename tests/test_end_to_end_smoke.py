@@ -2,7 +2,10 @@
 
 Each test wires a fresh ``MockDiaryStore`` + ``Dispatcher`` into the
 FastAPI app via ``app.dependency_overrides`` so per-test state is
-isolated from the module-level singleton in ``webhook.py``.
+isolated from the module-level singleton in ``webhook.py``. The
+``QueryService`` runs the baseline hybrid path (D-025): on the mock
+backend the sparse leg matches via token overlap and the dense leg
+matches only on identical text (mock embeddings encode text identity).
 """
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from diary_rag.adapters.embeddings import MockEmbeddingClient
 from diary_rag.adapters.telegram.webhook import get_dispatcher
 from diary_rag.app import create_app
 from diary_rag.config import Settings
@@ -26,7 +30,11 @@ def _settings() -> Settings:
 
 def _client_with_fresh_store() -> tuple[TestClient, MockDiaryStore]:
     store = MockDiaryStore()
-    dispatcher = Dispatcher(DiaryService(store), QueryService(store))
+    embed = MockEmbeddingClient()
+    dispatcher = Dispatcher(
+        DiaryService(store, embedding_client=embed),
+        QueryService(store, embed),
+    )
     app = create_app(_settings())
     app.dependency_overrides[get_dispatcher] = lambda: dispatcher
     return TestClient(app), store
@@ -80,7 +88,9 @@ def test_entry_then_ask_returns_grounded_reply_with_date() -> None:
     assert body["method"] == "sendMessage"
     assert body["chat_id"] == 42
     assert body["text"] == (
-        "Found 1 memory:\n- [2026-05-09] Tried a new book\n(mock retrieval — substring match)"
+        "Found 1 memory:\n"
+        "- [2026-05-09] Tried a new book\n"
+        "(hybrid retrieval — dense+sparse RRF)"
     )
 
 
@@ -91,9 +101,7 @@ def test_ask_with_no_match_returns_no_evidence_fallback() -> None:
     resp = _post(client, _update("/ask snowstorm", update_id=2, message_id=2))
 
     assert resp.status_code == 200
-    assert resp.json()["text"] == (
-        "No memories matched 'snowstorm'. (no_evidence — mock retrieval only.)"
-    )
+    assert resp.json()["text"] == "No memories matched 'snowstorm'."
 
 
 def test_entry_with_invalid_first_line_returns_invalid_input_and_persists_source() -> None:
@@ -116,9 +124,7 @@ def test_ask_before_any_entry_returns_no_evidence() -> None:
     resp = _post(client, _update("/ask anything", update_id=1))
 
     assert resp.status_code == 200
-    assert resp.json()["text"] == (
-        "No memories matched 'anything'. (no_evidence — mock retrieval only.)"
-    )
+    assert resp.json()["text"] == "No memories matched 'anything'."
 
 
 def test_dated_plain_text_is_ingested_as_entry_via_heuristic() -> None:
@@ -144,7 +150,7 @@ def test_question_plain_text_returns_grounded_reply_via_heuristic() -> None:
     assert resp.json()["text"] == (
         "Found 1 memory:\n"
         "- [2026-05-10] Learned a new recipe\n"
-        "(mock retrieval — substring match)\n"
+        "(hybrid retrieval — dense+sparse RRF)\n"
         "(routed as question — send /ask next time to be explicit)"
     )
 

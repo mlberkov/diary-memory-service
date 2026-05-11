@@ -33,7 +33,7 @@ Files listed are *targets*. Most do not exist yet. Each row will be split into o
 | Slice | Files / artifacts |
 | --- | --- |
 | 3.1+3.2 embedding adapter + sync indexing | `core/embeddings/{client,models}.py` (`EmbeddingClient` Protocol, `EmbeddingRecord`, `EmbeddingStatus`); `adapters/embeddings/{mock,openai_client,factory}.py`; `event_chunks.embedding_status` column + `embedding_records` table with `vector(3072)`; pgvector image swap in `docker-compose.yml`; boot dimension + pgvector probe (R-10); `DiaryService` calls embedding client after `save_event_chunks`; failure → `embedding_status='failed'`; replay short-circuits before embedding. Closes A-5 / A-7 / A-8 via D-024; opens A-35 / A-36 |
-| 3.3 hybrid retrieval | `SearchRepository` with dense + sparse (assumption A-6); 3072-dim ANN strategy fork (A-36) |
+| 3.3 baseline hybrid retrieval | `storage/search_repository.py` (`SearchRepository` + `HybridDiaryStore`); `services/retrieval.py` (service-layer RRF); generated `event_chunks.chunk_text_tsv` + GIN index; Postgres dense exact-scan + sparse `tsvector('simple')`; mock + sqlite parity (mock deterministic; sqlite `NotImplementedError`); `QueryService` rewritten to hybrid; dispatcher converts `NotImplementedError` → `NO_EVIDENCE`. Closes A-6 / A-29 via D-025; opens A-36b (ANN strategy) and A-37 (sparse dictionary). **Out of scope: BM25, rerankers, Qdrant** (next quality-decision packet) |
 | 3.4 metadata filtering | family / child / visibility / date filters (I-7) |
 | 3.5 retrieval traces | `RetrievalHit` rows; debug command for inspecting top-k |
 

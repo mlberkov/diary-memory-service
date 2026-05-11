@@ -1,10 +1,10 @@
 """Unit tests for ``SqliteDiaryStore``.
 
-Covers round-trip save/fetch, family-scoped substring search,
-top-k clamping, empty-input behaviour, end-to-end restart
-survival, and the R-2 / D-023 idempotency contract enforced by
-``UNIQUE (external_chat_id, external_message_id, edit_seq)`` plus
-``INSERT OR IGNORE`` in ``get_or_create_source_message``.
+Covers round-trip save/fetch, restart survival, idempotent ingest (R-2 /
+D-023), and the Slice 3.3 retirement of the substring search path:
+SQLite is opt-in ingest only, so the new ``dense_candidates`` and
+``sparse_candidates`` raise ``NotImplementedError`` (D-025). Retrieval
+lives on Postgres only.
 """
 
 from __future__ import annotations
@@ -93,66 +93,13 @@ def test_get_source_message_missing_returns_none(tmp_path: Path) -> None:
     assert store.get_source_message("nope") is None
 
 
-def test_search_chunks_family_scoping(tmp_path: Path) -> None:
+def test_hybrid_retrieval_unsupported_on_sqlite(tmp_path: Path) -> None:
     store = SqliteDiaryStore(str(tmp_path / "diary.db"))
 
-    store.save_source_message(_source(sid="s1", family_id="fam-A"))
-    store.save_diary_entry(_entry(eid="e1", sid="s1", family_id="fam-A"))
-    store.save_event_chunks(
-        [_chunk(cid="c1", eid="e1", sid="s1", family_id="fam-A", text="Walked the dog")]
-    )
-
-    store.save_source_message(_source(sid="s2", family_id="fam-B"))
-    store.save_diary_entry(_entry(eid="e2", sid="s2", family_id="fam-B"))
-    store.save_event_chunks(
-        [_chunk(cid="c2", eid="e2", sid="s2", family_id="fam-B", text="Walked the dog")]
-    )
-
-    assert [h.chunk_id for h in store.search_chunks("fam-A", "dog", top_k=10)] == ["c1"]
-    assert [h.chunk_id for h in store.search_chunks("fam-B", "dog", top_k=10)] == ["c2"]
-    assert store.search_chunks("fam-C", "dog", top_k=10) == []
-
-
-def test_search_chunks_insertion_order_and_topk_clamp(tmp_path: Path) -> None:
-    store = SqliteDiaryStore(str(tmp_path / "diary.db"))
-    store.save_source_message(_source())
-    store.save_diary_entry(_entry())
-    store.save_event_chunks(
-        [
-            _chunk(cid="c1", text="dog walk #1", idx=0),
-            _chunk(cid="c2", text="dog walk #2", idx=1),
-            _chunk(cid="c3", text="dog walk #3", idx=2),
-        ]
-    )
-
-    hits = store.search_chunks("fam-A", "dog", top_k=2)
-    assert [h.chunk_id for h in hits] == ["c1", "c2"]
-
-
-def test_search_chunks_case_insensitive(tmp_path: Path) -> None:
-    store = SqliteDiaryStore(str(tmp_path / "diary.db"))
-    store.save_source_message(_source())
-    store.save_diary_entry(_entry())
-    store.save_event_chunks([_chunk(text="Walked the DOG")])
-
-    assert [h.chunk_id for h in store.search_chunks("fam-A", "dog", top_k=10)] == ["c1"]
-
-
-def test_search_chunks_empty_query_or_zero_topk(tmp_path: Path) -> None:
-    store = SqliteDiaryStore(str(tmp_path / "diary.db"))
-    store.save_source_message(_source())
-    store.save_diary_entry(_entry())
-    store.save_event_chunks([_chunk(text="Walked the dog")])
-
-    assert store.search_chunks("fam-A", "", top_k=10) == []
-    assert store.search_chunks("fam-A", "   ", top_k=10) == []
-    assert store.search_chunks("fam-A", "dog", top_k=0) == []
-
-
-def test_search_chunks_empty_family_id_raises(tmp_path: Path) -> None:
-    store = SqliteDiaryStore(str(tmp_path / "diary.db"))
-    with pytest.raises(ValueError):
-        store.search_chunks("", "dog", top_k=5)
+    with pytest.raises(NotImplementedError, match="sqlite"):
+        store.dense_candidates("fam-A", [0.0], "mock", 5)
+    with pytest.raises(NotImplementedError, match="sqlite"):
+        store.sparse_candidates("fam-A", "dog", 5)
 
 
 def test_restart_survival(tmp_path: Path) -> None:
@@ -171,8 +118,9 @@ def test_restart_survival(tmp_path: Path) -> None:
     assert fetched is not None
     assert fetched.source_message_id == "s1"
 
-    hits = second.search_chunks("fam-A", "dog", top_k=10)
-    assert [h.chunk_id for h in hits] == ["c1"]
+    chunk = second.get_event_chunk("c1")
+    assert chunk is not None
+    assert chunk.chunk_text == "Walked the dog"
 
 
 def test_get_or_create_source_message_returns_false_on_first_insert(tmp_path: Path) -> None:

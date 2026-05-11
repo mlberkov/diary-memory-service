@@ -2,18 +2,37 @@
 
 Top of list = pick next. Each item maps to a row in `docs/execution-map.md`. When a slice is done, remove it and add the next downstream slice.
 
-## Slice 3.3 — Hybrid retrieval (next)
+## Next quality-decision packet — search-quality fork (next)
+- Owner: agent + human (decision boundary)
+- Map: execution-map 3.3 follow-up
+- Concrete: evaluate retrieval quality improvements against the D-025 baseline (exact dense scan + Postgres FTS `simple` + service-layer RRF). Decide between, at minimum: **BM25-grade sparse** (e.g. via the `pg_search` extension, the `bm25_catalog` extension, or an app-side BM25 over tokenized chunks); a **reranker / cross-encoder** layer; **Qdrant or another dedicated vector / search system**; multilingual sparse tuning beyond `simple` (e.g. mixed Russian/English support); the **3072-dim ANN strategy** (A-36b: halfvec + HNSW vs alternatives) when corpus scale demands it. Bound the packet — do not bundle all of these. Pick one or two with the largest expected lift, measure them, and record the rest as deferred.
+
+## Slice 3.4 — Metadata filtering (after 3.3)
 - Owner: agent
-- Map: execution-map 3.3
-- Concrete: introduce `SearchRepository` (channel-neutral) with hybrid (dense + sparse) retrieval. Resolve A-36 (3072-dim ANN strategy): pick exact sequential scan, `halfvec(3072)` + HNSW (pgvector ≥ 0.7), or another approach. Resolve A-6 (where dense / sparse signals merge). Swap `QueryService` from substring (A-29) to the new search seam. Add family-scoped filters that already match I-7. Keep retrieval traces minimal — `RetrievalHit` row writes can land in 3.5.
+- Map: execution-map 3.4
+- Concrete: layer family / child / visibility / date filters onto the existing `SearchRepository` legs without changing the retrieval shape. Coordinate with A-15 (visibility scopes).
 
 ## Schema evolution before non-local deployment
-- No migration tool is wired yet (A-34). Local Postgres schema upgrades are destructive: pull a packet that changes columns and you must `docker compose down -v` to reset `diary_pg_data` before the bootstrap DDL applies. This is acceptable for the single-dev contour but must be replaced (Alembic or equivalent) before the first non-local deployment. D-024 added the pgvector image, `embedding_records`, and the `embedding_status` column — all of which required a destructive upgrade. Consider a dedicated packet once the next production-shaped slice is on the horizon.
+- No migration tool is wired yet (A-34). Local Postgres schema upgrades are destructive: pull a packet that changes columns and you must `docker compose down -v` to reset `diary_pg_data` before the bootstrap DDL applies. This is acceptable for the single-dev contour but must be replaced (Alembic or equivalent) before the first non-local deployment. D-024 added the pgvector image, `embedding_records`, and the `embedding_status` column; D-025 added the generated `chunk_text_tsv` column + GIN index — both required a destructive upgrade or an explicit `ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...` step. Consider a dedicated packet once the next production-shaped slice is on the horizon.
 
 ## Reconciliation for failed embeddings (Phase 6 candidate)
 - A-35 leaves failed embeddings sticky: a chunk with `embedding_status='failed'` stays that way until manual intervention. Once Phase 6 (provider hardening) is on the horizon, ship a reconciliation job that retries `failed` chunks with bounded backoff and a dead-letter strategy, plus the corresponding observability (logs / metrics on retry success/failure).
 
 ---
+
+Closed in the Slice 3.3 baseline hybrid retrieval packet (D-025):
+- `src/diary_rag/storage/search_repository.py` — `SearchRepository` Protocol (`dense_candidates`, `sparse_candidates`) + `HybridDiaryStore` (combined ingest + retrieval).
+- `src/diary_rag/services/retrieval.py` — pure service-layer Reciprocal Rank Fusion (RRF, k=60); no calibration, no reranker.
+- Postgres dense leg: exact family-scoped scan over `vector(3072)` with `embedding <=> %s::vector`, `embedding_status='ready'` + `model_name` filter. No HNSW; A-36 replaced by A-36b (halfvec/HNSW deferred to next quality-decision packet).
+- Postgres sparse leg: generated stored column `event_chunks.chunk_text_tsv tsvector GENERATED ALWAYS AS (to_tsvector('simple', chunk_text)) STORED` + GIN index; `websearch_to_tsquery('simple', $q)` ranked by `ts_rank_cd`. A-37 (sparse dictionary `simple`) opened.
+- Mock backend: deterministic dense (cosine + 0.5 distance threshold so unrelated queries don't fabricate matches) and sparse (whitespace token overlap). `MockEmbeddingClient` provenance unchanged.
+- SQLite backend: `dense_candidates` / `sparse_candidates` raise `NotImplementedError`; dispatcher catches and returns `FallbackMode.NO_EVIDENCE` with a `retrieval.unavailable` log line. SQLite remains opt-in for ingest.
+- `DiaryRepository.search_chunks` removed; `DiaryRepository.get_event_chunk(chunk_id)` added as the small chunk-by-id read primitive.
+- `QueryService` rewritten: constructor takes `SearchRepository` + `EmbeddingClient`; embeds query once; calls both legs; RRF-merges; logs `retrieval.hybrid family_id=… model=… dense_n=… sparse_n=… merged_n=…`. Two new `Settings` knobs: `retrieval_top_k` (5), `retrieval_candidate_k` (20).
+- Dispatcher: reply trailer changes to `(hybrid retrieval — dense+sparse RRF)`; the no-evidence reply drops the substring parenthetical.
+- Docs: D-025 in `decision-log.md`. A-6, A-29, A-36 closed (A-36 replaced by A-36b). A-37 opened. I-8 updated in place to record that hybrid retrieval is now enforced rather than declared. R-4 updated to record the `ready`-only filter on dense.
+- New tests: `tests/test_retrieval_rrf.py`, `tests/test_search_repository_mock.py`, `tests/test_search_repository_postgres.py`, `tests/test_dispatcher_retrieval_fallback.py`. Existing tests adjusted: `test_query_service.py` rewritten around hybrid; substring assertions removed from `test_postgres_store.py` / `test_sqlite_store.py`; `test_end_to_end_smoke.py` trailer updated; `test_indexing_pipeline.py` uses `get_event_chunk` instead of substring.
+- **Explicitly not in this packet:** BM25, reranker / cross-encoder, Qdrant or any external vector/search system, halfvec / HNSW migration, metadata filters (3.4), retrieval traces (3.5), multilingual sparse tuning, query-embedding caching, migration tool (A-34 unchanged).
 
 Closed in the Phase 3.1+3.2 embedding-adapter + sync-indexing packet (D-024):
 - `core/embeddings/{client,models}.py` — `EmbeddingClient` Protocol, `EmbeddingRecord`, `EmbeddingStatus`.

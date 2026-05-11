@@ -14,6 +14,8 @@ Every retrieval call carries a non-null `family_id`. The retriever rejects calls
 ## R-4. Active-state filter on retrieval
 Retrieval returns only chunks of non-tombstoned entries by default. Bypass requires an explicit, logged debug path.
 
+The dense leg additionally requires `embedding_status='ready'` (D-025): chunks with `pending` or `failed` status do not participate in dense ranking. The sparse leg ranks any chunk whose text yields tokens regardless of `embedding_status` — sparse is text-only and does not depend on a successful embedding. Every retrieval call logs `dense_n`, `sparse_n`, `merged_n` so an operator can confirm both legs ran.
+
 ## R-5. Provenance on every answer
 No answer is returned to a user without an `AnswerTrace` row that records `context_chunk_ids` (possibly empty in fallback modes), `prompt_version`, and `fallback_mode`.
 

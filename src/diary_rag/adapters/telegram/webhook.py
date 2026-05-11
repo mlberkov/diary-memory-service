@@ -29,14 +29,14 @@ from diary_rag.core.routing.classifier import classify_plain_text
 from diary_rag.logging import get_logger
 from diary_rag.services import DiaryService, Dispatcher, QueryService
 from diary_rag.storage.mock import MockDiaryStore
-from diary_rag.storage.repository import DiaryRepository
+from diary_rag.storage.search_repository import HybridDiaryStore
 
 log = get_logger(__name__)
 
 _dispatcher: Dispatcher | None = None
 
 
-def _build_store(settings: Settings) -> DiaryRepository:
+def _build_store(settings: Settings) -> HybridDiaryStore:
     if settings.storage_backend == "postgres":
         from diary_rag.storage.postgres import PostgresDiaryStore
 
@@ -56,15 +56,22 @@ def get_dispatcher() -> Dispatcher:
         embedding_client = build_embedding_client(settings)
         _dispatcher = Dispatcher(
             DiaryService(store, embedding_client=embedding_client),
-            QueryService(store),
+            QueryService(
+                store,
+                embedding_client,
+                top_k=settings.retrieval_top_k,
+                candidate_k=settings.retrieval_candidate_k,
+            ),
         )
         log.info(
             "dispatcher.built storage_backend=%s embedding_backend=%s "
-            "embedding_model=%s embedding_dim=%d",
+            "embedding_model=%s embedding_dim=%d top_k=%d candidate_k=%d",
             settings.storage_backend,
             settings.embedding_backend,
             embedding_client.model_name,
             embedding_client.dimension,
+            settings.retrieval_top_k,
+            settings.retrieval_candidate_k,
         )
     return _dispatcher
 

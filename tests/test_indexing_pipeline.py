@@ -131,17 +131,18 @@ def test_set_chunk_embedding_status_ready(store: DiaryRepository) -> None:
     _seed_chunk(store)
     store.set_chunk_embedding_status("c1", EmbeddingStatus.READY)
 
-    hits = store.search_chunks("fam-A", "dog", top_k=10)
-    assert len(hits) == 1
-    assert hits[0].embedding_status is EmbeddingStatus.READY
+    chunk = store.get_event_chunk("c1")
+    assert chunk is not None
+    assert chunk.embedding_status is EmbeddingStatus.READY
 
 
 def test_set_chunk_embedding_status_failed(store: DiaryRepository) -> None:
     _seed_chunk(store)
     store.set_chunk_embedding_status("c1", EmbeddingStatus.FAILED)
 
-    hits = store.search_chunks("fam-A", "dog", top_k=10)
-    assert hits[0].embedding_status is EmbeddingStatus.FAILED
+    chunk = store.get_event_chunk("c1")
+    assert chunk is not None
+    assert chunk.embedding_status is EmbeddingStatus.FAILED
 
 
 def test_set_chunk_embedding_status_unknown_chunk_raises(store: DiaryRepository) -> None:
@@ -151,8 +152,13 @@ def test_set_chunk_embedding_status_unknown_chunk_raises(store: DiaryRepository)
 
 def test_freshly_saved_chunk_is_pending(store: DiaryRepository) -> None:
     _seed_chunk(store)
-    hits = store.search_chunks("fam-A", "dog", top_k=10)
-    assert hits[0].embedding_status is EmbeddingStatus.PENDING
+    chunk = store.get_event_chunk("c1")
+    assert chunk is not None
+    assert chunk.embedding_status is EmbeddingStatus.PENDING
+
+
+def test_get_event_chunk_missing_returns_none(store: DiaryRepository) -> None:
+    assert store.get_event_chunk("nope") is None
 
 
 def test_duplicate_embedding_for_same_chunk_and_model_raises(store: DiaryRepository) -> None:

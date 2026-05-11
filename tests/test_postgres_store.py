@@ -1,9 +1,8 @@
-"""Integration tests for ``PostgresDiaryStore``.
+"""Integration tests for ``PostgresDiaryStore`` (ingest contract only).
 
 Skipped unless ``DIARY_RAG_PG_TEST_DSN`` is set, so the offline test
-flow stays green. Mirrors the case set in ``tests/test_sqlite_store.py``
-(round-trip, family scoping, top-k, case-insensitive, empty inputs,
-R-3 guard, restart survival, R-2 idempotency / D-023).
+flow stays green. Retrieval coverage lives in
+``tests/test_search_repository_postgres.py`` (Slice 3.3 / D-025).
 """
 
 from __future__ import annotations
@@ -118,62 +117,6 @@ def test_get_source_message_missing_returns_none(store: PostgresDiaryStore) -> N
     assert store.get_source_message("nope") is None
 
 
-def test_search_chunks_family_scoping(store: PostgresDiaryStore) -> None:
-    store.save_source_message(_source(sid="s1", family_id="fam-A"))
-    store.save_diary_entry(_entry(eid="e1", sid="s1", family_id="fam-A"))
-    store.save_event_chunks(
-        [_chunk(cid="c1", eid="e1", sid="s1", family_id="fam-A", text="Walked the dog")]
-    )
-
-    store.save_source_message(_source(sid="s2", family_id="fam-B"))
-    store.save_diary_entry(_entry(eid="e2", sid="s2", family_id="fam-B"))
-    store.save_event_chunks(
-        [_chunk(cid="c2", eid="e2", sid="s2", family_id="fam-B", text="Walked the dog")]
-    )
-
-    assert [h.chunk_id for h in store.search_chunks("fam-A", "dog", top_k=10)] == ["c1"]
-    assert [h.chunk_id for h in store.search_chunks("fam-B", "dog", top_k=10)] == ["c2"]
-    assert store.search_chunks("fam-C", "dog", top_k=10) == []
-
-
-def test_search_chunks_insertion_order_and_topk_clamp(store: PostgresDiaryStore) -> None:
-    store.save_source_message(_source())
-    store.save_diary_entry(_entry())
-    store.save_event_chunks(
-        [
-            _chunk(cid="c1", text="dog walk #1", idx=0),
-            _chunk(cid="c2", text="dog walk #2", idx=1),
-            _chunk(cid="c3", text="dog walk #3", idx=2),
-        ]
-    )
-
-    hits = store.search_chunks("fam-A", "dog", top_k=2)
-    assert [h.chunk_id for h in hits] == ["c1", "c2"]
-
-
-def test_search_chunks_case_insensitive(store: PostgresDiaryStore) -> None:
-    store.save_source_message(_source())
-    store.save_diary_entry(_entry())
-    store.save_event_chunks([_chunk(text="Walked the DOG")])
-
-    assert [h.chunk_id for h in store.search_chunks("fam-A", "dog", top_k=10)] == ["c1"]
-
-
-def test_search_chunks_empty_query_or_zero_topk(store: PostgresDiaryStore) -> None:
-    store.save_source_message(_source())
-    store.save_diary_entry(_entry())
-    store.save_event_chunks([_chunk(text="Walked the dog")])
-
-    assert store.search_chunks("fam-A", "", top_k=10) == []
-    assert store.search_chunks("fam-A", "   ", top_k=10) == []
-    assert store.search_chunks("fam-A", "dog", top_k=0) == []
-
-
-def test_search_chunks_empty_family_id_raises(store: PostgresDiaryStore) -> None:
-    with pytest.raises(ValueError):
-        store.search_chunks("", "dog", top_k=5)
-
-
 def test_restart_survival() -> None:
     """Two separate stores against the same DSN: writes from A visible to B."""
     assert PG_DSN is not None
@@ -195,8 +138,9 @@ def test_restart_survival() -> None:
         assert fetched is not None
         assert fetched.source_message_id == "s1"
 
-        hits = second.search_chunks("fam-A", "dog", top_k=10)
-        assert [h.chunk_id for h in hits] == ["c1"]
+        chunk = second.get_event_chunk("c1")
+        assert chunk is not None
+        assert chunk.chunk_text == "Walked the dog"
     finally:
         second.close()
 

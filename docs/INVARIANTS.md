@@ -26,7 +26,7 @@ Each diary event line becomes exactly one `EventChunk`. Multiple events do not s
 Every persisted record outside `SourceMessage` carries `family_id`. No retrieval may cross families.
 
 ## I-8. Hybrid retrieval
-The retrieval contract supports both dense and sparse signals. A retrieval backend that cannot deliver hybrid retrieval is not acceptable.
+The retrieval contract supports both dense and sparse signals. A retrieval backend that cannot deliver hybrid retrieval is not acceptable. Enforced as of D-025: `SearchRepository.dense_candidates` (exact family-scoped scan over `vector(3072)`) and `sparse_candidates` (Postgres FTS `tsvector('simple')`) are independently produced and fused by service-layer Reciprocal Rank Fusion.
 
 ## I-9. Grounded answers
 Every answer references the chunks used as evidence (`AnswerTrace.context_chunk_ids`). An answer with no retrieved evidence must use an explicit `fallback_mode`, not a fabricated response.

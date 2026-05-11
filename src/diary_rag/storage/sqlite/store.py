@@ -1,4 +1,4 @@
-"""Local-disk SQLite store implementing ``DiaryRepository``.
+"""Local-disk SQLite store implementing ``DiaryRepository`` (ingest only).
 
 Schema is bootstrapped at construction via ``CREATE TABLE IF NOT EXISTS``.
 A fresh ``sqlite3.Connection`` is opened per public method call, so the
@@ -16,6 +16,13 @@ pgvector. Embeddings are stored as little-endian ``f32`` ``BLOB``
 payloads — correctness only; no ANN, no search optimisation.
 ``embedding_status`` lives on ``event_chunks`` so the column is visible
 to plain SQL inspection.
+
+Slice 3.3 (D-025): SQLite is an opt-in ingest-only backend. Postgres
+is the canonical retrieval target; SQLite has no pgvector and no
+FTS-with-ranking parity, so ``dense_candidates`` and
+``sparse_candidates`` raise ``NotImplementedError``. ``Dispatcher``
+converts that to ``FallbackMode.NO_EVIDENCE`` so an operator running
+SQLite still gets a clean reply from ``/ask``.
 """
 
 from __future__ import annotations
@@ -281,27 +288,42 @@ class SqliteDiaryStore:
             return 0
         return int(row[0])
 
-    def search_chunks(self, family_id: str, query_text: str, top_k: int) -> list[EventChunk]:
-        if not family_id:
-            raise ValueError("family_id is required (Runtime invariant R-3)")
-        if top_k <= 0:
-            return []
-        needle = query_text.strip().lower()
-        if not needle:
-            return []
-        like = f"%{needle}%"
+    def get_event_chunk(self, chunk_id: str) -> EventChunk | None:
         with self._connect() as conn:
-            rows = conn.execute(
+            row = conn.execute(
                 "SELECT chunk_id, diary_entry_id, source_message_id, family_id, "
                 "       author_user_id, entry_date, event_index, chunk_text, "
                 "       created_at, embedding_status "
                 "  FROM event_chunks "
-                " WHERE family_id = ? AND lower(chunk_text) LIKE ? "
-                " ORDER BY created_at, event_index "
-                " LIMIT ?",
-                (family_id, like, top_k),
-            ).fetchall()
-        return [_row_to_chunk(r) for r in rows]
+                " WHERE chunk_id = ?",
+                (chunk_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return _row_to_chunk(row)
+
+    def dense_candidates(
+        self,
+        family_id: str,
+        query_embedding: list[float],
+        model_name: str,
+        limit: int,
+    ) -> list[EventChunk]:
+        raise NotImplementedError(
+            "sqlite hybrid retrieval not supported; "
+            "postgres is the canonical retrieval backend (D-022, D-025)"
+        )
+
+    def sparse_candidates(
+        self,
+        family_id: str,
+        query_text: str,
+        limit: int,
+    ) -> list[EventChunk]:
+        raise NotImplementedError(
+            "sqlite hybrid retrieval not supported; "
+            "postgres is the canonical retrieval backend (D-022, D-025)"
+        )
 
     def save_embedding_records(self, records: list[EmbeddingRecord]) -> None:
         if not records:

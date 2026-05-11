@@ -1,9 +1,7 @@
 """In-memory mock store for the diary domain.
 
 Holds raw source messages, parsed diary entries, per-event chunks, and
-per-chunk embedding records in process-local dicts. Search is a
-deterministic case-insensitive substring match over chunk text, scoped
-to ``family_id``.
+per-chunk embedding records in process-local dicts.
 
 ``get_or_create_source_message`` enforces R-2 (D-023) by keying on the
 ``(external_chat_id, external_message_id, edit_seq)`` triple in a side
@@ -15,15 +13,31 @@ the store keeps ``EmbeddingRecord`` rows keyed on
 on read with their current status so callers see the same shape as the
 durable backends.
 
+Slice 3.3 (D-025): baseline hybrid retrieval (``dense_candidates`` +
+``sparse_candidates``) is implemented in process-local terms so unit
+tests can exercise the hybrid path without a database. Dense ranks by
+cosine distance over the deterministic mock embeddings; sparse ranks by
+lowercased whitespace token-overlap count. Both legs are family-scoped
+and restricted to chunks in ``ready`` state.
+
 Not thread-safe. State lives only as long as the process.
 """
 
 from __future__ import annotations
 
+import math
+import re
 from dataclasses import replace
 
 from diary_rag.core.diary.models import DiaryEntry, EventChunk, SourceMessage
 from diary_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
+
+_TOKEN_RE = re.compile(r"\w+", re.UNICODE)
+_MOCK_DENSE_THRESHOLD = 0.5
+
+
+def _tokenize(text: str) -> list[str]:
+    return [m.group(0) for m in _TOKEN_RE.finditer(text.lower())]
 
 
 class MockDiaryStore:
@@ -77,30 +91,69 @@ class MockDiaryStore:
             1 for chunk in self._chunks.values() if chunk.source_message_id == source_message_id
         )
 
-    def search_chunks(self, family_id: str, query_text: str, top_k: int) -> list[EventChunk]:
-        """Case-insensitive substring match within a single ``family_id``.
+    def get_event_chunk(self, chunk_id: str) -> EventChunk | None:
+        return self._chunks.get(chunk_id)
 
-        Results are returned in insertion order so the smoke flow is
-        deterministic without depending on dict ordering surprises.
-        """
+    def dense_candidates(
+        self,
+        family_id: str,
+        query_embedding: list[float],
+        model_name: str,
+        limit: int,
+    ) -> list[EventChunk]:
         if not family_id:
             raise ValueError("family_id is required (Runtime invariant R-3)")
-        if top_k <= 0:
+        if limit <= 0:
             return []
 
-        needle = query_text.strip().lower()
-        if not needle:
-            return []
-
-        hits: list[EventChunk] = []
-        for chunk in self._chunks.values():
+        # ``MockEmbeddingClient`` derives each vector from a SHA-256 of the
+        # text, so the cosine distance between two unrelated texts at
+        # dim=3072 clusters tightly around 1.0 (orthogonal) while identical
+        # text gives 0.0. A distance threshold of 0.5 keeps the mock leg
+        # honest: only chunks whose text is effectively identical to the
+        # query qualify, matching what a real semantic retriever would do
+        # while refusing to fabricate relevance from random vectors.
+        ranked: list[tuple[float, int, EventChunk]] = []
+        for index, chunk in enumerate(self._chunks.values()):
             if chunk.family_id != family_id:
                 continue
-            if needle in chunk.chunk_text.lower():
-                hits.append(chunk)
-                if len(hits) >= top_k:
-                    break
-        return hits
+            if chunk.embedding_status is not EmbeddingStatus.READY:
+                continue
+            record = self._embeddings.get((chunk.chunk_id, model_name))
+            if record is None:
+                continue
+            distance = _cosine_distance(query_embedding, record.embedding)
+            if distance >= _MOCK_DENSE_THRESHOLD:
+                continue
+            ranked.append((distance, index, chunk))
+        ranked.sort(key=lambda triple: (triple[0], triple[1]))
+        return [chunk for _, _, chunk in ranked[:limit]]
+
+    def sparse_candidates(
+        self,
+        family_id: str,
+        query_text: str,
+        limit: int,
+    ) -> list[EventChunk]:
+        if not family_id:
+            raise ValueError("family_id is required (Runtime invariant R-3)")
+        if limit <= 0:
+            return []
+        query_tokens = set(_tokenize(query_text))
+        if not query_tokens:
+            return []
+
+        ranked: list[tuple[int, int, EventChunk]] = []
+        for index, chunk in enumerate(self._chunks.values()):
+            if chunk.family_id != family_id:
+                continue
+            chunk_tokens = set(_tokenize(chunk.chunk_text))
+            overlap = len(query_tokens & chunk_tokens)
+            if overlap == 0:
+                continue
+            ranked.append((-overlap, index, chunk))
+        ranked.sort(key=lambda triple: (triple[0], triple[1]))
+        return [chunk for _, _, chunk in ranked[:limit]]
 
     def save_embedding_records(self, records: list[EmbeddingRecord]) -> None:
         for record in records:
@@ -143,3 +196,18 @@ class MockDiaryStore:
         self._entries.clear()
         self._chunks.clear()
         self._embeddings.clear()
+
+
+def _cosine_distance(a: list[float], b: list[float]) -> float:
+    if len(a) != len(b):
+        raise ValueError(f"vector length mismatch: {len(a)} vs {len(b)}")
+    dot = 0.0
+    norm_a = 0.0
+    norm_b = 0.0
+    for x, y in zip(a, b, strict=True):
+        dot += x * y
+        norm_a += x * x
+        norm_b += y * y
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 1.0
+    return 1.0 - dot / (math.sqrt(norm_a) * math.sqrt(norm_b))
