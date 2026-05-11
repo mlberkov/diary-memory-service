@@ -26,9 +26,11 @@ rather than a 500.
 from __future__ import annotations
 
 from diary_rag.core.diary import AnswerResult, FallbackMode, IngestResult
+from diary_rag.core.export import ExportFormat
 from diary_rag.core.routing import DispatchResult, InboundMessage, RouteKind
 from diary_rag.logging import get_logger
 from diary_rag.services.diary_service import DiaryService
+from diary_rag.services.export_service import ExportService
 from diary_rag.services.query_service import QueryService
 
 log = get_logger(__name__)
@@ -47,6 +49,7 @@ _REPLY_CLARIFY = (
     "Send /entry <YYYY-MM-DD> on the first line then your events to record it, "
     "or /ask <your question> to query."
 )
+_REPLY_EXPORT_USAGE = "Usage: /export json | /export txt — pick a format."
 _HEURISTIC_MARKER_ENTRY = "(routed as entry — send /entry next time to be explicit)"
 _HEURISTIC_MARKER_ASK = "(routed as question — send /ask next time to be explicit)"
 _DRAFT_REPLY_PREFIX = "Stored as draft"
@@ -94,9 +97,15 @@ def _append_marker(reply: str, marker: str) -> str:
 class Dispatcher:
     """Maps an :class:`InboundMessage` to a :class:`DispatchResult`."""
 
-    def __init__(self, diary: DiaryService, query: QueryService) -> None:
+    def __init__(
+        self,
+        diary: DiaryService,
+        query: QueryService,
+        export: ExportService,
+    ) -> None:
         self._diary = diary
         self._query = query
+        self._export = export
 
     def dispatch(self, message: InboundMessage) -> DispatchResult:
         route = message.route
@@ -156,6 +165,8 @@ class Dispatcher:
                     "route_source": message.route_source,
                 },
             )
+        if route is RouteKind.EXPORT:
+            return self._dispatch_export(message)
         if route is RouteKind.CLARIFY:
             return DispatchResult(
                 reply_text=_REPLY_CLARIFY,
@@ -163,3 +174,42 @@ class Dispatcher:
                 metadata={"route_source": message.route_source},
             )
         return DispatchResult(reply_text=_REPLY_UNKNOWN, route=RouteKind.UNKNOWN)
+
+    def _dispatch_export(self, message: InboundMessage) -> DispatchResult:
+        arg = message.payload.strip().lower()
+        if arg == "json":
+            fmt = ExportFormat.JSON
+        elif arg == "txt":
+            fmt = ExportFormat.TXT
+        else:
+            log.info(
+                "export.usage_error chat_id=%s payload=%r",
+                message.external_chat_id,
+                message.payload,
+            )
+            return DispatchResult(
+                reply_text=_REPLY_EXPORT_USAGE,
+                route=RouteKind.EXPORT,
+                metadata={
+                    "fallback": FallbackMode.INVALID_INPUT.value,
+                    "route_source": message.route_source,
+                },
+            )
+        family_id = message.external_chat_id
+        payload = self._export.export(
+            family_id=family_id,
+            requester_user_id=message.external_user_id,
+            format=fmt,
+        )
+        unit = "message" if payload.record_count == 1 else "messages"
+        reply = f"Exported {payload.record_count} raw {unit} as {fmt.value.upper()}."
+        return DispatchResult(
+            reply_text=reply,
+            route=RouteKind.EXPORT,
+            document=payload,
+            metadata={
+                "fallback": FallbackMode.NONE.value,
+                "route_source": message.route_source,
+                "format": fmt.value,
+            },
+        )

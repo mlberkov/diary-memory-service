@@ -281,3 +281,58 @@ def test_get_or_create_source_message_idempotent_for_draft_route(
     assert replayed is True
     assert persisted.source_message_id == "d1"
     assert persisted.detected_route is RouteKind.DRAFT
+
+
+def test_list_source_messages_is_family_scoped_and_ordered(
+    store: PostgresDiaryStore,
+) -> None:
+    base = datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC)
+    store.save_source_message(
+        SourceMessage(
+            source_message_id="a",
+            family_id="fam-A",
+            author_user_id="u1",
+            external_chat_id="fam-A",
+            external_user_id="u1",
+            external_message_id="1",
+            edit_seq=0,
+            raw_text="first",
+            detected_route=RouteKind.ENTRY,
+            created_at=base,
+        )
+    )
+    store.save_source_message(
+        SourceMessage(
+            source_message_id="b",
+            family_id="fam-A",
+            author_user_id="u1",
+            external_chat_id="fam-A",
+            external_user_id="u1",
+            external_message_id="2",
+            edit_seq=0,
+            raw_text="second",
+            detected_route=RouteKind.DRAFT,
+            created_at=base.replace(hour=11),
+        )
+    )
+    store.save_source_message(
+        SourceMessage(
+            source_message_id="other",
+            family_id="fam-B",
+            author_user_id="u2",
+            external_chat_id="fam-B",
+            external_user_id="u2",
+            external_message_id="3",
+            edit_seq=0,
+            raw_text="other family",
+            detected_route=RouteKind.ENTRY,
+            created_at=base,
+        )
+    )
+
+    rows = store.list_source_messages("fam-A")
+    assert [r.source_message_id for r in rows] == ["a", "b"]
+    assert [r.detected_route for r in rows] == [RouteKind.ENTRY, RouteKind.DRAFT]
+
+    rows_limited = store.list_source_messages("fam-A", limit=1)
+    assert [r.source_message_id for r in rows_limited] == ["a"]

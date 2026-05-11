@@ -227,6 +227,30 @@ class PostgresDiaryStore:
             return None
         return _row_to_source(row)
 
+    def list_source_messages(
+        self, family_id: str, *, limit: int | None = None
+    ) -> list[SourceMessage]:
+        if not family_id:
+            raise ValueError("family_id is required (Runtime invariant R-3)")
+        if limit is not None and limit < 0:
+            raise ValueError("limit must be non-negative")
+        sql = (
+            "SELECT source_message_id, family_id, author_user_id, "
+            "       external_chat_id, external_user_id, external_message_id, "
+            "       edit_seq, raw_text, detected_route, created_at "
+            "  FROM source_messages "
+            " WHERE family_id = %s "
+            " ORDER BY created_at ASC, source_message_id ASC"
+        )
+        params: tuple[object, ...] = (family_id,)
+        if limit is not None:
+            sql += " LIMIT %s"
+            params = (family_id, limit)
+        with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+        return [_row_to_source(row) for row in rows]
+
     def get_diary_entry_by_source_message_id(self, source_message_id: str) -> DiaryEntry | None:
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(

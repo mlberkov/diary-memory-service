@@ -256,6 +256,14 @@ class SqliteDiaryStore:
             return None
         return _row_to_source(row)
 
+    def list_source_messages(
+        self, family_id: str, *, limit: int | None = None
+    ) -> list[SourceMessage]:
+        raise NotImplementedError(
+            "sqlite raw export not supported; "
+            "postgres is the canonical durable backend (D-022, D-029)"
+        )
+
     def get_diary_entry_by_source_message_id(self, source_message_id: str) -> DiaryEntry | None:
         with self._connect() as conn:
             row = conn.execute(

@@ -20,7 +20,7 @@ from diary_rag.adapters.embeddings import MockEmbeddingClient
 from diary_rag.adapters.telegram.webhook import get_dispatcher
 from diary_rag.app import create_app
 from diary_rag.config import Settings
-from diary_rag.services import DiaryService, Dispatcher, QueryService
+from diary_rag.services import DiaryService, Dispatcher, ExportService, QueryService
 from diary_rag.storage.mock import MockDiaryStore
 
 
@@ -34,6 +34,7 @@ def _client_with_fresh_store() -> tuple[TestClient, MockDiaryStore]:
     dispatcher = Dispatcher(
         DiaryService(store, embedding_client=embed),
         QueryService(store, embed),
+        ExportService(store),
     )
     app = create_app(_settings())
     app.dependency_overrides[get_dispatcher] = lambda: dispatcher

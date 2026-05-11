@@ -80,6 +80,19 @@ class MockDiaryStore:
     def get_source_message(self, source_message_id: str) -> SourceMessage | None:
         return self._sources.get(source_message_id)
 
+    def list_source_messages(
+        self, family_id: str, *, limit: int | None = None
+    ) -> list[SourceMessage]:
+        if not family_id:
+            raise ValueError("family_id is required (Runtime invariant R-3)")
+        rows = [s for s in self._sources.values() if s.family_id == family_id]
+        rows.sort(key=lambda s: (s.created_at, s.source_message_id))
+        if limit is None:
+            return rows
+        if limit < 0:
+            raise ValueError("limit must be non-negative")
+        return rows[:limit]
+
     def get_diary_entry_by_source_message_id(self, source_message_id: str) -> DiaryEntry | None:
         for entry in self._entries.values():
             if entry.source_message_id == source_message_id:
