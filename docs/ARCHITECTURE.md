@@ -11,7 +11,7 @@ This repository implements a **portable memory/journal core**. The functional co
 Hosts and integrations vary along five axes. Each axis has a single explicit seam:
 
 1. **Event source** — Telegram webhook today; HTTP API, embedded SDK call, CLI, web form later. Adapter translates transport-specific input into a `SourceMessage` plus a routing decision.
-2. **Control surface** — how users invoke ingest vs. ask. `/entry` and `/ask` in Telegram; UI buttons, endpoints, or app screens elsewhere. Routing logic is core-shaped; its binding to a transport is adapter-side.
+2. **Control surface** — how users invoke ingest vs. ask. `/note` and `/ask` in Telegram; UI buttons, endpoints, or app screens elsewhere. Routing logic is core-shaped; its binding to a transport is adapter-side.
 3. **Storage / infrastructure** — `DiaryRepository` and `SearchRepository` Protocols. Mock, SQLite (dev), local Postgres + pgvector, managed Postgres, or a host's existing database when embedded.
 4. **Embedding / LLM providers** — `EmbeddingClient`, `ChatClient`. OpenAI today, but also self-hosted models, on-prem inference, host-provided gateways, mocks for tests.
 5. **Tenant / auth mapping** — maps the host's identity model (Telegram chat → family scope; TheyGrow account → workspace; OSS deployment → single-tenant default) onto the core's scope. The mapping function is adapter; the scoped query is core.
@@ -112,7 +112,7 @@ Target control surface (D-027):
 - `/ask <text>` — query.
 - **No command** — defaults to **draft**. Heuristics MAY suggest a stronger route (note or ask), but they MUST NOT override the draft floor: absence of an explicit command never silently discards or downgrades raw persistence.
 
-The current Telegram implementation exposes `/entry` (the historical name for `/note`), `/draft`, and `/ask`; the no-command-→-draft default is enforced in code (D-028). The lifecycle state is carried by `SourceMessage.detected_route` (extended with `RouteKind.DRAFT`), with `core.routing.lifecycle_for` as the canonical mapping helper — no separate lifecycle column. Renaming `/entry` → `/note` (and `RouteKind.ENTRY` → `NOTE`) is its own packet (D-026).
+The Telegram implementation exposes `/note`, `/ask`, `/drafts`, and `/export` (D-031); the explicit `/draft` command was removed in D-030, and the no-command-→-draft default is enforced in code (D-028). The lifecycle state is carried by `SourceMessage.detected_route` (extended with `RouteKind.DRAFT`), with `core.routing.lifecycle_for` as the canonical mapping helper — no separate lifecycle column. Internal symbol renames (`RouteKind.ENTRY` → `NOTE`, persisted `detected_route='entry'`) remain deferred under D-026.
 
 Lifecycle rules:
 
@@ -123,7 +123,7 @@ Lifecycle rules:
 
 Specific draft retention, expiry, and promotion mechanics are bracketed as open assumptions.
 
-## Data flow — ingestion (`/entry`)
+## Data flow — ingestion (`/note`)
 
 1. Channel adapter receives an inbound update.
 2. Adapter calls `IngestionService.ingest_source_message(...)`.

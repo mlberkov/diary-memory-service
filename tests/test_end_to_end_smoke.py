@@ -1,4 +1,4 @@
-"""End-to-end webhook smoke: /entry then /ask via TestClient.
+"""End-to-end webhook smoke: /note then /ask via TestClient.
 
 Each test wires a fresh ``MockDiaryStore`` + ``Dispatcher`` into the
 FastAPI app via ``app.dependency_overrides`` so per-test state is
@@ -79,7 +79,7 @@ def test_entry_then_ask_returns_grounded_reply_with_date() -> None:
 
     entry_resp = _post(
         client,
-        _update("/entry 2026-05-09\nHad a calm morning\nTried a new book", update_id=1),
+        _update("/note 2026-05-09\nHad a calm morning\nTried a new book", update_id=1),
     )
     assert entry_resp.status_code == 200
     assert entry_resp.json()["text"] == "Saved 2 events for 2026-05-09."
@@ -100,7 +100,7 @@ def test_entry_then_ask_returns_grounded_reply_with_date() -> None:
 def test_ask_with_no_match_returns_no_evidence_fallback() -> None:
     client, _ = _client_with_fresh_store()
 
-    _post(client, _update("/entry 2026-05-09\nMorning routine", update_id=1))
+    _post(client, _update("/note 2026-05-09\nMorning routine", update_id=1))
     resp = _post(client, _update("/ask snowstorm", update_id=2, message_id=2))
 
     assert resp.status_code == 200
@@ -110,11 +110,11 @@ def test_ask_with_no_match_returns_no_evidence_fallback() -> None:
 def test_entry_with_invalid_first_line_returns_invalid_input_and_persists_source() -> None:
     client, store = _client_with_fresh_store()
 
-    resp = _post(client, _update("/entry not-a-date\nfoo", update_id=1))
+    resp = _post(client, _update("/note not-a-date\nfoo", update_id=1))
 
     assert resp.status_code == 200
     assert resp.json()["text"] == (
-        "Mock /entry needs an ISO date (YYYY-MM-DD) on the first line. Got: 'not-a-date'."
+        "Mock /note needs an ISO date (YYYY-MM-DD) on the first line. Got: 'not-a-date'."
     )
     assert store.len_sources() == 1
     assert store.len_entries() == 0
@@ -137,8 +137,7 @@ def test_dated_plain_text_is_ingested_as_entry_via_heuristic() -> None:
 
     assert resp.status_code == 200
     assert resp.json()["text"] == (
-        "Saved 2 events for 2026-05-10.\n"
-        "(routed as entry — send /entry next time to be explicit)"
+        "Saved 2 events for 2026-05-10.\n" "(routed as note — send /note next time to be explicit)"
     )
     assert store.len_chunks() == 2
 
@@ -146,7 +145,7 @@ def test_dated_plain_text_is_ingested_as_entry_via_heuristic() -> None:
 def test_question_plain_text_returns_grounded_reply_via_heuristic() -> None:
     client, _ = _client_with_fresh_store()
 
-    _post(client, _update("/entry 2026-05-10\nLearned a new recipe\nWalked 5km", update_id=1))
+    _post(client, _update("/note 2026-05-10\nLearned a new recipe\nWalked 5km", update_id=1))
     resp = _post(client, _update("recipe?", update_id=2, message_id=2))
 
     assert resp.status_code == 200
@@ -166,7 +165,7 @@ def test_ambiguous_plain_text_persists_as_draft_under_no_command_default() -> No
     assert resp.status_code == 200
     body = resp.json()
     assert body["text"].startswith("Stored as draft")
-    assert "/entry" in body["text"]
+    assert "/note" in body["text"]
     assert store.len_sources() == 1
     assert store.len_entries() == 0
     assert store.len_chunks() == 0
@@ -214,7 +213,7 @@ def test_replayed_entry_returns_same_reply_and_does_not_duplicate(
 ) -> None:
     client, store = _client_with_fresh_store()
     payload = _update(
-        "/entry 2026-05-09\nHad a calm morning\nTried a new book",
+        "/note 2026-05-09\nHad a calm morning\nTried a new book",
         update_id=1,
         message_id=99,
     )
@@ -241,12 +240,12 @@ def test_edited_message_is_distinct_state_from_original() -> None:
 
     first = _post(
         client,
-        _update("/entry 2026-05-09\nA\nB", update_id=1, message_id=99),
+        _update("/note 2026-05-09\nA\nB", update_id=1, message_id=99),
     )
     edited = _post(
         client,
         _update(
-            "/entry 2026-05-09\nA\nB\nC",
+            "/note 2026-05-09\nA\nB\nC",
             update_id=2,
             message_id=99,
             edit_date=1715300100,

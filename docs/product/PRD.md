@@ -93,13 +93,13 @@ Heuristics MAY suggest a stronger route (note or ask) for plain text, but MUST N
 
 ### Naming note
 
-The target command names are `/note`, `/ask`, `/drafts`. The current Telegram implementation exposes `/entry` (the historical name for `/note`), `/ask`, `/drafts`, and `/export`; the no-command-→-draft default is in place (D-028) and the explicit `/draft` command was removed (D-030). The `/entry` → `/note` rename is a separate naming-alignment packet.
+The Telegram command surface is `/note`, `/ask`, `/drafts`, `/export` (D-031). The no-command-→-draft default is in place (D-028) and the explicit `/draft` command was removed (D-030). Internal symbols (`RouteKind.ENTRY`, `detected_route='entry'`, `DiaryEntry`, `parse_diary_entry`, the `diary_rag` package, `family_id`) keep their historical names until their own renaming packets (D-026).
 
 ## 6. Functional Scope
 
 ### In scope for MVP
 - Telegram text input,
-- explicit `/entry`, `/ask`, and `/drafts` commands (the current command surface; `/entry` is the historical name for `/note`; the explicit `/draft` command was removed in D-030 — the no-command default carries the draft floor),
+- explicit `/note`, `/ask`, and `/drafts` commands (the explicit `/draft` command was removed in D-030 — the no-command default carries the draft floor),
 - heuristic auto-routing by date presence on top of the draft floor: high-confidence ENTRY/ASK signals route as before; everything else persists as a draft (D-028),
 - date parsing,
 - line-by-line event splitting,
@@ -168,7 +168,7 @@ The target command names are `/note`, `/ask`, `/drafts`. The current Telegram im
 ## 10. MVP Recommendation
 
 Build the first production slice as:
-1. Telegram `/entry`
+1. Telegram `/note`
 2. raw message persistence
 3. parse date
 4. split event lines

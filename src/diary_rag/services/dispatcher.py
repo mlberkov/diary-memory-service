@@ -43,34 +43,34 @@ from diary_rag.services.query_service import QueryService
 log = get_logger(__name__)
 
 _REPLY_START = (
-    "Welcome — diary mode. Use /entry to record, /ask to query, or /drafts to recall "
+    "Welcome — diary mode. Use /note to record, /ask to query, or /drafts to recall "
     "recent drafts. Plain text without a command is stored as a draft so nothing is lost."
 )
 _REPLY_HELP = (
-    "Commands: /start, /help, /entry, /ask, /drafts, /export. Plain text without a "
+    "Commands: /start, /help, /note, /ask, /drafts, /export. Plain text without a "
     "command is stored as a draft."
 )
-_REPLY_UNKNOWN = "I haven't been taught how to handle that yet — use /entry, /ask, or /drafts."
+_REPLY_UNKNOWN = "I haven't been taught how to handle that yet — use /note, /ask, or /drafts."
 _REPLY_CLARIFY = (
     "I couldn't tell if that's a diary entry or a question. "
-    "Send /entry <YYYY-MM-DD> on the first line then your events to record it, "
+    "Send /note <YYYY-MM-DD> on the first line then your events to record it, "
     "or /ask <your question> to query."
 )
 _REPLY_EXPORT_USAGE = "Usage: /export json | /export txt — pick a format."
 _REPLY_DRAFTS_USAGE = "Usage: /drafts [N]. N must be a positive integer."
 _REPLY_DRAFTS_EMPTY = "No drafts to show."
-_HEURISTIC_MARKER_ENTRY = "(routed as entry — send /entry next time to be explicit)"
+_HEURISTIC_MARKER_ENTRY = "(routed as note — send /note next time to be explicit)"
 _HEURISTIC_MARKER_ASK = "(routed as question — send /ask next time to be explicit)"
 _DRAFT_REPLY_PREFIX = "Stored as draft"
 _DRAFT_REPLY_HINT = (
-    "Send /entry <YYYY-MM-DD> on the first line to commit it as a note, or /ask to query."
+    "Send /note <YYYY-MM-DD> on the first line to commit it as a note, or /ask to query."
 )
 
 
 def _format_ingest_reply(result: IngestResult) -> str:
     if result.fallback is FallbackMode.INVALID_INPUT:
         got = result.invalid_first_line or ""
-        return f"Mock /entry needs an ISO date (YYYY-MM-DD) on the first line. Got: '{got}'."
+        return f"Mock /note needs an ISO date (YYYY-MM-DD) on the first line. Got: '{got}'."
     assert result.entry_date is not None
     if result.events_count == 0:
         return f"Saved {result.entry_date.isoformat()} with no event lines."

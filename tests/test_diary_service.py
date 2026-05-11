@@ -26,7 +26,7 @@ def _entry_message(
         external_message_id=message_id,
         external_chat_id=chat,
         external_user_id=user,
-        text=f"/entry {payload}",
+        text=f"/note {payload}",
         route=RouteKind.ENTRY,
         received_at=datetime.now(tz=UTC),
         route_source="command",

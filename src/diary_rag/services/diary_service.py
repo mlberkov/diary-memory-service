@@ -63,7 +63,7 @@ def _first_line(text: str) -> str:
 
 
 class DiaryService:
-    """Ingests an ``InboundMessage`` carrying a ``/entry`` payload."""
+    """Ingests an ``InboundMessage`` carrying a ``/note`` payload."""
 
     def __init__(
         self,

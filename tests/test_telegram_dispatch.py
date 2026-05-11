@@ -68,7 +68,7 @@ def test_dispatch_called_with_route_start_for_start_command() -> None:
 
 def test_dispatch_called_with_route_entry_and_payload() -> None:
     client, fake = _client_with_fake()
-    response = _post(client, _message_update("/entry 2026-05-09\nFoo"))
+    response = _post(client, _message_update("/note 2026-05-09\nFoo"))
     assert response.status_code == 200
     assert len(fake.calls) == 1
     assert fake.calls[0].route is RouteKind.ENTRY
@@ -132,7 +132,7 @@ def test_dispatch_old_draft_command_is_treated_as_unknown() -> None:
 
 def test_command_routing_wins_over_heuristic_when_command_present() -> None:
     client, fake = _client_with_fake()
-    response = _post(client, _message_update("/entry what is this?"))
+    response = _post(client, _message_update("/note what is this?"))
     assert response.status_code == 200
     assert fake.calls[0].route is RouteKind.ENTRY
     assert fake.calls[0].route_source == "command"
@@ -164,7 +164,7 @@ def test_dispatch_edit_seq_defaults_to_zero_when_no_edit_date() -> None:
 
 def test_dispatch_edit_seq_is_edit_date_when_present() -> None:
     client, fake = _client_with_fake()
-    payload = _message_update("/entry 2026-05-09\nFoo")
+    payload = _message_update("/note 2026-05-09\nFoo")
     payload["message"]["edit_date"] = 1715300100
     response = _post(client, payload)
     assert response.status_code == 200

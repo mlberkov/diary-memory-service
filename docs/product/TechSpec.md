@@ -75,7 +75,7 @@ Inbound messages enter one of three lifecycle states — **draft**, **note**, or
 - **No command** → defaults to **draft**. The raw text is persisted as a `SourceMessage` with `detected_route='draft'`. No path silently discards an inbound message. Drafts are not note-candidates and have no promotion path (D-030).
 
 ### Current command surface
-The Telegram adapter exposes `/entry` (the historical name for `/note`), `/ask`, `/drafts`, and `/export`. The no-command-→-draft default is in place (D-028). The explicit `/draft` command was removed in D-030; rows previously persisted with `detected_route='draft'` remain valid. Renaming `/entry` to `/note` is part of the broader naming-alignment packet (D-026).
+The Telegram adapter exposes `/note`, `/ask`, `/drafts`, and `/export` (D-031). The no-command-→-draft default is in place (D-028). The explicit `/draft` command was removed in D-030; rows previously persisted with `detected_route='draft'` remain valid. Internal symbols (`RouteKind.ENTRY`, persisted `detected_route='entry'`, the Postgres CHECK constraint) keep their historical names until their own renaming packets under D-026.
 
 ### Convenience routing
 Heuristics MAY suggest a stronger route (note or ask) for plain text, but MUST NOT override the draft floor. As of D-028, the classifier keeps the high-confidence ENTRY (`first_line_iso_date_with_events`) and ASK (`question_mark_terminator`, `interrogative_or_imperative_first_token`) rules and routes everything else to `RouteKind.DRAFT` (reason `draft_floor_no_signal`). CLARIFY remains a valid response kind but no plain-text path emits it; it survives in the dispatcher for explicit-command active-conflict cases.

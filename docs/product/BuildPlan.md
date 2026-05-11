@@ -63,7 +63,7 @@ Validate the UX and routing model without real providers.
 
 ### Build
 - Telegram webhook receiver,
-- `/start`, `/help`, `/entry`, `/ask`,
+- `/start`, `/help`, `/note`, `/ask`,
 - basic date parser,
 - line splitter,
 - mock persistence,

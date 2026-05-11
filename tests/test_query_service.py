@@ -37,7 +37,7 @@ def _entry(payload: str, *, chat: str = "42", user: str = "7") -> InboundMessage
         external_message_id="100",
         external_chat_id=chat,
         external_user_id=user,
-        text=f"/entry {payload}",
+        text=f"/note {payload}",
         route=RouteKind.ENTRY,
         received_at=datetime.now(tz=UTC),
         route_source="command",

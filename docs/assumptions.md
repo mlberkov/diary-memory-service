@@ -39,7 +39,7 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 - **A-26. Webhook secret enforcement**: the `/telegram/webhook` endpoint fails closed when `TELEGRAM_WEBHOOK_SECRET` is unset or mismatched (returns 401). The `X-Telegram-Bot-Api-Secret-Token` header is compared with `secrets.compare_digest`.
 
 ## Mock contour (current)
-- **A-28. Mock `/entry` accepts ISO-only dates**: the date parser in `core/diary/parser.py` recognizes only `YYYY-MM-DD` on the first non-empty line. Anything else returns `INVALID_INPUT`. Precursor to A-12 (date parsing scope).
+- **A-28. Mock `/note` accepts ISO-only dates**: the date parser in `core/diary/parser.py` recognizes only `YYYY-MM-DD` on the first non-empty line. Anything else returns `INVALID_INPUT`. Precursor to A-12 (date parsing scope).
 *A-29 → D-025.*
 *A-30 → D-023.*
 - **A-31. Mock per-route persistence**: in the current in-memory contour, only ENTRY messages persist a `SourceMessage`; ASK and CLARIFY do not. This describes mock behavior only — it is not an architectural rule about durable storage. Per-route persistence semantics are an open design question for Phase 2 and are not bound by this assumption.

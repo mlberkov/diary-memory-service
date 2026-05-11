@@ -56,7 +56,7 @@ def test_telegram_message_parses_edit_date_when_present() -> None:
             "edit_date": 1715300100,
             "chat": {"id": 42},
             "from": {"id": 7},
-            "text": "/entry 2026-05-09\nA",
+            "text": "/note 2026-05-09\nA",
         },
     }
     update = TelegramUpdate.model_validate(payload)
