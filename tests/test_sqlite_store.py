@@ -197,3 +197,9 @@ def test_count_event_chunks_for_source(tmp_path: Path) -> None:
 
     assert store.count_event_chunks_for_source("s1") == 2
     assert store.count_event_chunks_for_source("nope") == 0
+
+
+def test_list_source_messages_raises_not_implemented(tmp_path: Path) -> None:
+    store = SqliteDiaryStore(str(tmp_path / "diary.db"))
+    with pytest.raises(NotImplementedError, match="sqlite raw export not supported"):
+        store.list_source_messages("fam-A")

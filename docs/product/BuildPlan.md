@@ -5,7 +5,13 @@ Draft v1
 
 ## Goal
 
-Build a reusable Diary Memory Service that starts with Telegram as the first interface and is later integrated into TheyGrow.
+Build a portable memory/journal core, surfaced first as a Diary Memory Service that starts with Telegram and is later integrated into TheyGrow. The same core is intended to support additional hosts (self-hosted OSS, managed cloud, other embedded products) without rewrite (D-026). The family-diary framing is the first use case, not the definition of the system.
+
+Target-state shape (D-027) — bound here so future slices stay consistent, not scheduled as their own phases yet:
+- Draft-by-default safety: explicit `/note`, `/draft`, `/ask` commands; absence of command defaults to draft so no inbound message is silently discarded.
+- Raw-data durability with a daily backup window (`03:00–05:00` target) and stronger-than-nightly recovery.
+- Raw export on demand in JSON or TXT.
+- Managed cloud as the default reference deployment shape, with self-hosted OSS and embedded (TheyGrow) as peer shapes.
 
 ## Build Strategy
 
@@ -184,36 +190,40 @@ Measure whether the system is actually improving.
 - regressions are visible,
 - rollout decisions can rely on metrics rather than intuition.
 
-## Phase 8 — Privacy and Shared-Diary Controls
+## Phase 8 — Privacy, Durability, and Shared-Memory Controls
 
 ### Goal
-Add product trust baseline.
+Add product trust baseline: scope safety, raw data durability, and user-visible export.
 
 ### Build
 - family-scoped access control,
 - authorship preservation,
 - visibility model,
-- export/delete flow,
+- raw export on demand in JSON or TXT (D-027),
 - audit log for sensitive operations,
-- retention policy.
+- retention policy,
+- daily backup window (`03:00–05:00` target) and stronger-than-nightly recovery for raw data (D-027) — mechanism per deployment shape.
 
 ### Definition of Done
 - cross-family leakage is prevented,
 - access behavior is explicit,
-- sensitive operations are traceable.
+- sensitive operations are traceable,
+- users can export their raw data on demand in either format,
+- raw is recoverable from at least the prior nightly window plus a tighter recovery point than nightly-only.
 
-## Phase 9 — TheyGrow Integration Seam
+## Phase 9 — Host Integration Seams
 
 ### Goal
-Make future integration cheap.
+Make integration into other hosts cheap. TheyGrow is the named first-class case; self-hosted OSS, managed cloud, and other embedded hosts are peer shapes (D-026, D-027).
 
 ### Build
 - internal API or SDK,
 - stable domain boundaries,
-- family/child identity mapping,
+- tenant/scope identity mapping (current: family/child; per-host mapping isolated in the adapter layer),
 - downstream integration hooks,
 - Telegram-specific logic isolated in adapter layer.
 
 ### Definition of Done
 - a non-Telegram client can consume the same service,
-- migration into TheyGrow is an integration task, not a rewrite.
+- migration into TheyGrow is an integration task, not a rewrite,
+- self-hosted OSS and managed cloud shapes share the same core configuration.

@@ -393,3 +393,139 @@ The 3072-dim ANN strategy is left open (A-36b) on purpose: an exact family-scope
 - New `Settings` knobs: `retrieval_top_k`, `retrieval_candidate_k`. These are tuning placeholders, not quality claims.
 - Dispatcher reply text changes; the e2e smoke tests and any external documentation that quoted the old trailer were updated in the same packet.
 - Out of scope (unchanged or deferred): **BM25**, **reranker / cross-encoder**, **Qdrant or any external vector/search system**, **halfvec / HNSW migration** (A-36b), Phase 3.4 metadata filters (visibility / child / date), Phase 3.5 retrieval-trace persistence (`RetrievalHit` rows), Phase 4 AnswerTrace persistence, Phase 5 query rewriting / answer modes, Phase 6 provider hardening (A-35 unchanged), multilingual sparse tuning beyond `simple`, query-embedding caching, migration tooling (A-34 unchanged), edit-content semantics (A-10).
+
+---
+
+## D-026 — Portable memory core, many hosts
+
+### Decision
+The repository is a **portable memory/journal core**. The functional core — raw capture, parsing, line-level chunking, embedding, hybrid retrieval, grounded answering, provenance — is one consistent subsystem regardless of which system embeds it. Hosts and integrations vary along five adapter axes, each with a single explicit seam:
+
+1. **Event source** — Telegram webhook today; HTTP API, embedded SDK call, CLI, or web form later.
+2. **Control surface** — `/entry` and `/ask` in Telegram; UI buttons, endpoints, or app screens in other hosts.
+3. **Storage / infrastructure** — `DiaryRepository` and `SearchRepository` Protocols (mock, SQLite dev, local Postgres + pgvector, managed Postgres, or a host's existing database when embedded).
+4. **Embedding / LLM providers** — `EmbeddingClient`, `ChatClient` (OpenAI today; self-hosted, on-prem, host-provided gateways, or mocks elsewhere).
+5. **Tenant / auth mapping** — host identity (Telegram chat, TheyGrow workspace, OSS single-tenant default) mapped onto the core's opaque scope.
+
+Self-hosted OSS, managed cloud, and embedded-in-TheyGrow are first-class deployment shapes. Telegram is one event-source adapter today; TheyGrow is one future host. The current parents / family / child framing is the **first use case** of the core, not its definition. Journal/topic semantics in the core stay generic; use-case-specific identifiers (`family_id`, child) are carried as opaque scope, not encoded in core types or behavior.
+
+### Why
+D-001 (Telegram-first, TheyGrow-later) and D-015 (TheyGrow integration seam) name two specific hosts and one specific migration. As more deployment shapes become realistic (OSS self-host, managed cloud, library embedding), framing the architecture around Telegram-vs-TheyGrow risks encoding host-specific assumptions into the core and use-case vocabulary into types and schemas. This decision generalizes D-001 and D-015 into a single rule with named adapter axes, so future packets evaluate changes against one principle rather than ad-hoc Telegram/TheyGrow comparisons. It also names a drift that already exists (`family_id`, `DiaryEntry`, "family diary" framing) and bounds it: existing names persist; new core code adopts the neutral form; an explicit renaming packet may revisit the existing names later on its own merits.
+
+### Consequence
+- Generalizes D-001 and D-015. Both remain valid as specific host instances of the rule; they are not retired.
+- New core code does not introduce use-case vocabulary (`family`, `child`, `parent`, "diary" as a type name) where a generic name fits. Existing names — including `family_id` in `event_chunks`, `DiaryRepository`, `DiaryEntry`, and the `diary_rag` package — are out of scope of this decision and continue to mean what they mean. An explicit renaming packet may revisit them.
+- No transport types, provider SDKs, raw SQL, or host-runtime assumptions (HTTP-shaped, Telegram-shaped, single-tenant, internet-connected, English-only) appear in core code. This restates and extends I-1 and I-11.
+- Future packets must classify their changes as **core**, **adapter**, or **config** in the packet description. Changes that cross axes name the seams they touch.
+- `docs/ARCHITECTURE.md` updated in place with the portability principle, adapter axes, and boundary-rule extension.
+- `docs/product/PRD.md` and `docs/product/BuildPlan.md` reframed so the parents / family-diary use case is named as the first use case of a generic memory core, not its definition. No product scope change.
+- `AGENTS.md` and `CLAUDE.md` gain the core/adapter/config classification rule for future packets.
+- No code changes, no schema changes, no new dependencies, no roadmap commitment in this packet. Concrete renames, multi-tenant schema work, new event-source adapters, and a managed-cloud or OSS-distribution story are each separate packets, opened on their own merits when needed.
+- Out of scope (unchanged): all open assumptions (A-10, A-34, A-35, A-36b), Phase 3.4+ work, AnswerTrace persistence (Phase 4), Phase 5 query rewriting, Phase 6 provider hardening, Phase 8 privacy/visibility model, Phase 9 TheyGrow integration seam.
+
+---
+
+## D-027 — Target-state architecture extensions: draft-by-default routing, raw-data durability and export, cloud-first deployment
+
+### Decision
+
+The target-state architecture extends D-026 with four behavioral commitments that bind future implementation packets. None of them changes code, schema, or names in this packet; each is a directional rule that future implementation packets implement on their own merits.
+
+1. **Draft-by-default safety (control surface).** Inbound messages enter one of three lifecycle states — **draft**, **note**, or **query**. The user-facing control surface offers three explicit commands:
+   - `/note` — canonical note. Triggers the full ingestion pipeline (parse → chunk → embed → index).
+   - `/draft` — explicit draft. Persisted as raw `SourceMessage` only; no parse, chunk, embed, or index.
+   - `/ask` — query / retrieval.
+   - **Absence of an explicit command** is treated as **draft**. Heuristics may layer suggestions on top, but MUST NOT override the draft floor: no path silently discards an inbound message. CLARIFY (D-020) remains valid for cases where heuristics actively conflict with intent; the new floor is "raw always persists" regardless of routing confidence.
+   A draft may later be promoted to a note via an explicit user action; promotion is replayable from the persisted raw text (I-12). Specific draft retention, expiry, and promotion mechanics are bracketed as A-38.
+
+2. **Raw-data durability with a daily backup window and stronger-than-nightly recovery.** Raw `SourceMessage` is the system's highest-tier durability surface (I-2, I-3). The target contour requires:
+   - a scheduled nightly backup window (target: `03:00–05:00` local time) covering at minimum `source_messages` plus enough relational scaffolding to restore the `SourceMessage → DiaryEntry → EventChunk` lineage,
+   - recovery to a point closer to failure than the last nightly snapshot (the mechanism — continuous WAL archiving, PITR, replicas, or a managed-cloud equivalent — is selected per deployment shape),
+   - operational policies (retention windows, restore drills) that treat raw retention as the highest tier.
+   Derived state (embeddings, indexes, traces) remains reproducible by replay from raw under the active parser/embedding versions. Specific tooling and RPO/RTO targets are bracketed as A-40.
+
+3. **Raw export on demand in JSON or TXT.** The user must be able to export their raw data on demand, in either JSON (stable field names, ISO timestamps) or TXT (one record per block). The export is scope-bounded (R-3) and self-describing (records its own export id, scope, time range, format, requester). Derived state is not in the minimum export contract — raw is sufficient to reconstruct everything else. Per-host delivery channels and the request shape are bracketed as A-39.
+
+4. **Cloud-first deployment as the default shape.** The reference deployment shape is **managed cloud** (managed Postgres, scheduled backups, provider gateways). Self-hosted OSS and embedded-in-host (TheyGrow today as the named first-class case) remain first-class peer shapes — same core, different adapter configurations. None of the three is a rewrite path of the others. The specific managed environment that is the production reference is bracketed as A-41.
+
+### Why
+
+These commitments capture target-state requirements that were implicit or absent in canonical docs:
+
+- D-006 named explicit commands plus heuristic routing, and D-020 named CLARIFY as the safety move for ambiguous plain text. As the system moves toward richer use cases and valuable personal information is being captured, the safety floor for ambiguous input changes from "ask to clarify, drop the message" to "preserve as draft", because absence of an explicit command must never cause silent loss of user data.
+- D-007 made PostgreSQL the durable system of record, and D-022 stood up a local Postgres backend, but durability beyond "raw committed before enrichment" (I-3) was unspecified. Daily backup plus stronger-than-nightly recovery plus raw export make raw durability auditable end-to-end.
+- D-026 named OSS / managed cloud / embedded as first-class deployment shapes without ranking them. Naming managed cloud as the **default** shape resolves which configuration is the production reference; OSS and embedded remain peers, not derivatives.
+
+The behaviors above are directional commitments. Mechanisms — heuristic semantics under the draft floor, draft retention, backup tooling, RPO/RTO, export delivery channel, the specific managed environment — are bracketed as open assumptions and decided by their respective implementation packets.
+
+### Consequence
+
+- Extends D-026 with four behavioral target-state commitments. D-026 remains the portability rule; D-027 names the behaviors the portable core must support.
+- Generalizes D-006 / D-020: the safety floor for ambiguous input is **preserve as draft**, not **clarify and drop**. D-020's CLARIFY UX remains valid for cases where the heuristic actively conflicts with intent.
+- Sharpens A-20 (export/delete semantics — export half directionally answered), A-22 (hosting target — managed cloud as default), A-23 (backup strategy — daily window plus stronger recovery).
+- Opens new assumptions: **A-38** (draft lifecycle semantics), **A-39** (raw export packaging and delivery), **A-40** (backup tooling and recovery objectives), **A-41** (cloud-first reference environment).
+- `docs/ARCHITECTURE.md` updated in place with the message-lifecycle, durability/backup/recovery, and raw-export sections, deployment-shapes naming, and a one-page-view diagram refresh to target-state command names.
+- `docs/product/PRD.md` updated to reflect target-state control surface, an added user job (Job 5 — Own my data), expanded product principles (draft-by-default, durability, raw export, generic topic model), in-scope target-state additions, and the integration-direction ranking.
+- `docs/product/BuildPlan.md` updated for consistency: target-state shape called out next to Goal; Phase 8 wording now covers raw export and backup/recovery; Phase 9 renamed "Host Integration Seams" with TheyGrow named as one first-class case among peers.
+- No code changes, no schema changes, no naming-alignment changes in this packet. Implementing `/note`, `/draft`, the no-command-→-draft default, the export endpoint, the backup/recovery contour, and the cloud-first deployment are each separate implementation packets opened on their own merits. The renaming of the existing `/entry` command to `/note` is part of the broader naming-alignment packet (D-026).
+- Out of scope (unchanged): all prior open assumptions (A-9, A-10, A-11, A-12, A-13, A-14, A-15, A-18, A-19, A-21, A-24, A-25, A-26, A-28, A-31, A-33, A-34, A-35, A-36b, A-37); Phase 3.4+ retrieval refinements; Phase 4 grounded-answer pipeline; Phase 5 query rewriting / answer modes; Phase 6 provider hardening; Phase 8 visibility-model implementation; Phase 9 host-integration mechanics; TechSpec.md, INVARIANTS.md, RUNTIME-INVARIANTS.md, RUNBOOK.md, assumption-audit.md (each carries its own follow-up alignment when the corresponding implementation packet lands).
+
+---
+
+## D-028 — Draft-by-default routing floor: `/draft` + no-command-→-draft, lifecycle carried by `detected_route`
+
+### Decision
+The first implementation packet after D-027 lands the no-silent-loss floor in code with the smallest safe surface change:
+
+- **Command surface (adapter).** The Telegram adapter adds `/draft` to `COMMAND_TOKENS` (`src/diary_rag/adapters/telegram/commands.py`). `/start`, `/help`, `/entry`, and `/ask` are unchanged. The `/entry` → `/note` rename remains the separate naming-alignment packet (D-026).
+- **Heuristic routing (core).** `classify_plain_text` (`src/diary_rag/core/routing/classifier.py`) keeps its high-confidence ENTRY and ASK rules unchanged but routes every other non-empty plain-text message to `RouteKind.DRAFT` (reason `draft_floor_no_signal`). `CLARIFY` only remains as the empty/whitespace branch; the webhook short-circuits empty text before the classifier runs, so CLARIFY is effectively dormant under R-13.
+- **Lifecycle representation (core, smallest seam).** `RouteKind` gains a `DRAFT` value and a `lifecycle_for(route)` helper maps `ENTRY → "note"`, `ASK → "query"`, `DRAFT → "draft"`, everything else → `"other"`. The persisted carrier is the existing `SourceMessage.detected_route` column — no new column, no migration. The lifecycle vocabulary is named in code (`Literal["draft","note","query","other"]`) without renaming the underlying route values; the `entry`-vs-`note` naming mismatch is bracketed for the naming-alignment packet (A-38 narrowed accordingly).
+- **Persistence (core).** `DiaryService.ingest` handles `RouteKind.DRAFT` by committing the raw `SourceMessage` via `get_or_create_source_message` and returning an `IngestResult` with `fallback=NONE`, `entry_date=None`, `events_count=0`. No parse, no chunk, no embed, no index. The replay path (`_reconstruct_result`) branches on the persisted `detected_route`: drafts return the same `IngestResult` shape on replay; notes look up the `DiaryEntry` as before. R-2 holds for drafts because the idempotency key path is unchanged.
+- **Dispatcher (core).** The `DRAFT` branch delegates to `DiaryService.ingest` and replies `Stored as draft[ (replay)]. Send /entry <YYYY-MM-DD> on the first line to commit it as a note, or /ask to query.` No heuristic marker is appended for no-command-default DRAFT — the draft floor is unconditional, so there is no requested-vs-effective divergence to surface (R-6 does not apply). The CLARIFY route handler is preserved but no plain-text path reaches it under the new classifier rules.
+- **Schema (adapter).** Postgres `source_messages.detected_route` CHECK constraint extends from `{start, help, entry, ask, clarify, unknown}` to `{start, help, entry, ask, draft, clarify, unknown}` in `src/diary_rag/storage/postgres/schema.sql`. SQLite has no enum constraint on the column. The mock backend has no type-level constraint. Per A-34, existing local Postgres volumes that pre-date this packet must be reset (`docker compose down -v`) before the new CHECK applies; the test fixture truncates but cannot rewrite the constraint, so the Postgres integration tests added for drafts will pass after the next volume reset.
+- **Observability (adapter).** The webhook log line gains a `lifecycle=draft|note|query|other` field derived from `lifecycle_for(result.route)`. `DiaryService` logs `draft.persisted source_message_id=… family_id=… effective_path=fresh|replay` when the draft path is taken.
+- **Out of scope (unchanged).** `/entry` → `/note` rename; draft retention, expiry, and promotion mechanics; raw export; backup/recovery tooling; tenancy generalization; schema migration tooling.
+
+### Why
+D-027 committed the draft-by-default safety floor and named the absence of an explicit command as a draft trigger so no inbound message is silently discarded. That commitment was a directional rule with no code change. This packet enforces it in real code with the smallest seam that respects D-026: a single new `RouteKind` value, one new command token, one new branch in the classifier, one new branch in `DiaryService.ingest`, one new dispatcher branch, and one extended CHECK. The lifecycle representation question opened by A-38 admits the cheapest answer here — the existing `detected_route` column already serves as the carrier; introducing a parallel `lifecycle` column would have meant a destructive schema upgrade for every backend without any new behavior to justify it.
+
+The `Literal["draft","note","query","other"]` vocabulary lets the rest of the code refer to lifecycle states without committing to a rename of `RouteKind.ENTRY` → `NOTE`. That keeps the naming-alignment packet (D-026) cleanly separable.
+
+### Consequence
+- Closes the lifecycle-representation slice of **A-38**: `SourceMessage.detected_route` is the lifecycle carrier; no new column. The retention / expiry / promotion mechanics remain open under the same assumption.
+- I-14 / R-11 / R-13 are now enforced in code, not just declared in docs.
+- `core.routing.RouteKind` adds `DRAFT`; `core.routing.lifecycle_for` is the canonical mapping helper; `core.routing.Lifecycle` is the `Literal` alias.
+- The Telegram adapter exposes `/draft` and routes no-command text to `RouteKind.DRAFT`. The dispatcher reply text changes for help / start / unknown to name `/draft`.
+- `source_messages.detected_route` CHECK extended; A-34 destructive-upgrade discipline applies to existing local Postgres volumes.
+- Webhook log line gains `lifecycle=…`; `DiaryService` emits `draft.persisted` on the draft path.
+- Out of scope (unchanged or deferred): A-38 retention/expiry/promotion mechanics, A-39 export packaging, A-40 backup tooling, A-41 cloud-first reference environment, `/entry` → `/note` rename (naming-alignment packet under D-026), raw export endpoint, schema migration tooling, multi-tenancy generalization, AnswerTrace persistence, retrieval refinements (Phase 3.4+).
+
+---
+
+## D-029 — Raw export (minimal first slice): synchronous, family-scoped, JSON/TXT via Telegram `sendDocument`
+
+### Decision
+The first implementation packet after D-028 lands the raw-export slice of D-027 with the smallest safe surface that proves I-15 end-to-end on the Telegram adapter:
+
+- **Command surface (adapter).** The Telegram adapter adds `/export` to `COMMAND_TOKENS` (`src/diary_rag/adapters/telegram/commands.py`). Existing tokens are unchanged. The argument is parsed from the existing payload — `json` or `txt`; anything else (including the empty arg) returns a fixed usage reply and does not generate or deliver a document.
+- **Repository seam (core / storage).** `DiaryRepository` gains `list_source_messages(family_id: str, *, limit: int | None = None) -> list[SourceMessage]` ordered `(created_at ASC, source_message_id ASC)`. `MockDiaryStore` and `PostgresDiaryStore` implement it; `SqliteDiaryStore` raises `NotImplementedError("sqlite raw export not supported; postgres is the canonical durable backend (D-022, D-029)")` matching the D-025 style. No new schema, no new index — the existing `source_messages.family_id` column is sufficient at diary scale.
+- **Core service.** New `src/diary_rag/services/export_service.py` adds `ExportService.export(*, family_id, requester_user_id, format)` returning a channel-neutral `ExportPayload` (bytes, filename, media_type, format, record_count, generated_at, family_id, requester_user_id). `core/export/serializers.py` provides pure `serialize_json` / `serialize_txt` functions; each emits an inline provenance envelope (JSON top-level `export` object, TXT `#`-prefixed header) with `schema_version=1`. No provider SDK, no host identifier, no use-case vocabulary in any new type.
+- **Dispatcher (core).** `Dispatcher.__init__` gains a required `export: ExportService` argument. The new `RouteKind.EXPORT` branch parses `json|txt`, calls `ExportService.export`, and returns a `DispatchResult` that carries the bytes via the new optional `DispatchResult.document: ExportPayload | None` field. Invalid/missing arg returns text-only with `fallback=invalid_input`. `lifecycle_for(EXPORT)` returns `"other"` without code change.
+- **Outbound delivery (adapter).** A new `TelegramClient` Protocol (`src/diary_rag/adapters/telegram/client.py`) names the outbound surface; `HttpxTelegramClient` performs the multipart `sendDocument` POST to `https://api.telegram.org/bot<token>/sendDocument`. The webhook handler is now FastAPI-injected with a `TelegramClient` (factory `get_telegram_client` mirrors `get_dispatcher`). When `result.document is not None` it calls `send_document`, returns `{}` on success, and logs `export.delivered`; on outbound exception it returns a `sendMessage` error reply and logs `export.delivery_failed` with the exception class.
+- **Persistence.** No export-audit row is persisted. No `source_messages` schema or CHECK change (export does not insert any new `detected_route` value).
+- **Observability.** `ExportService` logs `export.ok family_id=… format=… count=… bytes=…`. Dispatcher logs `export.usage_error chat_id=… payload=…` on invalid arg. Webhook logs `export.delivered` / `export.delivery_failed`. The existing `telegram.webhook` log line is unchanged; `lifecycle=other` is the natural value for `EXPORT`.
+- **Dependencies.** `httpx` moves from dev-only to a runtime dependency in `pyproject.toml`; it is the canonical Python multipart-capable HTTP client and was already transitively present via FastAPI's `TestClient`.
+
+### Why
+D-027 committed raw export on demand in JSON or TXT (scope-bounded) as a directional rule, and I-15 already names raw durability and export as the highest-tier surface. D-028 landed the draft-by-default companion. This packet enforces the export half on the Telegram adapter with the smallest seams that work: one new repository method, one new core type cluster (`ExportFormat` / `ExportPayload` / serializers / service), one new optional field on `DispatchResult`, one new outbound HTTP surface in the Telegram adapter. Synchronous single-shot is the minimum that delivers the user-facing capability; async generation, time-range arguments, an audit row, and HTTP / host-app delivery channels remain real questions answered by future packets on their own merits.
+
+A `TelegramClient` outbound seam is unavoidable: the Telegram webhook response body supports `sendDocument` only with a `file_id` or URL, not a binary upload; a freshly-generated raw export requires multipart/form-data. Naming the seam as a Protocol keeps the webhook handler transport-agnostic and lets tests inject a recording fake.
+
+### Consequence
+- Closes the Telegram-delivery-channel slice of **A-39** (delivery channel for the Telegram adapter is outbound `sendDocument` via multipart) and the request-shape slice (synchronous, single-shot). Remaining open under A-39: audit-row schema for export provenance, inclusion of derived state as an optional flag, time-range arguments, and delivery channels for non-Telegram hosts (HTTP download, host-app screen).
+- I-15 is now enforced in code on the Telegram adapter, not just declared in docs.
+- New: `src/diary_rag/core/export/{models,serializers}.py`, `src/diary_rag/services/export_service.py`, `src/diary_rag/adapters/telegram/client.py`, plus four test files (`tests/test_export_serializers.py`, `tests/test_export_service.py`, `tests/test_storage_list_source_messages.py`, `tests/test_telegram_export.py`).
+- Changed: `core/routing/models.py` adds `RouteKind.EXPORT` and `DispatchResult.document`; `services/dispatcher.py` adds `ExportService` dependency and the EXPORT branch; `services/__init__.py` exports `ExportService`; `storage/repository.py` extends the Protocol; `storage/mock/store.py` and `storage/postgres/store.py` implement `list_source_messages`; `storage/sqlite/store.py` raises `NotImplementedError`; `adapters/telegram/commands.py` adds `/export`; `adapters/telegram/webhook.py` injects `TelegramClient` and branches on `result.document`. Existing tests that construct a real `Dispatcher` updated to pass `ExportService(...)` as the third argument.
+- New runtime dependency: `httpx>=0.27,<0.28` (promoted from dev-only).
+- No schema changes (A-34 unaffected — no destructive local-Postgres upgrade required).
+- Out of scope (unchanged or deferred): A-38 draft retention/expiry/promotion, A-40 backup tooling and RPO/RTO, A-41 cloud-first reference environment, naming-alignment packet (`/entry` → `/note`, `diary_rag` → neutral name, `family_id` → neutral scope name), the remaining slices of A-39 above, derived-state export, HTTP / host-app delivery channels, AnswerTrace persistence (Phase 4), retrieval refinements (Phase 3.4+), schema migration tooling.

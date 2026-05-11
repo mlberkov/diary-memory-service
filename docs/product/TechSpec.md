@@ -5,16 +5,19 @@ Draft v1
 
 ## 1. Architecture Position
 
-The system must be implemented as a standalone Diary Memory Service.
+The system must be implemented as a standalone Diary Memory Service — a **portable memory/journal core** surfaced through host-specific adapters (D-026). The first use case is a family/child diary; the core itself is topic-neutral.
 
 ### Current channel
 - Telegram bot
 
-### Future channel
-- TheyGrow app/backend
+### Future channels and deployment shapes
+- TheyGrow app/backend (embedded host, named first-class case),
+- self-hosted OSS (peer shape),
+- **managed cloud as the default reference deployment** (D-027),
+- other embedded products and future web/app surfaces.
 
 ### Rule
-Telegram-specific logic must remain in the adapter layer and must not define the core domain model.
+Telegram-specific logic must remain in the adapter layer and must not define the core domain model. The same boundary applies to other event sources, control surfaces, storage backends, provider SDKs, and tenant/auth mappings — each is one of the five adapter axes named in `docs/ARCHITECTURE.md` (D-026).
 
 ## 2. Core Technical Direction
 
@@ -62,16 +65,25 @@ The `SourceMessage` row (step 3) must be committed before any enrichment step �
 
 ## 4. Routing
 
-### Preferred routing
-- `/entry` → diary ingestion path
-- `/ask` → question path
+### Target command surface (D-027)
+Inbound messages enter one of three lifecycle states — **draft**, **note**, or **query** — set by the user's command, not by message content:
+
+- `/note <text>` → canonical note. Triggers the full ingestion pipeline (parse → chunk → embed → index).
+- `/draft <text>` → explicit draft. Persisted as raw `SourceMessage` only; no parse, chunk, embed, or index.
+- `/ask <text>` → query / retrieval.
+- **No command** → defaults to **draft**. The raw text is persisted; the user may later promote it to a note. No path silently discards an inbound message.
+
+### Current command surface
+The Telegram adapter exposes `/entry` (the historical name for `/note`), `/draft`, and `/ask`. The no-command-→-draft default is also in place (D-028). Renaming `/entry` to `/note` is part of the broader naming-alignment packet (D-026).
 
 ### Convenience routing
-- date present at message start → diary path
-- no date present → question path
+Heuristics MAY suggest a stronger route (note or ask) for plain text, but MUST NOT override the draft floor. As of D-028, the classifier keeps the high-confidence ENTRY (`first_line_iso_date_with_events`) and ASK (`question_mark_terminator`, `interrogative_or_imperative_first_token`) rules and routes everything else to `RouteKind.DRAFT` (reason `draft_floor_no_signal`). CLARIFY remains a valid response kind but no plain-text path emits it; it survives in the dispatcher for explicit-command active-conflict cases.
 
 ### Safety rule
-If routing confidence is low, the system should ask for clarification rather than silently misclassify.
+The safety floor for ambiguous input is **preserve as draft**, not **clarify and drop** (D-027 / D-028). Absence of an explicit command never causes silent data loss. CLARIFY remains a valid response shape when a heuristic would actively conflict with intent (D-020), but raw persistence is unconditional.
+
+### Lifecycle representation
+`SourceMessage.detected_route` carries the lifecycle state (D-028). The `core.routing.lifecycle_for` helper maps routes to the canonical lifecycle vocabulary — `ENTRY → "note"`, `ASK → "query"`, `DRAFT → "draft"`, everything else → `"other"` — so the persisted `detected_route` value doubles as the lifecycle marker without a parallel column. Renaming `ENTRY` → `NOTE` is its own naming-alignment packet (D-026).
 
 ## 5. Data Model
 
@@ -225,6 +237,17 @@ Raw source message must be persisted before embeddings or indexing.
 ### Rationale
 No provider failure may destroy original user input.
 
+### Raw durability (D-027)
+Raw `SourceMessage` is the highest-tier durability surface. Derived state (embeddings, indexes, retrieval traces, answer traces) is reproducible from raw under the active parser/embedding versions; raw is not reproducible from anything else.
+
+Operational policy requires:
+- a daily backup window (target: `03:00–05:00` local time) covering at minimum `source_messages` plus enough relational scaffolding to restore the `SourceMessage → DiaryEntry → EventChunk` lineage,
+- a stronger-than-nightly recovery primitive (continuous WAL archiving, point-in-time recovery, streaming replicas, or a managed-cloud equivalent — selected per deployment shape; mechanism bracketed as A-40),
+- retention windows and restore drills that treat raw as the highest tier.
+
+### Raw export (D-027)
+The user must be able to export their raw `SourceMessage` data on demand in either JSON (stable field names, ISO timestamps) or TXT (one record per block). The export is scope-bounded the same way retrieval is, and records its own provenance (export id, scope, time range, format, requester). Derived state is not in the minimum export contract. Per-host delivery channels and request shape are bracketed as A-39.
+
 ## 9. Retrieval Contract
 
 ### Retrieval style
@@ -334,3 +357,5 @@ The system must log:
 5. Fallbacks are logged and discoverable.
 6. Optional AI enrichments are not mandatory for the base flow.
 7. Domain logic must not depend on framework internals.
+8. Absence of an explicit command never causes silent data loss; the safety floor for ambiguous input is a draft, not a discard (D-027).
+9. Raw is the highest-tier durability surface; on-demand raw export in JSON or TXT is a required capability (D-027).

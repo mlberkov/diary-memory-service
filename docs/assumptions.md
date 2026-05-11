@@ -22,14 +22,14 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 ## Privacy & lifecycle
 - **A-18. Data residency**: not stated.
 - **A-19. Retention policy**: revision and trace retention are not bounded. Required before Phase 8.
-- **A-20. Export/delete semantics**: shape of user-initiated export and delete is unspecified.
+- **A-20. Export/delete semantics**: directionally answered by D-027 for the export half — raw export on demand in JSON or TXT, scope-bounded. Remaining open: delivery channel per host (Telegram file reply / HTTP download / host-app screen), request shape, and the deletion half (still tied to A-10 edit/delete strategy).
 
 ## Integration target
 - **A-21. TheyGrow integration surface**: HTTP API, in-process SDK, or message bus. Required before Phase 9.
 
 ## Operational
-- **A-22. Hosting target**: where the service runs (local-only MVP? managed PaaS? self-hosted VM?). Required before Phase 6.
-- **A-23. Backup strategy**: not stated. Required before Phase 7/8.
+- **A-22. Hosting target**: directionally answered by D-027 — managed cloud is the default reference deployment shape; self-hosted OSS and embedded (TheyGrow) are peer shapes. Remaining open: which specific managed environment is the production reference (see A-41 below). Required before Phase 6.
+- **A-23. Backup strategy**: directionally answered by D-027 — daily backup window (`03:00–05:00` target) covering at minimum `source_messages` plus enough relational scaffolding to restore lineage, plus a stronger-than-nightly recovery primitive. Remaining open: specific tooling and RPO/RTO targets (see A-40 below). Required before Phase 7/8.
 
 ## Naming & layout
 - **A-24. Python package name**: Slice 1.1 introduced `diary_rag` (PyPI distribution name `diary-rag`) as the import root. Rationale: short, channel-neutral, matches "Diary Memory Service" naming. Not yet promoted to a decision-log entry. If a different name is preferred before Phase 9 (TheyGrow integration surface, A-21), rename now while the cost is low.
@@ -57,6 +57,12 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 ## Phase 3.3 baseline-hybrid contour (current)
 - **A-36b. 3072-dim ANN-index strategy remains open**: D-025 ships the dense leg as an exact family-scoped sequential scan over `vector(3072)`, which is correct at current diary scale and requires no schema churn. pgvector's HNSW / IVFFlat still cap at 2000 dim, so when corpus size demands ANN the choice is between `halfvec(3072)` + HNSW (small precision loss) or another approach. External vector DBs remain rejected on I-2 grounds. Revisit in the next quality-decision packet alongside BM25 / reranker / Qdrant evaluation.
 - **A-37. Sparse text-search dictionary is `simple`**: the generated `event_chunks.chunk_text_tsv` column uses `to_tsvector('simple', chunk_text)` (D-025). 'simple' avoids stemming and stopword removal — diary content may mix Russian and English, and 'simple' treats both symmetrically without committing to a stemmer that would tokenize one language worse than the other. Multilingual sparse tuning belongs to the next quality-decision packet, not this one.
+
+## Target-state architecture forks (opened by D-027)
+- **A-38. Draft lifecycle semantics**: the lifecycle-representation slice is answered by D-028 — `SourceMessage.detected_route` is the lifecycle carrier (extended with `RouteKind.DRAFT`), and `core.routing.lifecycle_for` is the canonical mapping helper. Remaining open: how long an unpromoted draft is retained, whether it expires by inactivity or by explicit cleanup, and which exact user action promotes a draft to a note (a follow-up `/note` referencing it, a UI confirmation, an inline command, etc.). Required before the draft promotion / retention implementation packet.
+- **A-39. Raw export packaging and delivery**: D-027 commits the formats (JSON and TXT) and the scope (raw `SourceMessage` rows within the requester's scope); D-029 closes the Telegram-delivery-channel slice (outbound `sendDocument` via multipart upload) and the request-shape slice (synchronous, single-shot — no time-range arguments, no async generation). Remaining open: audit-row schema for export provenance, inclusion of derived state as an optional flag, time-range arguments and async generation when scale demands them, and delivery channels for non-Telegram hosts (HTTP download endpoint, host-app screen). Required before each respective follow-up packet.
+- **A-40. Backup tooling and recovery objectives**: D-027 commits the nightly window (`03:00–05:00` target) and a stronger-than-nightly recovery primitive, but does not commit a mechanism. Open: continuous WAL archiving vs streaming replicas vs managed-cloud PITR, retention windows for nightly snapshots, formal RPO/RTO targets per deployment shape, and the restore-drill cadence. Required before the first non-local deployment.
+- **A-41. Cloud-first reference environment**: D-027 names managed cloud as the default deployment shape, but does not name which managed environment is the production reference (managed Postgres provider, hosting platform, observability stack). Self-hosted OSS and embedded shapes remain peers and have their own backend choices. Required before the production rollout packet.
 
 ---
 

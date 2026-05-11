@@ -30,6 +30,11 @@ class _UnusedDiaryService:
         raise AssertionError("ingest should not be called on an /ask path")
 
 
+class _UnusedExportService:
+    def export(self, **kwargs: object) -> object:  # pragma: no cover - not called
+        raise AssertionError("export should not be called on an /ask path")
+
+
 def _ask(query: str) -> InboundMessage:
     return InboundMessage(
         external_message_id="1",
@@ -46,7 +51,11 @@ def _ask(query: str) -> InboundMessage:
 def test_not_implemented_error_translates_to_no_evidence(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    dispatcher = Dispatcher(_UnusedDiaryService(), _RaisingQueryService())  # type: ignore[arg-type]
+    dispatcher = Dispatcher(
+        _UnusedDiaryService(),  # type: ignore[arg-type]
+        _RaisingQueryService(),  # type: ignore[arg-type]
+        _UnusedExportService(),  # type: ignore[arg-type]
+    )
 
     with caplog.at_level(logging.WARNING, logger="diary_rag.services.dispatcher"):
         result = dispatcher.dispatch(_ask("book"))

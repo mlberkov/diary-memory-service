@@ -264,3 +264,104 @@ def test_ingest_with_invalid_payload_does_not_call_embedding_client() -> None:
 
     assert _CountingClient.calls == 0
     assert store.len_embeddings() == 0
+
+
+def _draft_message(
+    payload: str,
+    *,
+    chat: str = "42",
+    user: str = "7",
+    message_id: str = "300",
+    edit_seq: int = 0,
+    route_source: str = "command",
+) -> InboundMessage:
+    return InboundMessage(
+        external_message_id=message_id,
+        external_chat_id=chat,
+        external_user_id=user,
+        text=f"/draft {payload}" if route_source == "command" else payload,
+        route=RouteKind.DRAFT,
+        received_at=datetime.now(tz=UTC),
+        route_source=route_source,  # type: ignore[arg-type]
+        payload=payload,
+        edit_seq=edit_seq,
+    )
+
+
+def test_ingest_draft_persists_raw_only() -> None:
+    store = MockDiaryStore()
+    service = DiaryService(store)
+
+    result = service.ingest(_draft_message("just thinking out loud"))
+
+    assert result.fallback is FallbackMode.NONE
+    assert result.entry_date is None
+    assert result.events_count == 0
+    assert result.replayed is False
+    assert store.len_sources() == 1
+    assert store.len_entries() == 0
+    assert store.len_chunks() == 0
+
+
+def test_ingest_draft_records_draft_route_on_source_message() -> None:
+    store = MockDiaryStore()
+    service = DiaryService(store)
+
+    service.ingest(_draft_message("just thinking out loud"))
+
+    sources = list(store._sources.values())
+    assert len(sources) == 1
+    assert sources[0].detected_route is RouteKind.DRAFT
+    assert sources[0].raw_text == "just thinking out loud"
+
+
+def test_ingest_draft_does_not_call_embedding_client() -> None:
+    store = MockDiaryStore()
+
+    class _CountingClient:
+        model_name = "mock"
+        dimension = 64
+        calls = 0
+
+        def embed(self, texts: list[str]) -> list[list[float]]:
+            type(self).calls += 1
+            return [[0.0] * 64 for _ in texts]
+
+    client = _CountingClient()
+    service = DiaryService(store, embedding_client=client)
+
+    service.ingest(_draft_message("ambiguous text"))
+
+    assert _CountingClient.calls == 0
+    assert store.len_embeddings() == 0
+
+
+def test_ingest_draft_replay_short_circuits_without_duplicating() -> None:
+    store = MockDiaryStore()
+    service = DiaryService(store)
+    msg = _draft_message("recipe yesterday", message_id="d1")
+
+    first = service.ingest(msg)
+    second = service.ingest(msg)
+
+    assert first.replayed is False
+    assert second.replayed is True
+    assert second.fallback is FallbackMode.NONE
+    assert second.source_message_id == first.source_message_id
+    assert second.events_count == 0
+    assert store.len_sources() == 1
+    assert store.len_entries() == 0
+    assert store.len_chunks() == 0
+
+
+def test_ingest_draft_then_distinct_entry_message_keeps_both_states() -> None:
+    store = MockDiaryStore()
+    service = DiaryService(store)
+
+    draft = service.ingest(_draft_message("idea, not yet committed", message_id="d1"))
+    note = service.ingest(_entry_message("2026-05-09\nMorning routine", message_id="n1"))
+
+    assert draft.source_message_id != note.source_message_id
+    assert store.len_sources() == 2
+    assert store.len_entries() == 1
+    assert store.len_chunks() == 1

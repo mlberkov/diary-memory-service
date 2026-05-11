@@ -45,15 +45,18 @@ If any prompt conflicts with these files:
 
 ## Product Context
 
-This project is a Diary RAG Service intended to:
-- start as a Telegram-based diary and Q&A interface,
-- later integrate into TheyGrow as a reusable memory subsystem.
+This project is a portable memory/journal core. The first use case is a Diary RAG Service that:
+- starts as a Telegram-based diary and Q&A interface,
+- later integrates into TheyGrow as a reusable memory subsystem,
+- is intended to support additional hosts (self-hosted OSS, managed cloud, other embedded products) without rewrite.
 
-Core architectural rule:
-- Telegram is a client channel, not the product core.
+Core architectural rule (D-026):
+- The functional core is the same subsystem across hosts.
+- Telegram is one event-source adapter; TheyGrow is one future host. Neither is the product core.
+- The parents / family-diary framing is the first use case of the core, not its definition.
 
 Core service rule:
-- the main system is a standalone Diary Memory Service.
+- the main system is a standalone Diary Memory Service exposed through host-specific adapters.
 
 ## Non-Negotiable Product Rules
 
@@ -67,6 +70,7 @@ Core service rule:
 8. Optional AI enrichments must be feature-flagged.
 9. No silent fallback may pretend that retrieval succeeded.
 10. Shared diary mode must preserve authorship.
+11. Host-specific types, provider SDKs, raw SQL, and use-case vocabulary (`family`, `child`, `parent`, "diary" as a type name) must not appear in newly added core code. Existing names persist until an explicit renaming packet (D-026).
 
 ## Working Rules for Agents
 
@@ -96,6 +100,14 @@ Do not jump ahead from:
 - docs setup -> production-grade infra,
 - Telegram shell -> full TheyGrow integration,
 - base RAG -> advanced agent orchestration.
+
+### Classify every packet
+Every packet description must classify its changes along the adapter axes (D-026). State for each touched area whether it is:
+- **core** (functional core: ingestion, retrieval, answering, traces, domain model, invariants),
+- **adapter** (event source, control surface, storage, providers, tenant/auth mapping),
+- **config** (settings, env, feature flags, deployment wiring).
+
+Changes that cross axes name the seams they touch. A "core" change that imports a provider SDK, references a transport type, or hard-codes use-case vocabulary in a new type is a leak, not a core change.
 
 ### Explicit assumptions
 If something important is underspecified:

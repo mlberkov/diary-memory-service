@@ -102,8 +102,29 @@ BM25, reranker, Qdrant, halfvec/HNSW (A-36b), and multilingual sparse tuning (A-
 ### Telegram in local development
 Webhook only (D-019). Expose the local process via a tunnel (e.g. `ngrok`, `cloudflared`) and register the tunnel URL with the bot. There is no polling fallback.
 
+### Command surface (D-028)
+The Telegram code path exposes `/entry` (historical name for `/note`), `/draft`, and `/ask`, with absence of an explicit command defaulting to **draft** (D-028). Renaming `/entry` to `/note` is part of the broader naming-alignment packet (D-026) and is not in this packet.
+
+Operationally: the draft floor (R-13) means no inbound message is silently discarded, even when routing confidence is low. The webhook log line records `lifecycle=draft|note|query|other` so an operator can see which lifecycle state each delivery resolved to. `DiaryService` emits `draft.persisted source_message_id=… family_id=… effective_path=fresh|replay` when the draft path commits. CLARIFY (D-020) remains a valid reply shape for the rare case where a heuristic would actively conflict with intent, but the classifier no longer emits CLARIFY for plain text; raw persistence is unconditional.
+
+Schema upgrade note: the `source_messages.detected_route` CHECK constraint extended from `{start, help, entry, ask, clarify, unknown}` to `{start, help, entry, ask, draft, clarify, unknown}` (D-028). Per A-34, existing local Postgres volumes must be reset with `docker compose down -v` before the new CHECK applies; SQLite has no enum constraint on the column. Until the reset is performed, inserts with `detected_route='draft'` raise a CHECK violation against the live Postgres backend.
+
+### Raw-data durability and recovery (D-027)
+Raw `SourceMessage` is the highest-tier durability surface (I-15). The target operational contour:
+
+- daily backup window (target: `03:00–05:00` local time) covering at minimum `source_messages` plus enough relational scaffolding to restore `SourceMessage → DiaryEntry → EventChunk` lineage,
+- a stronger-than-nightly recovery primitive (continuous WAL archiving, point-in-time recovery, streaming replicas, or a managed-cloud equivalent — selected per deployment shape).
+
+Specific backup tooling and RPO/RTO targets remain bracketed as A-40. Derived state (embeddings, indexes, retrieval traces, answer traces) is reproducible from raw under the active parser/embedding versions; raw loss is unrecoverable, so operational policies treat raw retention as the highest tier.
+
+### Raw export (D-027)
+The user can export their raw `SourceMessage` data on demand in JSON (stable field names, ISO timestamps) or TXT (one record per block). The export is scope-bounded the same way retrieval is (R-3 / R-14) and records its own provenance (export id, scope, time range, format, requester). Derived state is not in the minimum export contract — raw is sufficient to reconstruct everything else.
+
+Per-host delivery channels (Telegram file reply, HTTP download endpoint, host-app screen) and the request shape are bracketed as A-39. The implementation lands in its own packet.
+
 ## Useful reads when stuck
 - Workflow & recovery: this file.
+- Architecture, adapter axes, deployment shapes: `docs/ARCHITECTURE.md`.
 - What must hold at runtime: `docs/RUNTIME-INVARIANTS.md`.
 - Data shape rules: `docs/INVARIANTS.md`.
 - Open questions: `docs/assumptions.md`.

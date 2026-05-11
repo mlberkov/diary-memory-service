@@ -10,7 +10,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from diary_rag.core.export.models import ExportPayload
 
 RouteSource = Literal["command", "heuristic"]
 
@@ -20,8 +23,29 @@ class RouteKind(StrEnum):
     HELP = "help"
     ENTRY = "entry"
     ASK = "ask"
+    DRAFT = "draft"
+    EXPORT = "export"
     CLARIFY = "clarify"
     UNKNOWN = "unknown"
+
+
+Lifecycle = Literal["draft", "note", "query", "other"]
+
+
+def lifecycle_for(route: RouteKind) -> Lifecycle:
+    """Map a route to its D-027 lifecycle state.
+
+    ``ENTRY`` maps to ``"note"`` because naming alignment of ``/entry`` →
+    ``/note`` is its own packet (D-026); the route value persists under
+    its historical name but the lifecycle vocabulary is canonical.
+    """
+    if route is RouteKind.DRAFT:
+        return "draft"
+    if route is RouteKind.ENTRY:
+        return "note"
+    if route is RouteKind.ASK:
+        return "query"
+    return "other"
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,8 +71,15 @@ class InboundMessage:
 
 @dataclass(frozen=True, slots=True)
 class DispatchResult:
-    """A handler's reply text plus the route it served."""
+    """A handler's reply text plus the route it served.
+
+    ``document`` is set when a handler produces a channel-neutral file
+    payload that the adapter should deliver out-of-band (e.g. Telegram
+    ``sendDocument``). When ``document`` is ``None`` the adapter delivers
+    ``reply_text`` only.
+    """
 
     reply_text: str
     route: RouteKind
     metadata: Mapping[str, str] = field(default_factory=dict)
+    document: ExportPayload | None = None

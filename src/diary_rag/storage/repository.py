@@ -47,6 +47,18 @@ class DiaryRepository(Protocol):
 
     def get_source_message(self, source_message_id: str) -> SourceMessage | None: ...
 
+    def list_source_messages(
+        self, family_id: str, *, limit: int | None = None
+    ) -> list[SourceMessage]:
+        """List raw source messages for a family in deterministic order.
+
+        Order: ``(created_at ASC, source_message_id ASC)``. Includes every
+        persisted route (notes and drafts alike). Family scoping is
+        mandatory (I-7). ``limit`` caps the result; ``None`` means no
+        cap. Backends without raw-export parity (SQLite is opt-in
+        ingest-only) raise ``NotImplementedError`` (D-029).
+        """
+
     def get_or_create_source_message(self, source: SourceMessage) -> tuple[SourceMessage, bool]:
         """Idempotent persist (R-2, D-023).
 

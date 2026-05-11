@@ -42,3 +42,9 @@ Parsing and chunking are deterministic for a given `parse_version`. Re-running p
 
 ## I-13. Soft delete by default
 Deletes default to tombstones. Hard deletion of source data requires an explicit, audited operation. (Specific edit/delete mechanics are open — see `docs/assumptions.md` A-10.)
+
+## I-14. No silent data loss
+Absence of an explicit command never causes silent discard or downgrade of raw persistence. Drafts are the safety floor (D-027); CLARIFY (D-020) remains valid only as a response when a heuristic actively conflicts with intent, not as the persistence floor.
+
+## I-15. Raw durability and export
+Raw `SourceMessage` is the highest-tier durability surface. Operational policy requires a daily backup window plus a stronger-than-nightly recovery primitive; the user can export their raw data on demand in JSON or TXT, scope-bounded (D-027). Derived state is reproducible from raw under the active parser/embedding versions.

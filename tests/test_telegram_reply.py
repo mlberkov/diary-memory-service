@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from diary_rag.adapters.embeddings import MockEmbeddingClient
 from diary_rag.adapters.telegram.reply import build_send_message_payload
 from diary_rag.core.routing import InboundMessage, RouteKind, RouteSource
-from diary_rag.services import DiaryService, Dispatcher, QueryService
+from diary_rag.services import DiaryService, Dispatcher, ExportService, QueryService
 from diary_rag.storage.mock import MockDiaryStore
 
 
@@ -33,7 +33,11 @@ def _inbound(
 def _dispatcher() -> Dispatcher:
     store = MockDiaryStore()
     embed = MockEmbeddingClient()
-    return Dispatcher(DiaryService(store, embedding_client=embed), QueryService(store, embed))
+    return Dispatcher(
+        DiaryService(store, embedding_client=embed),
+        QueryService(store, embed),
+        ExportService(store),
+    )
 
 
 def test_reply_payload_has_send_message_envelope() -> None:
@@ -53,7 +57,7 @@ def test_dispatcher_start_reply_mentions_diary_mode() -> None:
 def test_dispatcher_help_reply_lists_supported_commands() -> None:
     result = _dispatcher().dispatch(_inbound(RouteKind.HELP, "/help"))
     text = result.reply_text
-    for token in ("/start", "/help", "/entry", "/ask"):
+    for token in ("/start", "/help", "/entry", "/draft", "/ask"):
         assert token in text
 
 
@@ -61,6 +65,51 @@ def test_dispatcher_unknown_reply_points_at_help() -> None:
     result = _dispatcher().dispatch(_inbound(RouteKind.UNKNOWN, "hello"))
     text = result.reply_text
     assert "/entry" in text or "/ask" in text
+
+
+def test_dispatcher_draft_reply_states_stored_as_draft() -> None:
+    result = _dispatcher().dispatch(
+        _inbound(
+            RouteKind.DRAFT,
+            text="/draft just thinking out loud",
+            payload="just thinking out loud",
+        )
+    )
+    assert result.route is RouteKind.DRAFT
+    assert result.reply_text.startswith("Stored as draft")
+    assert "/entry" in result.reply_text
+    assert result.metadata["effective_path"] == "fresh"
+    assert result.metadata["fallback"] == "none"
+
+
+def test_dispatcher_draft_reply_marks_replay_on_repeated_delivery() -> None:
+    dispatcher = _dispatcher()
+    msg = _inbound(
+        RouteKind.DRAFT,
+        text="/draft just thinking out loud",
+        payload="just thinking out loud",
+    )
+    first = dispatcher.dispatch(msg)
+    second = dispatcher.dispatch(msg)
+    assert first.metadata["effective_path"] == "fresh"
+    assert second.metadata["effective_path"] == "replay"
+    assert "replay" in second.reply_text
+
+
+def test_dispatcher_no_command_default_draft_omits_heuristic_marker() -> None:
+    result = _dispatcher().dispatch(
+        _inbound(
+            RouteKind.DRAFT,
+            text="recipe yesterday",
+            payload="recipe yesterday",
+            route_source="heuristic",
+        )
+    )
+    assert result.route is RouteKind.DRAFT
+    assert result.reply_text.startswith("Stored as draft")
+    # The draft floor is unconditional; no requested-vs-effective marker is needed
+    # because nothing about the draft outcome diverged from the routing decision.
+    assert "routed as" not in result.reply_text
 
 
 def test_dispatcher_clarify_reply_explains_both_commands() -> None:

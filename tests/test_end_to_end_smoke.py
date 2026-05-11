@@ -20,7 +20,7 @@ from diary_rag.adapters.embeddings import MockEmbeddingClient
 from diary_rag.adapters.telegram.webhook import get_dispatcher
 from diary_rag.app import create_app
 from diary_rag.config import Settings
-from diary_rag.services import DiaryService, Dispatcher, QueryService
+from diary_rag.services import DiaryService, Dispatcher, ExportService, QueryService
 from diary_rag.storage.mock import MockDiaryStore
 
 
@@ -34,6 +34,7 @@ def _client_with_fresh_store() -> tuple[TestClient, MockDiaryStore]:
     dispatcher = Dispatcher(
         DiaryService(store, embedding_client=embed),
         QueryService(store, embed),
+        ExportService(store),
     )
     app = create_app(_settings())
     app.dependency_overrides[get_dispatcher] = lambda: dispatcher
@@ -155,20 +156,53 @@ def test_question_plain_text_returns_grounded_reply_via_heuristic() -> None:
     )
 
 
-def test_ambiguous_plain_text_returns_clarify_and_does_not_persist() -> None:
+def test_ambiguous_plain_text_persists_as_draft_under_no_command_default() -> None:
     client, store = _client_with_fresh_store()
 
     resp = _post(client, _update("recipe yesterday", update_id=1))
 
     assert resp.status_code == 200
-    assert resp.json()["text"] == (
-        "I couldn't tell if that's a diary entry or a question. "
-        "Send /entry <YYYY-MM-DD> on the first line then your events to record it, "
-        "or /ask <your question> to query."
-    )
-    assert store.len_sources() == 0
+    body = resp.json()
+    assert body["text"].startswith("Stored as draft")
+    assert "/entry" in body["text"]
+    assert store.len_sources() == 1
     assert store.len_entries() == 0
     assert store.len_chunks() == 0
+
+
+def test_explicit_draft_command_persists_raw_only_and_skips_enrichment() -> None:
+    client, store = _client_with_fresh_store()
+
+    resp = _post(client, _update("/draft 2026-05-09\nNot sure yet, keep it raw", update_id=1))
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["text"].startswith("Stored as draft")
+    assert store.len_sources() == 1
+    assert store.len_entries() == 0
+    assert store.len_chunks() == 0
+    assert store.len_embeddings() == 0
+
+
+def test_replayed_draft_returns_same_reply_and_does_not_duplicate(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client, store = _client_with_fresh_store()
+    payload = _update("recipe yesterday", update_id=1, message_id=77)
+
+    with caplog.at_level(logging.INFO, logger="diary_rag.adapters.telegram.webhook"):
+        first = _post(client, payload)
+        second = _post(client, payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["text"].startswith("Stored as draft")
+    assert second.json()["text"].startswith("Stored as draft")
+    assert store.len_sources() == 1
+
+    paths = [line for line in caplog.text.splitlines() if "telegram.webhook" in line]
+    assert any("lifecycle=draft" in line and "effective_path=fresh" in line for line in paths)
+    assert any("lifecycle=draft" in line and "effective_path=replay" in line for line in paths)
 
 
 def test_replayed_entry_returns_same_reply_and_does_not_duplicate(

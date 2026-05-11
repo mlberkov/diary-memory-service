@@ -1,15 +1,25 @@
 """Channel-neutral ingestion service.
 
 Persists the raw inbound message first (Invariant I-3, runtime R-1),
-then parses the date-led payload and creates one ``DiaryEntry`` plus
-one ``EventChunk`` per event line (I-5). Authorship and family scope
-are carried through (I-6, I-7).
+then — for note-lifecycle messages (``RouteKind.ENTRY``) — parses the
+date-led payload and creates one ``DiaryEntry`` plus one ``EventChunk``
+per event line (I-5). Authorship and family scope are carried through
+(I-6, I-7).
+
+Draft floor (D-027 / R-13): when the inbound route is
+``RouteKind.DRAFT`` — either an explicit ``/draft`` or the no-command
+default — the source row is committed and the service returns without
+parsing, chunking, or embedding. Drafts can be promoted to notes later
+from the persisted raw text (I-12); promotion mechanics are an open
+follow-up (A-38).
 
 Idempotency (R-2 / D-023): the source row is committed via
 ``DiaryRepository.get_or_create_source_message`` keyed on
 ``(external_chat_id, external_message_id, edit_seq)``. A replay short-
 circuits parse, chunking, and the embedding step (D-024) and
-reconstructs the original ``IngestResult`` from persisted state.
+reconstructs the original ``IngestResult`` from persisted state; the
+persisted ``detected_route`` tells the reconstruction whether the row
+was a draft or a note.
 
 Phase 3.1+3.2 embedding step (D-024): after the chunk rows are
 committed, the configured ``EmbeddingClient`` is called once per
@@ -37,7 +47,7 @@ from diary_rag.core.diary import (
     parse_diary_entry,
 )
 from diary_rag.core.embeddings import EmbeddingClient, EmbeddingRecord, EmbeddingStatus
-from diary_rag.core.routing import InboundMessage
+from diary_rag.core.routing import InboundMessage, RouteKind
 from diary_rag.logging import get_logger
 from diary_rag.storage.repository import DiaryRepository
 
@@ -87,6 +97,17 @@ class DiaryService:
 
         if replayed:
             return self._reconstruct_result(persisted)
+
+        if message.route is RouteKind.DRAFT:
+            log.info(
+                "draft.persisted source_message_id=%s family_id=%s effective_path=fresh",
+                source_message_id,
+                family_id,
+            )
+            return IngestResult(
+                fallback=FallbackMode.NONE,
+                source_message_id=source_message_id,
+            )
 
         parsed = parse_diary_entry(message.payload)
         if parsed is None:
@@ -183,6 +204,17 @@ class DiaryService:
 
     def _reconstruct_result(self, source: SourceMessage) -> IngestResult:
         """Rebuild the original ``IngestResult`` from persisted state (R-2)."""
+        if source.detected_route is RouteKind.DRAFT:
+            log.info(
+                "draft.persisted source_message_id=%s family_id=%s effective_path=replay",
+                source.source_message_id,
+                source.family_id,
+            )
+            return IngestResult(
+                fallback=FallbackMode.NONE,
+                source_message_id=source.source_message_id,
+                replayed=True,
+            )
         entry = self._store.get_diary_entry_by_source_message_id(source.source_message_id)
         if entry is None:
             return IngestResult(

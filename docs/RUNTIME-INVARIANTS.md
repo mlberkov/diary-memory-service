@@ -43,7 +43,13 @@ Phase 3.1+3.2 contour (D-024):
 Full PostgreSQL connectivity, schema version, and provider reachability checks land with the migration packet.
 
 ## R-11. Routing is recorded
-Every inbound message records its routing decision (`detected_route`) and whether it came from an explicit command or from heuristic routing. Low-confidence routing asks for clarification rather than guessing.
+Every inbound message records its routing decision (`detected_route`) and whether it came from an explicit command or from heuristic routing. The persistence floor is the draft floor (D-027 / R-13): raw is committed regardless of routing confidence. CLARIFY (D-020) remains valid as a user-facing response when a heuristic actively conflicts with intent, but it never replaces raw persistence.
 
 ## R-12. Feature flags are inspectable
 The effective state of each optional-AI feature flag is loggable on demand and visible in the answer trace when relevant.
+
+## R-13. No silent data loss in dispatch
+No dispatch path discards raw text without persisting a `SourceMessage`. When no explicit command is given, the message is persisted as a draft (D-027). Implementations may layer heuristics on top to suggest a stronger route, but the draft floor is unconditional and is not overridable by routing confidence.
+
+## R-14. Scoped raw export
+Raw export honors the same scope as retrieval (R-3): no export call returns rows outside the requester's scope. Each export records its own provenance — export id, scope, time range, format, requester — so the operator can audit which raw was released to whom.
