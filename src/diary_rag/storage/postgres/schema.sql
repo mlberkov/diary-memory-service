@@ -28,10 +28,17 @@
 -- ``entry`` → ``note`` and adding a dedicated lifecycle column are
 -- separate packets.
 --
+-- Slice 3.5: retrieval-trace persistence adds the ``queries`` and
+-- ``retrieval_hits`` tables; ``QueryService.answer`` writes one query row
+-- per ``/ask`` plus per-leg + merged hit rows so an operator can inspect
+-- what each leg saw and what survived RRF via plain SQL. AnswerTrace
+-- persistence (Phase 4) lands on its own packet.
+--
 -- Bootstrapped by PostgresDiaryStore at __init__; safe to re-run on a fresh
--- database. Note: there is no migration tool yet (D-022/D-023/D-024/D-025),
--- so existing local volumes that pre-date these columns must be reset
--- (drop the named volume) before this DDL applies cleanly. See RUNBOOK.md.
+-- database. Note: there is no migration tool yet
+-- (D-022/D-023/D-024/D-025/Slice-3.5), so existing local volumes that
+-- pre-date these tables must be reset (drop the named volume) before this
+-- DDL applies cleanly. See RUNBOOK.md.
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -108,3 +115,36 @@ CREATE INDEX IF NOT EXISTS idx_embedding_records_source_message_id
 
 CREATE INDEX IF NOT EXISTS idx_embedding_records_family_id
     ON embedding_records(family_id);
+
+-- Slice 3.5: retrieval-trace persistence.
+-- One queries row per /ask call; zero-or-more retrieval_hits rows per
+-- call carrying leg in {dense, sparse, merged}, 1-based rank, and the
+-- RRF-contribution score (1/(K+rank) on per-leg rows; fused score on
+-- merged rows). Answer-side AnswerTrace persistence is deferred to
+-- Phase 4 and adds its own table later.
+
+CREATE TABLE IF NOT EXISTS queries (
+    query_id     TEXT PRIMARY KEY,
+    family_id    TEXT NOT NULL,
+    query_text   TEXT NOT NULL,
+    model_name   TEXT NOT NULL,
+    fallback     TEXT NOT NULL
+        CHECK (fallback IN ('none','no_evidence','invalid_input')),
+    created_at   TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_queries_family_id ON queries(family_id);
+
+CREATE TABLE IF NOT EXISTS retrieval_hits (
+    retrieval_hit_id TEXT PRIMARY KEY,
+    query_id         TEXT NOT NULL REFERENCES queries(query_id),
+    chunk_id         TEXT NOT NULL REFERENCES event_chunks(chunk_id),
+    leg              TEXT NOT NULL CHECK (leg IN ('dense','sparse','merged')),
+    rank             INTEGER NOT NULL CHECK (rank >= 1),
+    score            DOUBLE PRECISION NOT NULL,
+    model_name       TEXT NOT NULL,
+    created_at       TIMESTAMPTZ NOT NULL,
+    UNIQUE (query_id, chunk_id, leg)
+);
+
+CREATE INDEX IF NOT EXISTS idx_retrieval_hits_query_id ON retrieval_hits(query_id);

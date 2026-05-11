@@ -32,7 +32,13 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from diary_rag.core.diary.models import DiaryEntry, EventChunk, SourceMessage
+from diary_rag.core.diary.models import (
+    DiaryEntry,
+    EventChunk,
+    Query,
+    RetrievalHit,
+    SourceMessage,
+)
 from diary_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
 
 
@@ -115,4 +121,19 @@ class DiaryRepository(Protocol):
         ``ready`` after the embedding row is persisted; ``failed`` if the
         provider call raised. The chunk row itself is always intact
         (I-3, R-1).
+        """
+
+    def save_query(self, query: Query) -> None:
+        """Persist a single ``Query`` row for an ``/ask`` call (Slice 3.5)."""
+
+    def save_retrieval_hits(self, hits: list[RetrievalHit]) -> None:
+        """Persist zero-or-more ``RetrievalHit`` rows for a query (Slice 3.5)."""
+
+    def get_query(self, query_id: str) -> Query | None:
+        """Fetch a single ``Query`` by id, or ``None`` (Slice 3.5)."""
+
+    def get_retrieval_hits_for_query(self, query_id: str) -> list[RetrievalHit]:
+        """Return all ``RetrievalHit`` rows for a query (Slice 3.5).
+
+        Ordering is stable for inspection: ``(leg ASC, rank ASC)``.
         """

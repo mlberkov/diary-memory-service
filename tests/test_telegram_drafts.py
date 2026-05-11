@@ -79,7 +79,7 @@ def _build_client(
     embed = MockEmbeddingClient()
     dispatcher = Dispatcher(
         DiaryService(store, embedding_client=embed),
-        QueryService(store, embed),
+        QueryService(store, store, embed),
         ExportService(store),
         settings,
     )

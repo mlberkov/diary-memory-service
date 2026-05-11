@@ -19,6 +19,8 @@ The dense leg additionally requires `embedding_status='ready'` (D-025): chunks w
 ## R-5. Provenance on every answer
 No answer is returned to a user without an `AnswerTrace` row that records `context_chunk_ids` (possibly empty in fallback modes), `prompt_version`, and `fallback_mode`.
 
+The retrieval-side half of this invariant is enforced as of Slice 3.5 (D-032): every `/ask` call writes one `Query` row and zero-or-more `RetrievalHit` rows (`leg ∈ {dense, sparse, merged}`, 1-based `rank`, RRF-contribution `score`). Answer-side `AnswerTrace` persistence (prompt version, model name, generated text) remains deferred to Phase 4 and lands with its own table.
+
 ## R-6. Requested vs effective path
 When a fallback is taken (no evidence, weak evidence, ambiguous query, provider unavailable, optional feature disabled), the response and the log distinguish the *requested* path from the *effective* path. No silent degradation.
 

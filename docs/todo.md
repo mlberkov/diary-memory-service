@@ -2,7 +2,12 @@
 
 Top of list = pick next. Each item maps to a row in `docs/execution-map.md`. When a slice is done, remove it and add the next downstream slice.
 
-## Next quality-decision packet — search-quality fork (next)
+## Phase 4 — Grounded answer pipeline (next)
+- Owner: agent
+- Map: execution-map 4.1 → 4.4
+- Concrete: build the answer side of R-5 on top of the now-persisted retrieval-side traces (D-032). Context assembler over the merged `retrieval_hits`; versioned answer prompt; structured answer schema with explicit fallback modes (no-evidence, weak-evidence, ambiguous, provider-unavailable); evidence rendering in the Telegram reply. Persistence: `AnswerTrace(query_id, prompt_version, context_chunk_ids, answer_text, confidence_band, fallback_mode, model_name, token_counts, latency_ms, created_at)` — its own table, FK to `queries.query_id`.
+
+## Next quality-decision packet — search-quality fork
 - Owner: agent + human (decision boundary)
 - Map: execution-map 3.3 follow-up
 - Concrete: evaluate retrieval quality improvements against the D-025 baseline (exact dense scan + Postgres FTS `simple` + service-layer RRF). Decide between, at minimum: **BM25-grade sparse** (e.g. via the `pg_search` extension, the `bm25_catalog` extension, or an app-side BM25 over tokenized chunks); a **reranker / cross-encoder** layer; **Qdrant or another dedicated vector / search system**; multilingual sparse tuning beyond `simple` (e.g. mixed Russian/English support); the **3072-dim ANN strategy** (A-36b: halfvec + HNSW vs alternatives) when corpus scale demands it. Bound the packet — do not bundle all of these. Pick one or two with the largest expected lift, measure them, and record the rest as deferred.
@@ -19,6 +24,19 @@ Top of list = pick next. Each item maps to a row in `docs/execution-map.md`. Whe
 - A-35 leaves failed embeddings sticky: a chunk with `embedding_status='failed'` stays that way until manual intervention. Once Phase 6 (provider hardening) is on the horizon, ship a reconciliation job that retries `failed` chunks with bounded backoff and a dead-letter strategy, plus the corresponding observability (logs / metrics on retry success/failure).
 
 ---
+
+Closed in the Slice 3.5 retrieval-trace persistence packet (D-032):
+- `src/diary_rag/core/diary/models.py` — `RetrievalLeg` (`StrEnum`), `Query`, `RetrievalHit` channel-neutral dataclasses; exported from `core/diary/__init__.py`.
+- `src/diary_rag/services/retrieval.py` — `reciprocal_rank_fusion` now returns `list[FusedHit]` so the fused RRF score persists on merged rows; tie-breaking and `DEFAULT_RRF_K = 60` unchanged.
+- `src/diary_rag/services/query_service.py` — `QueryService.__init__` takes `(repo, search_repo, embedding_client, *, top_k, candidate_k)`; every `answer()` call writes one `Query` row plus per-leg + merged `RetrievalHit` rows (per-leg score = RRF contribution `1.0 / (RRF_K + rank)`, merged score = fused RRF score). Empty-query and empty-merged paths still persist the `Query` row with zero hits. The `retrieval.hybrid` log line gains `query_id=…` and `fallback=…`.
+- `src/diary_rag/storage/repository.py` — `DiaryRepository` Protocol gains `save_query`, `save_retrieval_hits`, `get_query`, `get_retrieval_hits_for_query` (the latter ordered by `(leg ASC, rank ASC)` for stable inspection).
+- All three backends implement the new seam fully: `MockDiaryStore` (process-local dicts), `SqliteDiaryStore` (new `queries` + `retrieval_hits` tables in the in-file DDL), `PostgresDiaryStore` (new tables in `schema.sql` with `UNIQUE (query_id, chunk_id, leg)`, `idx_queries_family_id`, `idx_retrieval_hits_query_id`, FK to `event_chunks`). SQLite's retrieval-side `dense_candidates` / `sparse_candidates` continue to raise `NotImplementedError` (D-025 unchanged).
+- `src/diary_rag/adapters/telegram/webhook.py` passes the store object twice into `QueryService` (it satisfies both `DiaryRepository` and `SearchRepository` structurally via `HybridDiaryStore`).
+- New tests: `tests/test_storage_query_traces.py` covers mock + sqlite + postgres parity for save/get of queries and hits, ordering, no-evidence-with-zero-hits, and the `UNIQUE (query_id, chunk_id, leg)` constraint on sqlite/postgres.
+- Extended tests: `tests/test_query_service.py` adds three persistence cases (successful-with-hits, no-evidence-with-zero-hits, empty-query-with-zero-hits); `tests/test_retrieval_rrf.py` updated to the new `FusedHit` shape plus a score-monotonicity assertion; `tests/test_end_to_end_smoke.py` extended with the two persistence assertions on the existing success and no-evidence cases; `tests/test_dispatcher_drafts.py`, `tests/test_telegram_export.py`, `tests/test_telegram_reply.py`, `tests/test_telegram_drafts.py`, `tests/test_end_to_end_smoke.py` updated for the new three-arg `QueryService` constructor.
+- Docs: D-032 in `decision-log.md`. I-9 in `INVARIANTS.md` and R-5 in `RUNTIME-INVARIANTS.md` tightened in place to record that retrieval-side trace persistence is enforced; answer-side `AnswerTrace` still pending Phase 4. `RUNBOOK.md` gains a "Retrieval traces" subsection with two operator SQL one-liners (recent traces; no-evidence only) and the standard A-34 destructive-upgrade note. `execution-map.md` row 3.5 updated. `todo.md` opens Phase 4 (grounded answer pipeline) as the next slice.
+- A-34 destructive-upgrade discipline applies to existing local Postgres volumes that pre-date the two new tables; reset with `docker compose down -v` or run the new `CREATE TABLE` / `CREATE INDEX` statements manually.
+- **Explicitly not in this packet:** `AnswerTrace` persistence (Phase 4); metadata filtering / Slice 3.4; retrieval-quality changes; BM25 / reranker / Qdrant / halfvec / HNSW; user-facing `/trace` command; schema migration tooling; Telegram adapter wording; renames deferred under D-026; broader TechSpec §5 alignment for the deferred `Query.source_message_id` / `Query.author_user_id` / `RetrievalHit.score_dense|sparse|hybrid` fields.
 
 Closed in the Slice 3.3 baseline hybrid retrieval packet (D-025):
 - `src/diary_rag/storage/search_repository.py` — `SearchRepository` Protocol (`dense_candidates`, `sparse_candidates`) + `HybridDiaryStore` (combined ingest + retrieval).

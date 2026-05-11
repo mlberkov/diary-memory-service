@@ -67,7 +67,7 @@ def _client_with(
     settings = _settings()
     dispatcher = Dispatcher(
         DiaryService(store, embedding_client=embed),
-        QueryService(store, embed),
+        QueryService(store, store, embed),
         ExportService(store),
         settings,
     )

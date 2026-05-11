@@ -40,7 +40,7 @@ def _dispatcher() -> Dispatcher:
     embed = MockEmbeddingClient()
     return Dispatcher(
         DiaryService(store, embedding_client=embed),
-        QueryService(store, embed),
+        QueryService(store, store, embed),
         ExportService(store),
         _settings(),
     )

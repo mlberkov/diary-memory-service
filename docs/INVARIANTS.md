@@ -31,6 +31,8 @@ The retrieval contract supports both dense and sparse signals. A retrieval backe
 ## I-9. Grounded answers
 Every answer references the chunks used as evidence (`AnswerTrace.context_chunk_ids`). An answer with no retrieved evidence must use an explicit `fallback_mode`, not a fabricated response.
 
+Retrieval-side trace persistence is enforced as of Slice 3.5 (D-032): every `/ask` call writes a `Query` row plus zero-or-more `RetrievalHit` rows carrying `leg ∈ {dense, sparse, merged}` so the chunks each leg saw and the chunks that survived RRF are inspectable via plain SQL. Answer-side `AnswerTrace` persistence remains deferred to Phase 4.
+
 ## I-10. Optional AI is optional
 Query rewriting, semantic expansion, reranking, and answer-style modes are feature-flagged. The base ingestion → retrieval → answer flow must work end-to-end with all enhancements disabled.
 

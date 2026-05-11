@@ -12,6 +12,9 @@ from diary_rag.core.diary.models import (
     Evidence,
     FallbackMode,
     IngestResult,
+    Query,
+    RetrievalHit,
+    RetrievalLeg,
     SourceMessage,
 )
 from diary_rag.core.diary.parser import ParsedEntry, parse_diary_entry
@@ -24,6 +27,9 @@ __all__ = [
     "FallbackMode",
     "IngestResult",
     "ParsedEntry",
+    "Query",
+    "RetrievalHit",
+    "RetrievalLeg",
     "SourceMessage",
     "parse_diary_entry",
 ]

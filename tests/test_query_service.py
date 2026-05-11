@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 import pytest
 
 from diary_rag.adapters.embeddings import MockEmbeddingClient
-from diary_rag.core.diary import FallbackMode
+from diary_rag.core.diary import FallbackMode, RetrievalLeg
 from diary_rag.core.routing import InboundMessage, RouteKind
 from diary_rag.services import DiaryService, QueryService
 from diary_rag.storage.mock import MockDiaryStore
@@ -46,7 +46,7 @@ def _entry(payload: str, *, chat: str = "42", user: str = "7") -> InboundMessage
 
 
 def _wire(store: MockDiaryStore, *, top_k: int = 5) -> QueryService:
-    return QueryService(store, MockEmbeddingClient(), top_k=top_k)
+    return QueryService(store, store, MockEmbeddingClient(), top_k=top_k)
 
 
 def _ingest(store: MockDiaryStore, payload: str, *, chat: str = "42") -> None:
@@ -140,6 +140,7 @@ def test_missing_family_id_raises() -> None:
                 payload="book",
             )
         )
+    assert store.len_queries() == 0  # R-3 rejection happens before persistence
 
 
 def test_blank_query_returns_no_evidence() -> None:
@@ -164,11 +165,70 @@ def test_terminal_punctuation_does_not_block_match() -> None:
     assert [e.chunk_text for e in result.evidence] == ["Learned a new recipe"]
 
 
+def test_successful_retrieval_persists_query_and_hits() -> None:
+    store = MockDiaryStore()
+    _ingest(store, "2026-05-09\nMorning routine\nTried a new book")
+    query = _wire(store)
+
+    result = query.answer(_ask("book"))
+
+    assert result.fallback is FallbackMode.NONE
+    assert store.len_queries() == 1
+    # Persisted Query mirrors the AnswerResult.
+    persisted = next(iter(store._queries.values()))
+    assert persisted.family_id == "42"
+    assert persisted.query_text == "book"
+    assert persisted.fallback is FallbackMode.NONE
+    assert persisted.model_name == MockEmbeddingClient().model_name
+
+    hits = store.get_retrieval_hits_for_query(persisted.query_id)
+    legs = {h.leg for h in hits}
+    assert RetrievalLeg.SPARSE in legs  # sparse matched "book"
+    assert RetrievalLeg.MERGED in legs  # merged carries the surviving evidence
+    merged_chunk_ids = [h.chunk_id for h in hits if h.leg is RetrievalLeg.MERGED]
+    assert merged_chunk_ids == [e.chunk_id for e in result.evidence]
+    # All ranks are 1-based and unique per leg.
+    for leg in legs:
+        leg_ranks = sorted(h.rank for h in hits if h.leg is leg)
+        assert leg_ranks == list(range(1, len(leg_ranks) + 1))
+
+
+def test_no_evidence_persists_query_with_zero_hits() -> None:
+    store = MockDiaryStore()
+    _ingest(store, "2026-05-09\nMorning routine")
+    query = _wire(store)
+
+    result = query.answer(_ask("snowstorm"))
+
+    assert result.fallback is FallbackMode.NO_EVIDENCE
+    assert store.len_queries() == 1
+    persisted = next(iter(store._queries.values()))
+    assert persisted.fallback is FallbackMode.NO_EVIDENCE
+    assert persisted.query_text == "snowstorm"
+    assert store.get_retrieval_hits_for_query(persisted.query_id) == []
+    assert store.len_retrieval_hits() == 0
+
+
+def test_empty_query_persists_query_with_zero_hits() -> None:
+    store = MockDiaryStore()
+    _ingest(store, "2026-05-09\nMorning routine")
+    query = _wire(store)
+
+    result = query.answer(_ask("   "))
+
+    assert result.fallback is FallbackMode.NO_EVIDENCE
+    assert store.len_queries() == 1
+    persisted = next(iter(store._queries.values()))
+    assert persisted.query_text == ""
+    assert persisted.fallback is FallbackMode.NO_EVIDENCE
+    assert store.len_retrieval_hits() == 0
+
+
 def test_invalid_constructor_arguments() -> None:
     store = MockDiaryStore()
     client = MockEmbeddingClient()
 
     with pytest.raises(ValueError, match="top_k"):
-        QueryService(store, client, top_k=0)
+        QueryService(store, store, client, top_k=0)
     with pytest.raises(ValueError, match="candidate_k"):
-        QueryService(store, client, top_k=5, candidate_k=2)
+        QueryService(store, store, client, top_k=5, candidate_k=2)

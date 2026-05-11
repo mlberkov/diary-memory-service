@@ -29,7 +29,13 @@ import math
 import re
 from dataclasses import replace
 
-from diary_rag.core.diary.models import DiaryEntry, EventChunk, SourceMessage
+from diary_rag.core.diary.models import (
+    DiaryEntry,
+    EventChunk,
+    Query,
+    RetrievalHit,
+    SourceMessage,
+)
 from diary_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
 from diary_rag.core.routing import RouteKind
 
@@ -50,6 +56,8 @@ class MockDiaryStore:
         self._entries: dict[str, DiaryEntry] = {}
         self._chunks: dict[str, EventChunk] = {}
         self._embeddings: dict[tuple[str, str], EmbeddingRecord] = {}
+        self._queries: dict[str, Query] = {}
+        self._retrieval_hits: dict[str, RetrievalHit] = {}
 
     def save_source_message(self, source: SourceMessage) -> None:
         key = (source.external_chat_id, source.external_message_id, source.edit_seq)
@@ -205,6 +213,25 @@ class MockDiaryStore:
             raise KeyError(f"unknown chunk_id={chunk_id}")
         self._chunks[chunk_id] = replace(existing, embedding_status=status)
 
+    def save_query(self, query: Query) -> None:
+        if query.query_id in self._queries:
+            raise ValueError(f"duplicate query_id={query.query_id}")
+        self._queries[query.query_id] = query
+
+    def save_retrieval_hits(self, hits: list[RetrievalHit]) -> None:
+        for hit in hits:
+            if hit.retrieval_hit_id in self._retrieval_hits:
+                raise ValueError(f"duplicate retrieval_hit_id={hit.retrieval_hit_id}")
+            self._retrieval_hits[hit.retrieval_hit_id] = hit
+
+    def get_query(self, query_id: str) -> Query | None:
+        return self._queries.get(query_id)
+
+    def get_retrieval_hits_for_query(self, query_id: str) -> list[RetrievalHit]:
+        rows = [h for h in self._retrieval_hits.values() if h.query_id == query_id]
+        rows.sort(key=lambda h: (h.leg.value, h.rank))
+        return rows
+
     def len_sources(self) -> int:
         return len(self._sources)
 
@@ -217,12 +244,20 @@ class MockDiaryStore:
     def len_embeddings(self) -> int:
         return len(self._embeddings)
 
+    def len_queries(self) -> int:
+        return len(self._queries)
+
+    def len_retrieval_hits(self) -> int:
+        return len(self._retrieval_hits)
+
     def clear(self) -> None:
         self._sources.clear()
         self._idempotency.clear()
         self._entries.clear()
         self._chunks.clear()
         self._embeddings.clear()
+        self._queries.clear()
+        self._retrieval_hits.clear()
 
 
 def _cosine_distance(a: list[float], b: list[float]) -> float:
