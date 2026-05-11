@@ -24,7 +24,7 @@ from diary_rag.adapters.telegram.commands import parse_command
 from diary_rag.adapters.telegram.models import TelegramUpdate
 from diary_rag.adapters.telegram.reply import build_send_message_payload
 from diary_rag.config import Settings, get_settings
-from diary_rag.core.routing import InboundMessage, RouteKind, RouteSource
+from diary_rag.core.routing import InboundMessage, RouteKind, RouteSource, lifecycle_for
 from diary_rag.core.routing.classifier import classify_plain_text
 from diary_rag.logging import get_logger
 from diary_rag.services import DiaryService, Dispatcher, QueryService
@@ -127,12 +127,13 @@ def register_telegram_webhook(app: FastAPI) -> None:
         effective_path = result.metadata.get("effective_path", "n/a")
         log.info(
             "telegram.webhook update_id=%s route=%s route_source=%s "
-            "confidence=%s edit_seq=%s effective_path=%s",
+            "confidence=%s edit_seq=%s lifecycle=%s effective_path=%s",
             update.update_id,
             result.route.value,
             route_source,
             confidence or "n/a",
             edit_seq,
+            lifecycle_for(result.route),
             effective_path,
         )
         return build_send_message_payload(inbound.external_chat_id, result.reply_text)

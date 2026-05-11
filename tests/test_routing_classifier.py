@@ -1,9 +1,13 @@
 """Heuristic classifier unit tests.
 
 Covers each classification rule in
-``src/diary_rag/core/routing/classifier.py`` plus edge cases that the
-PRD heuristic does not address explicitly: bare ISO date, malformed
-date attempts, plain statement, multi-line non-dated text.
+``src/diary_rag/core/routing/classifier.py`` plus edge cases the
+PRD heuristic does not address explicitly. Under the draft floor
+(D-027 / R-13), any non-empty text that does not match the high-
+confidence ENTRY or ASK rules falls through to ``RouteKind.DRAFT``
+so the dispatcher persists the raw text rather than discarding it.
+``CLARIFY`` remains the empty/whitespace branch (defensive — the
+webhook short-circuits empty text before reaching the classifier).
 """
 
 from __future__ import annotations
@@ -52,36 +56,36 @@ def test_first_token_case_normalized() -> None:
     assert result.route is RouteKind.ASK
 
 
-def test_bare_iso_date_classifies_as_clarify() -> None:
+def test_bare_iso_date_falls_through_to_draft_floor() -> None:
     result = classify_plain_text("2026-05-09")
-    assert result.route is RouteKind.CLARIFY
+    assert result.route is RouteKind.DRAFT
     assert result.confidence == "low"
-    assert result.reason == "first_line_iso_date_no_events"
+    assert result.reason == "draft_floor_no_signal"
 
 
-def test_malformed_date_attempt_classifies_as_clarify() -> None:
+def test_malformed_date_attempt_falls_through_to_draft_floor() -> None:
     result = classify_plain_text("2026-5-9 walk")
-    assert result.route is RouteKind.CLARIFY
+    assert result.route is RouteKind.DRAFT
     assert result.confidence == "low"
-    assert result.reason == "plain_text_no_signal"
+    assert result.reason == "draft_floor_no_signal"
 
 
-def test_relative_date_attempt_classifies_as_clarify() -> None:
+def test_relative_date_attempt_falls_through_to_draft_floor() -> None:
     result = classify_plain_text("yesterday I walked the dog")
-    assert result.route is RouteKind.CLARIFY
+    assert result.route is RouteKind.DRAFT
     assert result.confidence == "low"
 
 
-def test_plain_statement_classifies_as_clarify() -> None:
+def test_plain_statement_falls_through_to_draft_floor() -> None:
     result = classify_plain_text("recipe yesterday")
-    assert result.route is RouteKind.CLARIFY
+    assert result.route is RouteKind.DRAFT
     assert result.confidence == "low"
-    assert result.reason == "plain_text_no_signal"
+    assert result.reason == "draft_floor_no_signal"
 
 
-def test_multi_line_without_date_classifies_as_clarify() -> None:
+def test_multi_line_without_date_falls_through_to_draft_floor() -> None:
     result = classify_plain_text("morning routine\nevening reading")
-    assert result.route is RouteKind.CLARIFY
+    assert result.route is RouteKind.DRAFT
     assert result.confidence == "low"
 
 

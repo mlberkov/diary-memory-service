@@ -20,8 +20,28 @@ class RouteKind(StrEnum):
     HELP = "help"
     ENTRY = "entry"
     ASK = "ask"
+    DRAFT = "draft"
     CLARIFY = "clarify"
     UNKNOWN = "unknown"
+
+
+Lifecycle = Literal["draft", "note", "query", "other"]
+
+
+def lifecycle_for(route: RouteKind) -> Lifecycle:
+    """Map a route to its D-027 lifecycle state.
+
+    ``ENTRY`` maps to ``"note"`` because naming alignment of ``/entry`` →
+    ``/note`` is its own packet (D-026); the route value persists under
+    its historical name but the lifecycle vocabulary is canonical.
+    """
+    if route is RouteKind.DRAFT:
+        return "draft"
+    if route is RouteKind.ENTRY:
+        return "note"
+    if route is RouteKind.ASK:
+        return "query"
+    return "other"
 
 
 @dataclass(frozen=True, slots=True)

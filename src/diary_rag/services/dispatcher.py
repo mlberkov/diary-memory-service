@@ -1,10 +1,16 @@
 """Inbound-message dispatcher.
 
 Maps a channel-neutral :class:`InboundMessage` to a
-:class:`DispatchResult` carrying a reply string. ``ENTRY`` and ``ASK``
-delegate to :class:`DiaryService` / :class:`QueryService`; ``CLARIFY``
-returns a fixed clarification message; other routes return fixed
-strings appropriate for the current phase.
+:class:`DispatchResult` carrying a reply string. ``ENTRY``, ``DRAFT``,
+and ``ASK`` delegate to :class:`DiaryService` / :class:`QueryService`;
+``CLARIFY`` returns a fixed clarification message; other routes return
+fixed strings appropriate for the current phase.
+
+Draft floor (D-027 / R-13): the ``DRAFT`` path persists the inbound
+raw text via ``DiaryService.ingest`` and stops there — no parse,
+chunk, embed, or index. ``DRAFT`` covers both the explicit ``/draft``
+command and the no-command default, so no plain-text message is
+silently discarded.
 
 Reply wording lives next to the dispatcher (channel-neutral) so the
 Telegram adapter remains a transport layer (Invariant I-1).
@@ -27,12 +33,15 @@ from diary_rag.services.query_service import QueryService
 
 log = get_logger(__name__)
 
-_REPLY_START = "Welcome — diary mode. Use /entry to record, /ask to query."
-_REPLY_HELP = (
-    "Commands: /start, /help, /entry, /ask. "
-    "Diary mode is in setup; durable persistence and retrieval arrive in later phases."
+_REPLY_START = (
+    "Welcome — diary mode. Use /entry to record, /draft to save raw text "
+    "without parsing, or /ask to query."
 )
-_REPLY_UNKNOWN = "I haven't been taught how to handle plain messages yet — use /entry or /ask."
+_REPLY_HELP = (
+    "Commands: /start, /help, /entry, /draft, /ask. Plain text without a "
+    "command is stored as a draft so nothing is lost."
+)
+_REPLY_UNKNOWN = "I haven't been taught how to handle that yet — use /entry, /draft, or /ask."
 _REPLY_CLARIFY = (
     "I couldn't tell if that's a diary entry or a question. "
     "Send /entry <YYYY-MM-DD> on the first line then your events to record it, "
@@ -40,6 +49,10 @@ _REPLY_CLARIFY = (
 )
 _HEURISTIC_MARKER_ENTRY = "(routed as entry — send /entry next time to be explicit)"
 _HEURISTIC_MARKER_ASK = "(routed as question — send /ask next time to be explicit)"
+_DRAFT_REPLY_PREFIX = "Stored as draft"
+_DRAFT_REPLY_HINT = (
+    "Send /entry <YYYY-MM-DD> on the first line to commit it as a note, " "or /ask to query."
+)
 
 
 def _format_ingest_reply(result: IngestResult) -> str:
@@ -51,6 +64,11 @@ def _format_ingest_reply(result: IngestResult) -> str:
         return f"Saved {result.entry_date.isoformat()} with no event lines."
     plural = "event" if result.events_count == 1 else "events"
     return f"Saved {result.events_count} {plural} for {result.entry_date.isoformat()}."
+
+
+def _format_draft_reply(result: IngestResult) -> str:
+    suffix = " (replay)" if result.replayed else ""
+    return f"{_DRAFT_REPLY_PREFIX}{suffix}. {_DRAFT_REPLY_HINT}"
 
 
 _RETRIEVAL_TRAILER = "(hybrid retrieval — dense+sparse RRF)"
@@ -93,6 +111,18 @@ class Dispatcher:
             reply = _format_ingest_reply(ingest)
             if is_heuristic:
                 reply = _append_marker(reply, _HEURISTIC_MARKER_ENTRY)
+            return DispatchResult(
+                reply_text=reply,
+                route=route,
+                metadata={
+                    "fallback": ingest.fallback.value,
+                    "route_source": message.route_source,
+                    "effective_path": "replay" if ingest.replayed else "fresh",
+                },
+            )
+        if route is RouteKind.DRAFT:
+            ingest = self._diary.ingest(message)
+            reply = _format_draft_reply(ingest)
             return DispatchResult(
                 reply_text=reply,
                 route=route,

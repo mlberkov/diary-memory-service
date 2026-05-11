@@ -74,13 +74,16 @@ Inbound messages enter one of three lifecycle states — **draft**, **note**, or
 - **No command** → defaults to **draft**. The raw text is persisted; the user may later promote it to a note. No path silently discards an inbound message.
 
 ### Current command surface
-The Telegram adapter currently exposes `/entry` (the historical name for `/note`) and `/ask`. `/draft` and the no-command-→-draft default are target-state and land in their own implementation packets. Renaming `/entry` to `/note` is part of the broader naming-alignment packet (D-026).
+The Telegram adapter exposes `/entry` (the historical name for `/note`), `/draft`, and `/ask`. The no-command-→-draft default is also in place (D-028). Renaming `/entry` to `/note` is part of the broader naming-alignment packet (D-026).
 
 ### Convenience routing
-Heuristics MAY suggest a stronger route (note or ask) for plain text, but MUST NOT override the draft floor. The current heuristic rules and CLARIFY UX (D-020) remain valid for cases where the heuristic actively conflicts with intent; in the target contour a heuristic that cannot suggest with confidence falls back to **draft**, never to silent discard.
+Heuristics MAY suggest a stronger route (note or ask) for plain text, but MUST NOT override the draft floor. As of D-028, the classifier keeps the high-confidence ENTRY (`first_line_iso_date_with_events`) and ASK (`question_mark_terminator`, `interrogative_or_imperative_first_token`) rules and routes everything else to `RouteKind.DRAFT` (reason `draft_floor_no_signal`). CLARIFY remains a valid response kind but no plain-text path emits it; it survives in the dispatcher for explicit-command active-conflict cases.
 
 ### Safety rule
-The safety floor for ambiguous input is **preserve as draft**, not **clarify and drop** (D-027). Absence of an explicit command never causes silent data loss. CLARIFY remains a valid response when the heuristic actively conflicts with intent (D-020), but raw persistence is unconditional.
+The safety floor for ambiguous input is **preserve as draft**, not **clarify and drop** (D-027 / D-028). Absence of an explicit command never causes silent data loss. CLARIFY remains a valid response shape when a heuristic would actively conflict with intent (D-020), but raw persistence is unconditional.
+
+### Lifecycle representation
+`SourceMessage.detected_route` carries the lifecycle state (D-028). The `core.routing.lifecycle_for` helper maps routes to the canonical lifecycle vocabulary — `ENTRY → "note"`, `ASK → "query"`, `DRAFT → "draft"`, everything else → `"other"` — so the persisted `detected_route` value doubles as the lifecycle marker without a parallel column. Renaming `ENTRY` → `NOTE` is its own naming-alignment packet (D-026).
 
 ## 5. Data Model
 

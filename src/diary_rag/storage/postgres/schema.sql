@@ -21,6 +21,13 @@
 -- ``simple`` dictionary avoids a language commitment because diary
 -- content may mix English and Russian.
 --
+-- Draft floor (D-027): ``detected_route`` includes ``'draft'`` so a
+-- ``SourceMessage`` persisted under the no-silent-loss floor (raw-only,
+-- no parse/chunk/embed) is durable and inspectable by plain SQL. The
+-- column doubles as the lifecycle marker per A-38; renaming
+-- ``entry`` → ``note`` and adding a dedicated lifecycle column are
+-- separate packets.
+--
 -- Bootstrapped by PostgresDiaryStore at __init__; safe to re-run on a fresh
 -- database. Note: there is no migration tool yet (D-022/D-023/D-024/D-025),
 -- so existing local volumes that pre-date these columns must be reset
@@ -38,7 +45,7 @@ CREATE TABLE IF NOT EXISTS source_messages (
     edit_seq            INTEGER NOT NULL DEFAULT 0,
     raw_text            TEXT NOT NULL,
     detected_route      TEXT NOT NULL
-        CHECK (detected_route IN ('start','help','entry','ask','clarify','unknown')),
+        CHECK (detected_route IN ('start','help','entry','ask','draft','clarify','unknown')),
     created_at          TIMESTAMPTZ NOT NULL,
     UNIQUE (external_chat_id, external_message_id, edit_seq)
 );

@@ -93,14 +93,14 @@ Heuristics MAY suggest a stronger route (note or ask) for plain text, but MUST N
 
 ### Naming note
 
-The target command names are `/note`, `/draft`, `/ask`. The current Telegram implementation exposes `/entry` (the historical name for `/note`) and `/ask`; `/draft` and the no-command default are target-state and land in their own implementation packets. Naming alignment of the existing `/entry` command is a separate renaming packet.
+The target command names are `/note`, `/draft`, `/ask`. The current Telegram implementation exposes `/entry` (the historical name for `/note`), `/draft`, and `/ask`; the no-command-→-draft default is also in place (D-028). The `/entry` → `/note` rename is a separate naming-alignment packet.
 
 ## 6. Functional Scope
 
 ### In scope for MVP
 - Telegram text input,
-- explicit `/entry` and `/ask` commands (the current command surface; target state is `/note`, `/draft`, `/ask`),
-- heuristic auto-routing by date presence (preserved as a convenience layer; target state layers it on top of the draft floor),
+- explicit `/entry`, `/draft`, and `/ask` commands (the current command surface; `/entry` is the historical name for `/note`, target state is `/note`, `/draft`, `/ask`),
+- heuristic auto-routing by date presence on top of the draft floor: high-confidence ENTRY/ASK signals route as before; everything else persists as a draft (D-028),
 - date parsing,
 - line-by-line event splitting,
 - one event per chunk,
@@ -114,7 +114,6 @@ The target command names are `/note`, `/draft`, `/ask`. The current Telegram imp
 - observability for ingestion and retrieval.
 
 ### In scope for target state (beyond current MVP)
-- `/draft` command and no-command-→-draft default (D-027),
 - raw export on demand in JSON or TXT (D-027),
 - daily backup window and stronger-than-nightly recovery surfaced operationally (D-027),
 - managed-cloud reference deployment as the default operational shape (D-027).

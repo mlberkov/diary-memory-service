@@ -100,12 +100,22 @@ def test_dispatch_called_with_route_ask_for_question_plain_text() -> None:
     assert fake.calls[0].route_source == "heuristic"
 
 
-def test_dispatch_called_with_route_clarify_for_ambiguous_plain_text() -> None:
+def test_dispatch_called_with_route_draft_for_ambiguous_plain_text() -> None:
     client, fake = _client_with_fake()
     response = _post(client, _message_update("recipe yesterday"))
     assert response.status_code == 200
-    assert fake.calls[0].route is RouteKind.CLARIFY
+    assert fake.calls[0].route is RouteKind.DRAFT
     assert fake.calls[0].route_source == "heuristic"
+    assert fake.calls[0].payload == "recipe yesterday"
+
+
+def test_dispatch_called_with_route_draft_for_explicit_draft_command() -> None:
+    client, fake = _client_with_fake()
+    response = _post(client, _message_update("/draft groceries: milk, bread"))
+    assert response.status_code == 200
+    assert fake.calls[0].route is RouteKind.DRAFT
+    assert fake.calls[0].route_source == "command"
+    assert fake.calls[0].payload == "groceries: milk, bread"
 
 
 def test_command_routing_wins_over_heuristic_when_command_present() -> None:

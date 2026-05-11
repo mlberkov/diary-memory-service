@@ -112,7 +112,7 @@ Target control surface (D-027):
 - `/ask <text>` — query.
 - **No command** — defaults to **draft**. Heuristics MAY suggest a stronger route (note or ask), but they MUST NOT override the draft floor: absence of an explicit command never silently discards or downgrades raw persistence.
 
-The current Telegram implementation exposes `/entry` (the historical name for `/note`) and `/ask`; `/draft` and the no-command-→-draft default are target-state. Naming alignment in code is its own packet (D-026 + D-027).
+The current Telegram implementation exposes `/entry` (the historical name for `/note`), `/draft`, and `/ask`; the no-command-→-draft default is enforced in code (D-028). The lifecycle state is carried by `SourceMessage.detected_route` (extended with `RouteKind.DRAFT`), with `core.routing.lifecycle_for` as the canonical mapping helper — no separate lifecycle column. Renaming `/entry` → `/note` (and `RouteKind.ENTRY` → `NOTE`) is its own packet (D-026).
 
 Lifecycle rules:
 

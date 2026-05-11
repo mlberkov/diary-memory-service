@@ -222,3 +222,62 @@ def test_count_event_chunks_for_source(store: PostgresDiaryStore) -> None:
 
     assert store.count_event_chunks_for_source("s1") == 2
     assert store.count_event_chunks_for_source("nope") == 0
+
+
+def test_save_source_message_accepts_draft_route(store: PostgresDiaryStore) -> None:
+    """D-027: the CHECK constraint on ``detected_route`` includes ``'draft'``."""
+    draft = SourceMessage(
+        source_message_id="d1",
+        family_id="fam-A",
+        author_user_id="u1",
+        external_chat_id="fam-A",
+        external_user_id="u1",
+        external_message_id="m-draft",
+        edit_seq=0,
+        raw_text="ambiguous text without a date",
+        detected_route=RouteKind.DRAFT,
+        created_at=_now(),
+    )
+
+    store.save_source_message(draft)
+
+    fetched = store.get_source_message("d1")
+    assert fetched is not None
+    assert fetched.detected_route is RouteKind.DRAFT
+
+
+def test_get_or_create_source_message_idempotent_for_draft_route(
+    store: PostgresDiaryStore,
+) -> None:
+    """R-2 holds for drafts: replay returns the existing row, no duplicate."""
+    draft = SourceMessage(
+        source_message_id="d1",
+        family_id="fam-A",
+        author_user_id="u1",
+        external_chat_id="fam-A",
+        external_user_id="u1",
+        external_message_id="m-draft",
+        edit_seq=0,
+        raw_text="ambiguous text",
+        detected_route=RouteKind.DRAFT,
+        created_at=_now(),
+    )
+    duplicate = SourceMessage(
+        source_message_id="d2",
+        family_id="fam-A",
+        author_user_id="u1",
+        external_chat_id="fam-A",
+        external_user_id="u1",
+        external_message_id="m-draft",
+        edit_seq=0,
+        raw_text="ambiguous text",
+        detected_route=RouteKind.DRAFT,
+        created_at=_now(),
+    )
+
+    store.get_or_create_source_message(draft)
+    persisted, replayed = store.get_or_create_source_message(duplicate)
+
+    assert replayed is True
+    assert persisted.source_message_id == "d1"
+    assert persisted.detected_route is RouteKind.DRAFT

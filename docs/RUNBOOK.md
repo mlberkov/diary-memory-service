@@ -102,10 +102,12 @@ BM25, reranker, Qdrant, halfvec/HNSW (A-36b), and multilingual sparse tuning (A-
 ### Telegram in local development
 Webhook only (D-019). Expose the local process via a tunnel (e.g. `ngrok`, `cloudflared`) and register the tunnel URL with the bot. There is no polling fallback.
 
-### Target command surface (D-027)
-The target control surface is `/note`, `/draft`, `/ask`, with absence of an explicit command defaulting to **draft**. The current Telegram code path still exposes `/entry` (the historical name for `/note`) and `/ask`; `/draft` and the no-command-→-draft default are target-state and land in their own implementation packets. Renaming `/entry` to `/note` is part of the broader naming-alignment packet (D-026) and is not in this packet.
+### Command surface (D-028)
+The Telegram code path exposes `/entry` (historical name for `/note`), `/draft`, and `/ask`, with absence of an explicit command defaulting to **draft** (D-028). Renaming `/entry` to `/note` is part of the broader naming-alignment packet (D-026) and is not in this packet.
 
-Operationally: the draft floor (R-13) means no inbound message is silently discarded, even when routing confidence is low. CLARIFY (D-020) remains valid as a reply when a heuristic actively conflicts with intent, but raw persistence is unconditional.
+Operationally: the draft floor (R-13) means no inbound message is silently discarded, even when routing confidence is low. The webhook log line records `lifecycle=draft|note|query|other` so an operator can see which lifecycle state each delivery resolved to. `DiaryService` emits `draft.persisted source_message_id=… family_id=… effective_path=fresh|replay` when the draft path commits. CLARIFY (D-020) remains a valid reply shape for the rare case where a heuristic would actively conflict with intent, but the classifier no longer emits CLARIFY for plain text; raw persistence is unconditional.
+
+Schema upgrade note: the `source_messages.detected_route` CHECK constraint extended from `{start, help, entry, ask, clarify, unknown}` to `{start, help, entry, ask, draft, clarify, unknown}` (D-028). Per A-34, existing local Postgres volumes must be reset with `docker compose down -v` before the new CHECK applies; SQLite has no enum constraint on the column. Until the reset is performed, inserts with `detected_route='draft'` raise a CHECK violation against the live Postgres backend.
 
 ### Raw-data durability and recovery (D-027)
 Raw `SourceMessage` is the highest-tier durability surface (I-15). The target operational contour:
