@@ -2,7 +2,7 @@
 
 Diary RAG Service for **TheyGrow** — a low-friction memory system for parents who write family and child observations in Telegram and later ask natural-language questions over them.
 
-> **Status:** Milestone 1 complete (Phase 1 + Phase 2 + Phase 3.1/3.2). Slice 3.3 baseline hybrid retrieval is now in (D-025). Telegram webhook adapter, channel-neutral `DiaryService` / `QueryService`, durable PostgreSQL backend behind `DiaryRepository` (D-022), idempotent webhook + ingest keyed on `(external_chat_id, external_message_id, edit_seq)` (D-023), sync per-chunk embedding indexing on pgvector with `text-embedding-3-large` @ 3072 dim (D-024), and baseline hybrid retrieval with `SearchRepository` (dense exact family-scoped scan + Postgres FTS `tsvector('simple')`) fused by service-layer RRF (D-025). The grounded-answer pipeline, provider hardening, and search-quality optimizations (BM25, reranker, Qdrant, halfvec/HNSW) land in later milestones.
+> **Status:** Milestone 1 complete. Telegram webhook adapter and channel-neutral `DiaryService` / `QueryService`, durable PostgreSQL backend behind `DiaryRepository` (D-022), idempotent webhook + ingest keyed on `(external_chat_id, external_message_id, edit_seq)` (D-023), sync per-chunk embedding indexing on pgvector with `text-embedding-3-large` @ 3072 dim (D-024), and baseline hybrid retrieval with `SearchRepository` (dense exact family-scoped scan + Postgres FTS `tsvector('simple')`) fused by service-layer RRF (D-025) are all wired. The grounded-answer pipeline, provider hardening, and search-quality optimizations (BM25, reranker, Qdrant, halfvec/HNSW) land in later milestones.
 
 ## What this is
 
