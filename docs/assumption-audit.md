@@ -23,10 +23,10 @@ When an item is decided, move it to `docs/decision-log.md` (next D-### id) and r
 | A-17 | Clarification UX | User confusion | Mock chat exchange + review | human | Phase 1.4 |
 | A-18 | Data residency | Compliance failure | Stakeholder confirmation | human | before prod |
 | A-19 | Retention policy | Storage growth; user trust | Policy doc + sample math | human | Phase 8 |
-| A-20 | Export/delete semantics | Compliance, trust | Spec + prototype | human | Phase 8 |
+| A-20 | Export/delete semantics — export half directionally answered by D-027 (raw export in JSON or TXT, scope-bounded); remaining open: delivery channel and the deletion half (see A-39, A-10) | Compliance, trust | Spec + prototype | human | Phase 8 |
 | A-21 | TheyGrow integration surface | Integration cost | API/SDK sketch | human | Phase 9 |
-| A-22 | Hosting target | Operational rework | Decision + runbook update | human | Phase 6 |
-| A-23 | Backup strategy | Data loss | Drill + runbook | human | Phase 7 |
+| A-22 | Hosting target — directionally answered by D-027 (managed cloud as default; OSS and embedded as peers); remaining open: which specific managed environment (see A-41) | Operational rework | Decision + runbook update | human | Phase 6 |
+| A-23 | Backup strategy — directionally answered by D-027 (daily window `03:00–05:00` + stronger-than-nightly recovery); remaining open: tooling and RPO/RTO (see A-40) | Data loss | Drill + runbook | human | Phase 7 |
 | A-24 | Python package name `diary_rag` | Rename cost grows over time | Confirm before Phase 9 integration surface | human | Phase 9 |
 | A-25 | `/health` is liveness-only at 1.1 | Misleading readiness signal | Replace with R-10 readiness checks | agent | Phase 2/3 |
 | A-26 | Webhook fails closed when `TELEGRAM_WEBHOOK_SECRET` is unset or mismatched | Open webhook accepts spoofed traffic | Verified in Slice 1.2 secret-header tests | agent | end of Phase 1 |
@@ -36,3 +36,7 @@ When an item is decided, move it to `docs/decision-log.md` (next D-### id) and r
 | A-34 | No migration tool; local schema upgrades are destructive | Production schema evolution unsafe; dev volume drops feel like data loss | Document destructive upgrade in RUNBOOK; revisit before non-local deploy | agent | before prod |
 | A-36b | 3072-dim ANN index strategy deferred | Latency at scale once corpus grows past exact-scan budget | Next quality-decision packet: halfvec(3072)+HNSW vs other | agent | next quality-decision packet |
 | A-37 | Sparse FTS dictionary `simple` (no stemming) | Recall on inflected forms is lower than `english`/`russian` stemming would give | Revisit alongside multilingual tuning | agent | next quality-decision packet |
+| A-38 | Draft lifecycle semantics (retention, expiry, promotion mechanic, lifecycle field on `SourceMessage`) | Drafts leak forever or expire silently; promotion path is ambiguous | Spec + small prototype alongside draft routing implementation | human + agent | draft routing implementation packet |
+| A-39 | Raw export packaging and delivery (per-host channel, request shape, audit-row schema, optional derived-state flag) | Export usable in one host but not another; audit gaps | Spec + prototype alongside export implementation | human + agent | export implementation packet |
+| A-40 | Backup tooling and recovery objectives (WAL archiving vs replicas vs managed PITR; RPO/RTO; restore-drill cadence) | Recovery primitive untested; data loss beyond intent | Mechanism decision + restore drill | human | before first non-local deployment |
+| A-41 | Cloud-first reference environment (managed Postgres provider, hosting platform, observability stack) | Production rollout blocked or rework | Stakeholder confirmation + runbook update | human | production rollout packet |

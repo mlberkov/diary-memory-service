@@ -102,8 +102,27 @@ BM25, reranker, Qdrant, halfvec/HNSW (A-36b), and multilingual sparse tuning (A-
 ### Telegram in local development
 Webhook only (D-019). Expose the local process via a tunnel (e.g. `ngrok`, `cloudflared`) and register the tunnel URL with the bot. There is no polling fallback.
 
+### Target command surface (D-027)
+The target control surface is `/note`, `/draft`, `/ask`, with absence of an explicit command defaulting to **draft**. The current Telegram code path still exposes `/entry` (the historical name for `/note`) and `/ask`; `/draft` and the no-command-→-draft default are target-state and land in their own implementation packets. Renaming `/entry` to `/note` is part of the broader naming-alignment packet (D-026) and is not in this packet.
+
+Operationally: the draft floor (R-13) means no inbound message is silently discarded, even when routing confidence is low. CLARIFY (D-020) remains valid as a reply when a heuristic actively conflicts with intent, but raw persistence is unconditional.
+
+### Raw-data durability and recovery (D-027)
+Raw `SourceMessage` is the highest-tier durability surface (I-15). The target operational contour:
+
+- daily backup window (target: `03:00–05:00` local time) covering at minimum `source_messages` plus enough relational scaffolding to restore `SourceMessage → DiaryEntry → EventChunk` lineage,
+- a stronger-than-nightly recovery primitive (continuous WAL archiving, point-in-time recovery, streaming replicas, or a managed-cloud equivalent — selected per deployment shape).
+
+Specific backup tooling and RPO/RTO targets remain bracketed as A-40. Derived state (embeddings, indexes, retrieval traces, answer traces) is reproducible from raw under the active parser/embedding versions; raw loss is unrecoverable, so operational policies treat raw retention as the highest tier.
+
+### Raw export (D-027)
+The user can export their raw `SourceMessage` data on demand in JSON (stable field names, ISO timestamps) or TXT (one record per block). The export is scope-bounded the same way retrieval is (R-3 / R-14) and records its own provenance (export id, scope, time range, format, requester). Derived state is not in the minimum export contract — raw is sufficient to reconstruct everything else.
+
+Per-host delivery channels (Telegram file reply, HTTP download endpoint, host-app screen) and the request shape are bracketed as A-39. The implementation lands in its own packet.
+
 ## Useful reads when stuck
 - Workflow & recovery: this file.
+- Architecture, adapter axes, deployment shapes: `docs/ARCHITECTURE.md`.
 - What must hold at runtime: `docs/RUNTIME-INVARIANTS.md`.
 - Data shape rules: `docs/INVARIANTS.md`.
 - Open questions: `docs/assumptions.md`.
