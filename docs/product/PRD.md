@@ -7,15 +7,21 @@ Purpose: canonical product context for the first implementation slice
 
 ## 1. Product Intent
 
-The system is a portable memory/journal core surfaced through host-specific adapters. The **first use case** — and the scope of this PRD — is a low-friction diary memory system for parents who write family and child-related observations in Telegram and later ask natural-language questions over these records. The same core is intended to support additional hosts (TheyGrow, self-hosted OSS, managed cloud, other embedded products) without rewrite.
+The system is a **portable memory/journal core** surfaced through host-specific adapters. It exists to capture and recall valuable personal information — observations, events, reflections — without forcing the user to commit to a single host or topic. The topic model is generic; child- and family-related capture is **one possible use case**, not the system's definition.
 
-The short-term interface is Telegram.  
-The long-term product destination is integration into TheyGrow as a reusable internal memory subsystem.
+The **first use case** — and the scope of this PRD — is parents who write family and child-related observations in Telegram and later ask natural-language questions over these records. The same core is intended to support additional hosts (TheyGrow, self-hosted OSS, managed cloud, other embedded products) without rewrite.
 
-Core principle (D-026):
+The short-term interface is Telegram. The long-term product destination spans:
+- **managed cloud** as the default reference deployment (D-027),
+- **self-hosted OSS** as a peer deployment shape,
+- **embedded** in TheyGrow and other host products as a reusable internal memory subsystem.
+
+Core principles (D-026, D-027):
 - Telegram is one event-source adapter, not the product core.
 - The core is a standalone, portable memory/journal core — currently surfaced as a Diary Memory Service.
 - The parents / family-diary framing below is the first use case, not the definition of the system.
+- Absence of an explicit command must never cause silent data loss: any message the user sends is, at minimum, preserved as a draft.
+- Raw data is durable by design (daily backup window, stronger-than-nightly recovery) and exportable on demand (JSON or TXT).
 
 ## 2. Problem
 
@@ -43,50 +49,58 @@ Future users:
 
 ## 4. Core User Jobs
 
-### Job 1 — Capture
-As a parent, I want to record important events with minimal friction so that I do not lose them.
+### Job 1 — Capture without loss
+As a user, I want to record important observations with minimal friction so that I do not lose them — even when I am unsure whether what I just wrote is "ready" to be a canonical note.
 
 ### Job 2 — Recall
-As a parent, I want to ask natural-language questions over my diary and get grounded answers.
+As a user, I want to ask natural-language questions over my own captured memory and get grounded answers.
 
 ### Job 3 — Shared Memory
-As a couple, we want to maintain a shared memory space while preserving authorship and context.
+As co-authors, we want to maintain a shared memory space while preserving authorship and context.
 
 ### Job 4 — Portability
-As a product team, we want the same memory core to move from Telegram into TheyGrow without re-architecture.
+As a product team, we want the same memory core to move from Telegram into TheyGrow (and other hosts) without re-architecture.
 
-## 5. MVP Input Model
+### Job 5 — Own my data
+As a user, I want to export my raw captured data on demand and trust that it is durably backed up — including a recovery story stronger than "wait for the next nightly backup".
 
-A user writes messages in a Telegram chat.
+## 5. Input Model
 
-### Diary message
-A message that begins with a date is treated as a diary entry.
+A user writes messages in a chat (Telegram today; other hosts later). Routing is set by the user's command, not by message content (D-027):
 
-Expected structure:
-- first line or leading prefix contains date,
-- each following line is a separate event.
+- `/note <text>` — explicit **note**. Eligible for the full ingestion pipeline (parse → chunk → embed → index).
+- `/draft <text>` — explicit **draft**. Persisted as a raw message only; no parsing, chunking, embedding, or indexing.
+- `/ask <text>` — **query**. Treated as a retrieval request over previously captured notes.
+- **No command** — treated as a **draft**. The raw text is persisted; the user may later promote it to a note. No path silently discards an inbound message.
 
-Example:
+### Note capture shape
+
+A `/note` whose text follows the canonical shape:
+
+```
 2026-05-09
 Had a calm morning routine
 Tried a new picture book
 Fell asleep 20 minutes earlier than usual
+```
 
-### Query message
-A message without a date is treated as a question and triggers retrieval + answer generation.
+- the first line contains the date,
+- each following line is a separate event and becomes its own chunk.
 
-Important note:
-- this heuristic is allowed for MVP,
-- but explicit commands `/entry` and `/ask` should also exist,
-- commands are the preferred routing method,
-- heuristic routing is only a convenience layer.
+### Heuristics on top of the draft floor
+
+Heuristics MAY suggest a stronger route (note or ask) for plain text, but MUST NOT override the draft floor. A heuristic that cannot suggest with confidence falls back to draft — never to silent discard.
+
+### Naming note
+
+The target command names are `/note`, `/draft`, `/ask`. The current Telegram implementation exposes `/entry` (the historical name for `/note`) and `/ask`; `/draft` and the no-command default are target-state and land in their own implementation packets. Naming alignment of the existing `/entry` command is a separate renaming packet.
 
 ## 6. Functional Scope
 
 ### In scope for MVP
 - Telegram text input,
-- explicit `/entry` and `/ask` commands,
-- heuristic auto-routing by date presence,
+- explicit `/entry` and `/ask` commands (the current command surface; target state is `/note`, `/draft`, `/ask`),
+- heuristic auto-routing by date presence (preserved as a convenience layer; target state layers it on top of the draft floor),
 - date parsing,
 - line-by-line event splitting,
 - one event per chunk,
@@ -98,6 +112,12 @@ Important note:
 - grounded answer generation,
 - retrieval provenance,
 - observability for ingestion and retrieval.
+
+### In scope for target state (beyond current MVP)
+- `/draft` command and no-command-→-draft default (D-027),
+- raw export on demand in JSON or TXT (D-027),
+- daily backup window and stronger-than-nightly recovery surfaced operationally (D-027),
+- managed-cloud reference deployment as the default operational shape (D-027).
 
 ### Out of scope for MVP
 - voice/photo/video ingestion,
@@ -112,11 +132,14 @@ Important note:
 
 1. Telegram is a transport and UX layer only.
 2. The source of truth must live outside Telegram.
-3. Every answer must be grounded in retrieved diary evidence.
-4. Retrieval must be future-portable into TheyGrow.
-5. Shared-diary mode must preserve authorship.
-6. Optional AI enrichments must be feature-flagged, not entangled with the base flow.
-7. No silent failure may pretend confidence.
+3. Absence of an explicit command never causes silent data loss; the safety floor for ambiguous input is a draft, not a discard.
+4. Every answer must be grounded in retrieved evidence.
+5. Retrieval must be future-portable into TheyGrow and other hosts.
+6. Shared-memory mode must preserve authorship.
+7. Optional AI enrichments must be feature-flagged, not entangled with the base flow.
+8. No silent failure may pretend confidence.
+9. Raw data is durable by design: daily backup window, stronger-than-nightly recovery, on-demand raw export.
+10. The topic model is generic; child- and family-oriented capture is one use case, not the system's definition.
 
 ## 8. Success Criteria
 
@@ -131,7 +154,9 @@ Important note:
 - parsing and chunking are replayable,
 - indexing failures do not destroy source data,
 - retrieval behavior is inspectable,
-- answer generation degrades gracefully when evidence is weak.
+- answer generation degrades gracefully when evidence is weak,
+- raw data is recoverable from a daily backup window with a tighter recovery point than nightly-only,
+- users can export their raw data on demand in JSON or TXT.
 
 ## 9. Risks
 
@@ -157,10 +182,11 @@ Build the first production slice as:
 
 ## 11. Integration Direction
 
-The service must support multiple hosts as first-class integration shapes (D-026):
-- Telegram bot as one event-source adapter,
-- TheyGrow backend/app as another host,
-- self-hosted OSS, managed cloud, and other embedded products as deployment shapes,
-- future web/app surfaces through internal API or SDK.
+The service must support multiple hosts as first-class integration shapes (D-026, D-027):
+- Telegram bot as one event-source adapter (current),
+- TheyGrow backend/app as a named first-class embedded host,
+- self-hosted OSS as a peer deployment shape,
+- **managed cloud** as the **default reference deployment**,
+- other embedded products and future web/app surfaces through internal API or SDK.
 
 Each must be an integration path, not a rewrite path. Hosts vary along the five adapter axes (event source, control surface, storage/infrastructure, embedding/LLM providers, tenant/auth mapping); the functional core stays the same.

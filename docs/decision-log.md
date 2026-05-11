@@ -422,3 +422,50 @@ D-001 (Telegram-first, TheyGrow-later) and D-015 (TheyGrow integration seam) nam
 - `AGENTS.md` and `CLAUDE.md` gain the core/adapter/config classification rule for future packets.
 - No code changes, no schema changes, no new dependencies, no roadmap commitment in this packet. Concrete renames, multi-tenant schema work, new event-source adapters, and a managed-cloud or OSS-distribution story are each separate packets, opened on their own merits when needed.
 - Out of scope (unchanged): all open assumptions (A-10, A-34, A-35, A-36b), Phase 3.4+ work, AnswerTrace persistence (Phase 4), Phase 5 query rewriting, Phase 6 provider hardening, Phase 8 privacy/visibility model, Phase 9 TheyGrow integration seam.
+
+---
+
+## D-027 — Target-state architecture extensions: draft-by-default routing, raw-data durability and export, cloud-first deployment
+
+### Decision
+
+The target-state architecture extends D-026 with four behavioral commitments that bind future implementation packets. None of them changes code, schema, or names in this packet; each is a directional rule that future implementation packets implement on their own merits.
+
+1. **Draft-by-default safety (control surface).** Inbound messages enter one of three lifecycle states — **draft**, **note**, or **query**. The user-facing control surface offers three explicit commands:
+   - `/note` — canonical note. Triggers the full ingestion pipeline (parse → chunk → embed → index).
+   - `/draft` — explicit draft. Persisted as raw `SourceMessage` only; no parse, chunk, embed, or index.
+   - `/ask` — query / retrieval.
+   - **Absence of an explicit command** is treated as **draft**. Heuristics may layer suggestions on top, but MUST NOT override the draft floor: no path silently discards an inbound message. CLARIFY (D-020) remains valid for cases where heuristics actively conflict with intent; the new floor is "raw always persists" regardless of routing confidence.
+   A draft may later be promoted to a note via an explicit user action; promotion is replayable from the persisted raw text (I-12). Specific draft retention, expiry, and promotion mechanics are bracketed as A-38.
+
+2. **Raw-data durability with a daily backup window and stronger-than-nightly recovery.** Raw `SourceMessage` is the system's highest-tier durability surface (I-2, I-3). The target contour requires:
+   - a scheduled nightly backup window (target: `03:00–05:00` local time) covering at minimum `source_messages` plus enough relational scaffolding to restore the `SourceMessage → DiaryEntry → EventChunk` lineage,
+   - recovery to a point closer to failure than the last nightly snapshot (the mechanism — continuous WAL archiving, PITR, replicas, or a managed-cloud equivalent — is selected per deployment shape),
+   - operational policies (retention windows, restore drills) that treat raw retention as the highest tier.
+   Derived state (embeddings, indexes, traces) remains reproducible by replay from raw under the active parser/embedding versions. Specific tooling and RPO/RTO targets are bracketed as A-40.
+
+3. **Raw export on demand in JSON or TXT.** The user must be able to export their raw data on demand, in either JSON (stable field names, ISO timestamps) or TXT (one record per block). The export is scope-bounded (R-3) and self-describing (records its own export id, scope, time range, format, requester). Derived state is not in the minimum export contract — raw is sufficient to reconstruct everything else. Per-host delivery channels and the request shape are bracketed as A-39.
+
+4. **Cloud-first deployment as the default shape.** The reference deployment shape is **managed cloud** (managed Postgres, scheduled backups, provider gateways). Self-hosted OSS and embedded-in-host (TheyGrow today as the named first-class case) remain first-class peer shapes — same core, different adapter configurations. None of the three is a rewrite path of the others. The specific managed environment that is the production reference is bracketed as A-41.
+
+### Why
+
+These commitments capture target-state requirements that were implicit or absent in canonical docs:
+
+- D-006 named explicit commands plus heuristic routing, and D-020 named CLARIFY as the safety move for ambiguous plain text. As the system moves toward richer use cases and valuable personal information is being captured, the safety floor for ambiguous input changes from "ask to clarify, drop the message" to "preserve as draft", because absence of an explicit command must never cause silent loss of user data.
+- D-007 made PostgreSQL the durable system of record, and D-022 stood up a local Postgres backend, but durability beyond "raw committed before enrichment" (I-3) was unspecified. Daily backup plus stronger-than-nightly recovery plus raw export make raw durability auditable end-to-end.
+- D-026 named OSS / managed cloud / embedded as first-class deployment shapes without ranking them. Naming managed cloud as the **default** shape resolves which configuration is the production reference; OSS and embedded remain peers, not derivatives.
+
+The behaviors above are directional commitments. Mechanisms — heuristic semantics under the draft floor, draft retention, backup tooling, RPO/RTO, export delivery channel, the specific managed environment — are bracketed as open assumptions and decided by their respective implementation packets.
+
+### Consequence
+
+- Extends D-026 with four behavioral target-state commitments. D-026 remains the portability rule; D-027 names the behaviors the portable core must support.
+- Generalizes D-006 / D-020: the safety floor for ambiguous input is **preserve as draft**, not **clarify and drop**. D-020's CLARIFY UX remains valid for cases where the heuristic actively conflicts with intent.
+- Sharpens A-20 (export/delete semantics — export half directionally answered), A-22 (hosting target — managed cloud as default), A-23 (backup strategy — daily window plus stronger recovery).
+- Opens new assumptions: **A-38** (draft lifecycle semantics), **A-39** (raw export packaging and delivery), **A-40** (backup tooling and recovery objectives), **A-41** (cloud-first reference environment).
+- `docs/ARCHITECTURE.md` updated in place with the message-lifecycle, durability/backup/recovery, and raw-export sections, deployment-shapes naming, and a one-page-view diagram refresh to target-state command names.
+- `docs/product/PRD.md` updated to reflect target-state control surface, an added user job (Job 5 — Own my data), expanded product principles (draft-by-default, durability, raw export, generic topic model), in-scope target-state additions, and the integration-direction ranking.
+- `docs/product/BuildPlan.md` updated for consistency: target-state shape called out next to Goal; Phase 8 wording now covers raw export and backup/recovery; Phase 9 renamed "Host Integration Seams" with TheyGrow named as one first-class case among peers.
+- No code changes, no schema changes, no naming-alignment changes in this packet. Implementing `/note`, `/draft`, the no-command-→-draft default, the export endpoint, the backup/recovery contour, and the cloud-first deployment are each separate implementation packets opened on their own merits. The renaming of the existing `/entry` command to `/note` is part of the broader naming-alignment packet (D-026).
+- Out of scope (unchanged): all prior open assumptions (A-9, A-10, A-11, A-12, A-13, A-14, A-15, A-18, A-19, A-21, A-24, A-25, A-26, A-28, A-31, A-33, A-34, A-35, A-36b, A-37); Phase 3.4+ retrieval refinements; Phase 4 grounded-answer pipeline; Phase 5 query rewriting / answer modes; Phase 6 provider hardening; Phase 8 visibility-model implementation; Phase 9 host-integration mechanics; TechSpec.md, INVARIANTS.md, RUNTIME-INVARIANTS.md, RUNBOOK.md, assumption-audit.md (each carries its own follow-up alignment when the corresponding implementation packet lands).
