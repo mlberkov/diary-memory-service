@@ -31,6 +31,7 @@ from dataclasses import replace
 
 from diary_rag.core.diary.models import DiaryEntry, EventChunk, SourceMessage
 from diary_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
+from diary_rag.core.routing import RouteKind
 
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 _MOCK_DENSE_THRESHOLD = 0.5
@@ -91,6 +92,19 @@ class MockDiaryStore:
             return rows
         if limit < 0:
             raise ValueError("limit must be non-negative")
+        return rows[:limit]
+
+    def list_recent_drafts(self, family_id: str, *, limit: int) -> list[SourceMessage]:
+        if not family_id:
+            raise ValueError("family_id is required (Runtime invariant R-3)")
+        if limit < 1:
+            raise ValueError("limit must be >= 1")
+        rows = [
+            s
+            for s in self._sources.values()
+            if s.family_id == family_id and s.detected_route is RouteKind.DRAFT
+        ]
+        rows.sort(key=lambda s: (s.created_at, s.source_message_id), reverse=True)
         return rows[:limit]
 
     def get_diary_entry_by_source_message_id(self, source_message_id: str) -> DiaryEntry | None:

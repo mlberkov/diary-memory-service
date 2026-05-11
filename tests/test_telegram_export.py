@@ -43,10 +43,16 @@ class RecordingTelegramClient:
             }
         )
 
+    def send_message(self, *, chat_id: str, text: str) -> None:  # pragma: no cover
+        raise AssertionError("send_message should not be invoked for /export")
+
 
 class FailingTelegramClient:
     def send_document(self, **kwargs: Any) -> None:
         raise RuntimeError("simulated outbound delivery failure")
+
+    def send_message(self, *, chat_id: str, text: str) -> None:  # pragma: no cover
+        raise AssertionError("send_message should not be invoked for /export")
 
 
 def _settings() -> Settings:
@@ -58,14 +64,16 @@ def _client_with(
 ) -> tuple[TestClient, MockDiaryStore, TelegramClient]:
     store = MockDiaryStore()
     embed = MockEmbeddingClient()
+    settings = _settings()
     dispatcher = Dispatcher(
         DiaryService(store, embedding_client=embed),
         QueryService(store, embed),
         ExportService(store),
+        settings,
     )
     if telegram_client is None:
         telegram_client = RecordingTelegramClient()
-    app = create_app(_settings())
+    app = create_app(settings)
     app.dependency_overrides[get_dispatcher] = lambda: dispatcher
     app.dependency_overrides[get_telegram_client] = lambda: telegram_client
     return TestClient(app), store, telegram_client

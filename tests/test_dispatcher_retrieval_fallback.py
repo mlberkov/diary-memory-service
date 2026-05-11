@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from diary_rag.config import Settings
 from diary_rag.core.diary import AnswerResult, FallbackMode
 from diary_rag.core.routing import InboundMessage, RouteKind
 from diary_rag.services.dispatcher import Dispatcher
@@ -55,6 +56,7 @@ def test_not_implemented_error_translates_to_no_evidence(
         _UnusedDiaryService(),  # type: ignore[arg-type]
         _RaisingQueryService(),  # type: ignore[arg-type]
         _UnusedExportService(),  # type: ignore[arg-type]
+        Settings(_env_file=None),  # type: ignore[call-arg]
     )
 
     with caplog.at_level(logging.WARNING, logger="diary_rag.services.dispatcher"):

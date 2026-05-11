@@ -273,16 +273,16 @@ def _draft_message(
     user: str = "7",
     message_id: str = "300",
     edit_seq: int = 0,
-    route_source: str = "command",
 ) -> InboundMessage:
+    """Construct a no-command-default DRAFT inbound (D-030: only path to a draft)."""
     return InboundMessage(
         external_message_id=message_id,
         external_chat_id=chat,
         external_user_id=user,
-        text=f"/draft {payload}" if route_source == "command" else payload,
+        text=payload,
         route=RouteKind.DRAFT,
         received_at=datetime.now(tz=UTC),
-        route_source=route_source,  # type: ignore[arg-type]
+        route_source="heuristic",
         payload=payload,
         edit_seq=edit_seq,
     )
@@ -365,3 +365,54 @@ def test_ingest_draft_then_distinct_entry_message_keeps_both_states() -> None:
     assert store.len_sources() == 2
     assert store.len_entries() == 1
     assert store.len_chunks() == 1
+
+
+def test_list_recent_drafts_returns_drafts_only_most_recent_first() -> None:
+    store = MockDiaryStore()
+    service = DiaryService(store)
+
+    service.ingest(_draft_message("first draft", message_id="d1"))
+    service.ingest(_entry_message("2026-05-09\nA note", message_id="n1"))
+    service.ingest(_draft_message("second draft", message_id="d2"))
+
+    drafts = service.list_recent_drafts("42", limit=5)
+    assert [d.raw_text for d in drafts] == ["second draft", "first draft"]
+
+
+def test_list_recent_drafts_is_family_scoped() -> None:
+    store = MockDiaryStore()
+    service = DiaryService(store)
+
+    service.ingest(_draft_message("fam-A draft", chat="fam-A", message_id="d1"))
+    service.ingest(_draft_message("fam-B draft", chat="fam-B", message_id="d2"))
+
+    drafts = service.list_recent_drafts("fam-A", limit=5)
+    assert [d.raw_text for d in drafts] == ["fam-A draft"]
+
+
+def test_list_recent_drafts_respects_limit() -> None:
+    store = MockDiaryStore()
+    service = DiaryService(store)
+
+    for i in range(5):
+        service.ingest(_draft_message(f"draft-{i}", message_id=f"d{i}"))
+
+    drafts = service.list_recent_drafts("42", limit=2)
+    assert len(drafts) == 2
+
+
+def test_list_recent_drafts_empty_when_no_drafts() -> None:
+    store = MockDiaryStore()
+    service = DiaryService(store)
+
+    service.ingest(_entry_message("2026-05-09\nA note", message_id="n1"))
+
+    drafts = service.list_recent_drafts("42", limit=5)
+    assert drafts == []
+
+
+def test_list_recent_drafts_rejects_zero_limit() -> None:
+    store = MockDiaryStore()
+    service = DiaryService(store)
+    with pytest.raises(ValueError):
+        service.list_recent_drafts("42", limit=0)

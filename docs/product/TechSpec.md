@@ -65,16 +65,17 @@ The `SourceMessage` row (step 3) must be committed before any enrichment step �
 
 ## 4. Routing
 
-### Target command surface (D-027)
-Inbound messages enter one of three lifecycle states — **draft**, **note**, or **query** — set by the user's command, not by message content:
+### Target command surface (D-027, D-030)
+Inbound messages enter one of three lifecycle states — **draft**, **note**, or **query** — set by the user's command (or by the no-command default), not by message content:
 
 - `/note <text>` → canonical note. Triggers the full ingestion pipeline (parse → chunk → embed → index).
-- `/draft <text>` → explicit draft. Persisted as raw `SourceMessage` only; no parse, chunk, embed, or index.
 - `/ask <text>` → query / retrieval.
-- **No command** → defaults to **draft**. The raw text is persisted; the user may later promote it to a note. No path silently discards an inbound message.
+- `/drafts [N]` → recall the most recent full raw drafts back into chat (D-030). Action, not a lifecycle state.
+- `/export <json|txt>` → raw export (D-029).
+- **No command** → defaults to **draft**. The raw text is persisted as a `SourceMessage` with `detected_route='draft'`. No path silently discards an inbound message. Drafts are not note-candidates and have no promotion path (D-030).
 
 ### Current command surface
-The Telegram adapter exposes `/entry` (the historical name for `/note`), `/draft`, and `/ask`. The no-command-→-draft default is also in place (D-028). Renaming `/entry` to `/note` is part of the broader naming-alignment packet (D-026).
+The Telegram adapter exposes `/entry` (the historical name for `/note`), `/ask`, `/drafts`, and `/export`. The no-command-→-draft default is in place (D-028). The explicit `/draft` command was removed in D-030; rows previously persisted with `detected_route='draft'` remain valid. Renaming `/entry` to `/note` is part of the broader naming-alignment packet (D-026).
 
 ### Convenience routing
 Heuristics MAY suggest a stronger route (note or ask) for plain text, but MUST NOT override the draft floor. As of D-028, the classifier keeps the high-confidence ENTRY (`first_line_iso_date_with_events`) and ASK (`question_mark_terminator`, `interrogative_or_imperative_first_token`) rules and routes everything else to `RouteKind.DRAFT` (reason `draft_floor_no_signal`). CLARIFY remains a valid response kind but no plain-text path emits it; it survives in the dispatcher for explicit-command active-conflict cases.

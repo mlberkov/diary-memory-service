@@ -71,6 +71,13 @@ class Settings(BaseSettings):
     retrieval_top_k: int = Field(default=5, ge=1)
     retrieval_candidate_k: int = Field(default=20, ge=1)
 
+    # /drafts recall knobs. ``drafts_default_limit`` is used when the user
+    # omits ``N``; ``drafts_max_limit`` is a silent defensive cap so that
+    # an explicit ``N`` larger than the cap is served clamped (the user is
+    # told via the reply header, not via a usage error).
+    drafts_default_limit: int = Field(default=5, ge=1)
+    drafts_max_limit: int = Field(default=20, ge=1)
+
     def postgres_dsn(self) -> str:
         return (
             f"postgresql://{self.postgres_user}:{self.postgres_password}"

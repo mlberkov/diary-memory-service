@@ -3,12 +3,15 @@
 Telegram's webhook response body can deliver one ``method`` call inline,
 but ``sendDocument`` with a freshly-generated binary payload requires a
 multipart/form-data ``POST`` to ``api.telegram.org/bot<token>/sendDocument``.
-This module is the smallest seam that owns that outbound call.
+``sendMessage`` outbound is needed for the ``/drafts`` recall (D-030)
+when a multi-message split is forced or when the delivery is purely
+outbound. This module owns both.
 
 The :class:`TelegramClient` Protocol keeps the webhook handler
 transport-agnostic so tests can inject a recording fake. The concrete
-:class:`HttpxTelegramClient` performs the multipart upload via
-``httpx``.
+:class:`HttpxTelegramClient` performs both calls via ``httpx``;
+``send_message`` uses a JSON body and intentionally omits ``parse_mode``
+so user-supplied draft text passes through verbatim.
 """
 
 from __future__ import annotations
@@ -30,6 +33,8 @@ class TelegramClient(Protocol):
         media_type: str,
         caption: str | None = None,
     ) -> None: ...
+
+    def send_message(self, *, chat_id: str, text: str) -> None: ...
 
 
 class HttpxTelegramClient:
@@ -63,4 +68,15 @@ class HttpxTelegramClient:
             data["caption"] = caption
         files = {"document": (filename, content, media_type)}
         response = httpx.post(url, data=data, files=files, timeout=self._timeout)
+        response.raise_for_status()
+
+    def send_message(self, *, chat_id: str, text: str) -> None:
+        if not self._token:
+            raise RuntimeError("telegram bot token is not configured")
+        url = f"{self._base_url}/bot{self._token}/sendMessage"
+        response = httpx.post(
+            url,
+            json={"chat_id": chat_id, "text": text},
+            timeout=self._timeout,
+        )
         response.raise_for_status()

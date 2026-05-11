@@ -13,6 +13,7 @@ is non-empty, the heuristic classifier picks ``ENTRY`` / ``ASK`` /
 
 from __future__ import annotations
 
+import contextlib
 import secrets
 from datetime import UTC, datetime
 from typing import Annotated, Any
@@ -22,9 +23,11 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from diary_rag.adapters.embeddings import build_embedding_client
 from diary_rag.adapters.telegram.client import HttpxTelegramClient, TelegramClient
 from diary_rag.adapters.telegram.commands import parse_command
+from diary_rag.adapters.telegram.drafts_packing import pack_drafts_into_messages
 from diary_rag.adapters.telegram.models import TelegramUpdate
 from diary_rag.adapters.telegram.reply import build_send_message_payload
 from diary_rag.config import Settings, get_settings
+from diary_rag.core.diary.models import SourceMessage
 from diary_rag.core.routing import InboundMessage, RouteKind, RouteSource, lifecycle_for
 from diary_rag.core.routing.classifier import classify_plain_text
 from diary_rag.logging import get_logger
@@ -65,6 +68,7 @@ def get_dispatcher() -> Dispatcher:
                 candidate_k=settings.retrieval_candidate_k,
             ),
             ExportService(store),
+            settings,
         )
         log.info(
             "dispatcher.built storage_backend=%s embedding_backend=%s "
@@ -175,4 +179,46 @@ def register_telegram_webhook(app: FastAPI) -> None:
                 len(result.document.content),
             )
             return {}
+        if result.drafts is not None:
+            blocks = [_render_draft_block(d) for d in result.drafts]
+            messages = pack_drafts_into_messages(result.reply_text, blocks)
+            total = len(messages)
+            sent = 0
+            for body in messages:
+                try:
+                    telegram_client.send_message(chat_id=inbound.external_chat_id, text=body)
+                except Exception as exc:
+                    log.warning(
+                        "drafts.delivery_failed chat_id=%s sent=%d total=%d " "error_class=%s",
+                        inbound.external_chat_id,
+                        sent,
+                        total,
+                        exc.__class__.__name__,
+                    )
+                    with contextlib.suppress(Exception):
+                        telegram_client.send_message(
+                            chat_id=inbound.external_chat_id,
+                            text=(
+                                f"Couldn't deliver all drafts (sent {sent}/{total}). " "Try again."
+                            ),
+                        )
+                    return {}
+                sent += 1
+            log.info(
+                "drafts.delivered chat_id=%s draft_count=%d messages_sent=%d",
+                inbound.external_chat_id,
+                len(result.drafts),
+                sent,
+            )
+            return {}
         return build_send_message_payload(inbound.external_chat_id, result.reply_text)
+
+
+def _render_draft_block(draft: SourceMessage) -> str:
+    """Render a draft as a chat block: header line + blank line + raw text."""
+    short_id = draft.source_message_id[-8:]
+    header = (
+        f"\U0001f4dd {draft.created_at.isoformat()} · "
+        f"author:{draft.author_user_id} · id:{short_id}"
+    )
+    return f"{header}\n\n{draft.raw_text}"

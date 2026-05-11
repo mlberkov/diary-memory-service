@@ -31,12 +31,14 @@ def _settings() -> Settings:
 def _client_with_fresh_store() -> tuple[TestClient, MockDiaryStore]:
     store = MockDiaryStore()
     embed = MockEmbeddingClient()
+    settings = _settings()
     dispatcher = Dispatcher(
         DiaryService(store, embedding_client=embed),
         QueryService(store, embed),
         ExportService(store),
+        settings,
     )
-    app = create_app(_settings())
+    app = create_app(settings)
     app.dependency_overrides[get_dispatcher] = lambda: dispatcher
     return TestClient(app), store
 
@@ -170,10 +172,12 @@ def test_ambiguous_plain_text_persists_as_draft_under_no_command_default() -> No
     assert store.len_chunks() == 0
 
 
-def test_explicit_draft_command_persists_raw_only_and_skips_enrichment() -> None:
+def test_no_command_plain_text_persists_as_draft_and_skips_enrichment() -> None:
     client, store = _client_with_fresh_store()
 
-    resp = _post(client, _update("/draft 2026-05-09\nNot sure yet, keep it raw", update_id=1))
+    # No leading command. The webhook routes via the heuristic to DRAFT under
+    # the no-command-→-draft floor (the only path to a draft after D-030).
+    resp = _post(client, _update("Not sure yet, keep it raw", update_id=1))
 
     assert resp.status_code == 200
     body = resp.json()

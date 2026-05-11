@@ -14,8 +14,8 @@ from diary_rag.core.routing import RouteKind
         ("/start", RouteKind.START),
         ("/help", RouteKind.HELP),
         ("/entry", RouteKind.ENTRY),
-        ("/draft", RouteKind.DRAFT),
         ("/ask", RouteKind.ASK),
+        ("/drafts", RouteKind.DRAFTS),
     ],
 )
 def test_parse_command_recognizes_each_supported_command(
@@ -26,10 +26,22 @@ def test_parse_command_recognizes_each_supported_command(
     assert payload == ""
 
 
-def test_parse_command_returns_payload_after_draft() -> None:
+def test_parse_command_drafts_returns_integer_payload() -> None:
+    route, payload = parse_command("/drafts 5")
+    assert route is RouteKind.DRAFTS
+    assert payload == "5"
+
+
+def test_parse_command_drafts_without_argument_yields_empty_payload() -> None:
+    route, payload = parse_command("/drafts")
+    assert route is RouteKind.DRAFTS
+    assert payload == ""
+
+
+def test_parse_command_old_draft_token_no_longer_maps_to_draft_route() -> None:
     route, payload = parse_command("/draft groceries: milk, bread")
-    assert route is RouteKind.DRAFT
-    assert payload == "groceries: milk, bread"
+    assert route is RouteKind.UNKNOWN
+    assert payload == "/draft groceries: milk, bread"
 
 
 def test_parse_command_returns_payload_after_command() -> None:

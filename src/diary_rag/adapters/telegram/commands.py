@@ -1,6 +1,6 @@
 """Telegram command parser.
 
-Recognises ``/start``, ``/help``, ``/entry``, ``/draft``, ``/ask``,
+Recognises ``/start``, ``/help``, ``/entry``, ``/ask``, ``/drafts``,
 ``/export``. The leading ``@BotName`` suffix that Telegram appends in
 group chats is stripped before lookup. Anything else maps to
 :class:`RouteKind.UNKNOWN` and the webhook hands off to the heuristic
@@ -17,8 +17,8 @@ COMMAND_TOKENS: dict[str, RouteKind] = {
     "/start": RouteKind.START,
     "/help": RouteKind.HELP,
     "/entry": RouteKind.ENTRY,
-    "/draft": RouteKind.DRAFT,
     "/ask": RouteKind.ASK,
+    "/drafts": RouteKind.DRAFTS,
     "/export": RouteKind.EXPORT,
 }
 

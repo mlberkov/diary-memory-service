@@ -8,7 +8,7 @@ Draft v1
 Build a portable memory/journal core, surfaced first as a Diary Memory Service that starts with Telegram and is later integrated into TheyGrow. The same core is intended to support additional hosts (self-hosted OSS, managed cloud, other embedded products) without rewrite (D-026). The family-diary framing is the first use case, not the definition of the system.
 
 Target-state shape (D-027) — bound here so future slices stay consistent, not scheduled as their own phases yet:
-- Draft-by-default safety: explicit `/note`, `/draft`, `/ask` commands; absence of command defaults to draft so no inbound message is silently discarded.
+- Draft-by-default safety: explicit `/note`, `/ask`, `/drafts` commands; absence of command defaults to draft so no inbound message is silently discarded. The explicit `/draft` command was removed in D-030 — drafts are created only by the no-command default and recalled via `/drafts`.
 - Raw-data durability with a daily backup window (`03:00–05:00` target) and stronger-than-nightly recovery.
 - Raw export on demand in JSON or TXT.
 - Managed cloud as the default reference deployment shape, with self-hosted OSS and embedded (TheyGrow) as peer shapes.

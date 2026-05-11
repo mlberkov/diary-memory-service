@@ -66,12 +66,12 @@ As a user, I want to export my raw captured data on demand and trust that it is 
 
 ## 5. Input Model
 
-A user writes messages in a chat (Telegram today; other hosts later). Routing is set by the user's command, not by message content (D-027):
+A user writes messages in a chat (Telegram today; other hosts later). Routing is set by the user's command, not by message content (D-027, D-030):
 
 - `/note <text>` — explicit **note**. Eligible for the full ingestion pipeline (parse → chunk → embed → index).
-- `/draft <text>` — explicit **draft**. Persisted as a raw message only; no parsing, chunking, embedding, or indexing.
 - `/ask <text>` — **query**. Treated as a retrieval request over previously captured notes.
-- **No command** — treated as a **draft**. The raw text is persisted; the user may later promote it to a note. No path silently discards an inbound message.
+- `/drafts [N]` — **recall** the most recent full raw drafts back into the chat (D-030).
+- **No command** — treated as a **draft**. The raw text is persisted as a `SourceMessage` with `detected_route='draft'`. No path silently discards an inbound message. Drafts are not note-candidates and have no promotion path (D-030); recall (`/drafts`) and export (`/export`) are the operations available on captured drafts.
 
 ### Note capture shape
 
@@ -93,13 +93,13 @@ Heuristics MAY suggest a stronger route (note or ask) for plain text, but MUST N
 
 ### Naming note
 
-The target command names are `/note`, `/draft`, `/ask`. The current Telegram implementation exposes `/entry` (the historical name for `/note`), `/draft`, and `/ask`; the no-command-→-draft default is also in place (D-028). The `/entry` → `/note` rename is a separate naming-alignment packet.
+The target command names are `/note`, `/ask`, `/drafts`. The current Telegram implementation exposes `/entry` (the historical name for `/note`), `/ask`, `/drafts`, and `/export`; the no-command-→-draft default is in place (D-028) and the explicit `/draft` command was removed (D-030). The `/entry` → `/note` rename is a separate naming-alignment packet.
 
 ## 6. Functional Scope
 
 ### In scope for MVP
 - Telegram text input,
-- explicit `/entry`, `/draft`, and `/ask` commands (the current command surface; `/entry` is the historical name for `/note`, target state is `/note`, `/draft`, `/ask`),
+- explicit `/entry`, `/ask`, and `/drafts` commands (the current command surface; `/entry` is the historical name for `/note`; the explicit `/draft` command was removed in D-030 — the no-command default carries the draft floor),
 - heuristic auto-routing by date presence on top of the draft floor: high-confidence ENTRY/ASK signals route as before; everything else persists as a draft (D-028),
 - date parsing,
 - line-by-line event splitting,
