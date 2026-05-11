@@ -393,3 +393,32 @@ The 3072-dim ANN strategy is left open (A-36b) on purpose: an exact family-scope
 - New `Settings` knobs: `retrieval_top_k`, `retrieval_candidate_k`. These are tuning placeholders, not quality claims.
 - Dispatcher reply text changes; the e2e smoke tests and any external documentation that quoted the old trailer were updated in the same packet.
 - Out of scope (unchanged or deferred): **BM25**, **reranker / cross-encoder**, **Qdrant or any external vector/search system**, **halfvec / HNSW migration** (A-36b), Phase 3.4 metadata filters (visibility / child / date), Phase 3.5 retrieval-trace persistence (`RetrievalHit` rows), Phase 4 AnswerTrace persistence, Phase 5 query rewriting / answer modes, Phase 6 provider hardening (A-35 unchanged), multilingual sparse tuning beyond `simple`, query-embedding caching, migration tooling (A-34 unchanged), edit-content semantics (A-10).
+
+---
+
+## D-026 — Portable memory core, many hosts
+
+### Decision
+The repository is a **portable memory/journal core**. The functional core — raw capture, parsing, line-level chunking, embedding, hybrid retrieval, grounded answering, provenance — is one consistent subsystem regardless of which system embeds it. Hosts and integrations vary along five adapter axes, each with a single explicit seam:
+
+1. **Event source** — Telegram webhook today; HTTP API, embedded SDK call, CLI, or web form later.
+2. **Control surface** — `/entry` and `/ask` in Telegram; UI buttons, endpoints, or app screens in other hosts.
+3. **Storage / infrastructure** — `DiaryRepository` and `SearchRepository` Protocols (mock, SQLite dev, local Postgres + pgvector, managed Postgres, or a host's existing database when embedded).
+4. **Embedding / LLM providers** — `EmbeddingClient`, `ChatClient` (OpenAI today; self-hosted, on-prem, host-provided gateways, or mocks elsewhere).
+5. **Tenant / auth mapping** — host identity (Telegram chat, TheyGrow workspace, OSS single-tenant default) mapped onto the core's opaque scope.
+
+Self-hosted OSS, managed cloud, and embedded-in-TheyGrow are first-class deployment shapes. Telegram is one event-source adapter today; TheyGrow is one future host. The current parents / family / child framing is the **first use case** of the core, not its definition. Journal/topic semantics in the core stay generic; use-case-specific identifiers (`family_id`, child) are carried as opaque scope, not encoded in core types or behavior.
+
+### Why
+D-001 (Telegram-first, TheyGrow-later) and D-015 (TheyGrow integration seam) name two specific hosts and one specific migration. As more deployment shapes become realistic (OSS self-host, managed cloud, library embedding), framing the architecture around Telegram-vs-TheyGrow risks encoding host-specific assumptions into the core and use-case vocabulary into types and schemas. This decision generalizes D-001 and D-015 into a single rule with named adapter axes, so future packets evaluate changes against one principle rather than ad-hoc Telegram/TheyGrow comparisons. It also names a drift that already exists (`family_id`, `DiaryEntry`, "family diary" framing) and bounds it: existing names persist; new core code adopts the neutral form; an explicit renaming packet may revisit the existing names later on its own merits.
+
+### Consequence
+- Generalizes D-001 and D-015. Both remain valid as specific host instances of the rule; they are not retired.
+- New core code does not introduce use-case vocabulary (`family`, `child`, `parent`, "diary" as a type name) where a generic name fits. Existing names — including `family_id` in `event_chunks`, `DiaryRepository`, `DiaryEntry`, and the `diary_rag` package — are out of scope of this decision and continue to mean what they mean. An explicit renaming packet may revisit them.
+- No transport types, provider SDKs, raw SQL, or host-runtime assumptions (HTTP-shaped, Telegram-shaped, single-tenant, internet-connected, English-only) appear in core code. This restates and extends I-1 and I-11.
+- Future packets must classify their changes as **core**, **adapter**, or **config** in the packet description. Changes that cross axes name the seams they touch.
+- `docs/ARCHITECTURE.md` updated in place with the portability principle, adapter axes, and boundary-rule extension.
+- `docs/product/PRD.md` and `docs/product/BuildPlan.md` reframed so the parents / family-diary use case is named as the first use case of a generic memory core, not its definition. No product scope change.
+- `AGENTS.md` and `CLAUDE.md` gain the core/adapter/config classification rule for future packets.
+- No code changes, no schema changes, no new dependencies, no roadmap commitment in this packet. Concrete renames, multi-tenant schema work, new event-source adapters, and a managed-cloud or OSS-distribution story are each separate packets, opened on their own merits when needed.
+- Out of scope (unchanged): all open assumptions (A-10, A-34, A-35, A-36b), Phase 3.4+ work, AnswerTrace persistence (Phase 4), Phase 5 query rewriting, Phase 6 provider hardening, Phase 8 privacy/visibility model, Phase 9 TheyGrow integration seam.

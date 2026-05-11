@@ -5,7 +5,7 @@ Draft v1
 
 ## Goal
 
-Build a reusable Diary Memory Service that starts with Telegram as the first interface and is later integrated into TheyGrow.
+Build a portable memory/journal core, surfaced first as a Diary Memory Service that starts with Telegram and is later integrated into TheyGrow. The same core is intended to support additional hosts (self-hosted OSS, managed cloud, other embedded products) without rewrite (D-026). The family-diary framing is the first use case, not the definition of the system.
 
 ## Build Strategy
 

@@ -7,14 +7,15 @@ Purpose: canonical product context for the first implementation slice
 
 ## 1. Product Intent
 
-This service provides a low-friction diary memory system for parents who write family and child-related observations in Telegram and later ask natural-language questions over these records.
+The system is a portable memory/journal core surfaced through host-specific adapters. The **first use case** — and the scope of this PRD — is a low-friction diary memory system for parents who write family and child-related observations in Telegram and later ask natural-language questions over these records. The same core is intended to support additional hosts (TheyGrow, self-hosted OSS, managed cloud, other embedded products) without rewrite.
 
 The short-term interface is Telegram.  
 The long-term product destination is integration into TheyGrow as a reusable internal memory subsystem.
 
-Core principle:
-- Telegram is the initial channel, not the product core.
-- The core is a standalone Diary Memory Service.
+Core principle (D-026):
+- Telegram is one event-source adapter, not the product core.
+- The core is a standalone, portable memory/journal core — currently surfaced as a Diary Memory Service.
+- The parents / family-diary framing below is the first use case, not the definition of the system.
 
 ## 2. Problem
 
@@ -156,9 +157,10 @@ Build the first production slice as:
 
 ## 11. Integration Direction
 
-The service must later support:
-- Telegram bot as one client,
-- TheyGrow backend/app as another client,
+The service must support multiple hosts as first-class integration shapes (D-026):
+- Telegram bot as one event-source adapter,
+- TheyGrow backend/app as another host,
+- self-hosted OSS, managed cloud, and other embedded products as deployment shapes,
 - future web/app surfaces through internal API or SDK.
 
-This must be an integration path, not a rewrite path.
+Each must be an integration path, not a rewrite path. Hosts vary along the five adapter axes (event source, control surface, storage/infrastructure, embedding/LLM providers, tenant/auth mapping); the functional core stays the same.
