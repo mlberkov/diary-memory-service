@@ -40,7 +40,7 @@ Files listed are *targets*. Most do not exist yet. Each row will be split into o
 ## Phase 4 — Grounded Answer Pipeline
 | Slice | Files / artifacts |
 | --- | --- |
-| 4.1 context assembler | top-k selection, dedup, optional date grouping |
+| 4.1 context assembler | `core/diary/models.py` adds the channel-neutral `AnswerContext` (`query_id`, `query_text`, `ordered_chunks`, `model_name`, `created_at`); `services/context_assembler.py` (pure mapping from `Query` + RRF-merged `FusedHit` list → `AnswerContext`, order preserved from RRF, dedup upstream); `QueryService.answer` invokes the assembler after RRF and attaches the result to `AnswerResult.context` for success / no-evidence / empty-query contours; date grouping and other presentation shapes stay out of the canonical model. `tests/test_context_assembler.py` plus extended `tests/test_query_service.py`. Telegram reply layer unchanged in this slice. |
 | 4.2 answer prompt contract | versioned prompt, structured answer schema |
 | 4.3 fallback modes | no-evidence, weak-evidence, ambiguous, provider-unavailable (I-9, R-5, R-6) |
 | 4.4 evidence rendering | Telegram-side reply formatter with citations |

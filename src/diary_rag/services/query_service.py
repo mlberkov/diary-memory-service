@@ -20,6 +20,13 @@ rows for every candidate plus merged rows for every chunk in the
 returned evidence; ``NO_EVIDENCE`` (empty query or empty merged) still
 writes the ``Query`` row with zero hits. Answer-side ``AnswerTrace``
 persistence remains deferred to Phase 4.
+
+Slice 4.1: after RRF the service invokes
+:func:`diary_rag.services.context_assembler.assemble_answer_context` and
+attaches the resulting :class:`AnswerContext` to the returned
+``AnswerResult`` so the upcoming Phase-4 answer-prompt and chat-client
+packets can consume the assembled context without another refactor.
+The Telegram reply layer keeps reading ``evidence`` unchanged.
 """
 
 from __future__ import annotations
@@ -39,6 +46,7 @@ from diary_rag.core.diary.models import EventChunk
 from diary_rag.core.embeddings import EmbeddingClient
 from diary_rag.core.routing import InboundMessage
 from diary_rag.logging import get_logger
+from diary_rag.services.context_assembler import assemble_answer_context
 from diary_rag.services.retrieval import DEFAULT_RRF_K, FusedHit, reciprocal_rank_fusion
 from diary_rag.storage.repository import DiaryRepository
 from diary_rag.storage.search_repository import SearchRepository
@@ -95,17 +103,15 @@ class QueryService:
         model_name = self._embed.model_name
 
         if not query_text:
-            self._persist_trace(
+            query = Query(
                 query_id=query_id,
                 family_id=family_id,
                 query_text=query_text,
                 model_name=model_name,
                 fallback=FallbackMode.NO_EVIDENCE,
                 created_at=now,
-                dense_hits=[],
-                sparse_hits=[],
-                merged=[],
             )
+            self._persist_trace(query=query, dense_hits=[], sparse_hits=[], merged=[])
             log.info(
                 "retrieval.hybrid query_id=%s family_id=%s model=%s "
                 "dense_n=0 sparse_n=0 merged_n=0 fallback=no_evidence",
@@ -113,7 +119,11 @@ class QueryService:
                 family_id,
                 model_name,
             )
-            return AnswerResult(fallback=FallbackMode.NO_EVIDENCE, query_text=query_text)
+            return AnswerResult(
+                fallback=FallbackMode.NO_EVIDENCE,
+                query_text=query_text,
+                context=assemble_answer_context(query, []),
+            )
 
         query_embedding = self._embed.embed([query_text])[0]
 
@@ -124,16 +134,16 @@ class QueryService:
         merged = reciprocal_rank_fusion([dense_hits, sparse_hits], top_k=self._top_k)
 
         fallback = FallbackMode.NONE if merged else FallbackMode.NO_EVIDENCE
-        self._persist_trace(
+        query = Query(
             query_id=query_id,
             family_id=family_id,
             query_text=query_text,
             model_name=model_name,
             fallback=fallback,
             created_at=now,
-            dense_hits=dense_hits,
-            sparse_hits=sparse_hits,
-            merged=merged,
+        )
+        self._persist_trace(
+            query=query, dense_hits=dense_hits, sparse_hits=sparse_hits, merged=merged
         )
 
         log.info(
@@ -148,8 +158,13 @@ class QueryService:
             fallback.value,
         )
 
+        context = assemble_answer_context(query, merged)
         if not merged:
-            return AnswerResult(fallback=FallbackMode.NO_EVIDENCE, query_text=query_text)
+            return AnswerResult(
+                fallback=FallbackMode.NO_EVIDENCE,
+                query_text=query_text,
+                context=context,
+            )
 
         evidence = [
             Evidence(
@@ -159,29 +174,24 @@ class QueryService:
             )
             for h in merged
         ]
-        return AnswerResult(fallback=FallbackMode.NONE, query_text=query_text, evidence=evidence)
+        return AnswerResult(
+            fallback=FallbackMode.NONE,
+            query_text=query_text,
+            evidence=evidence,
+            context=context,
+        )
 
     def _persist_trace(
         self,
         *,
-        query_id: str,
-        family_id: str,
-        query_text: str,
-        model_name: str,
-        fallback: FallbackMode,
-        created_at: datetime,
+        query: Query,
         dense_hits: list[EventChunk],
         sparse_hits: list[EventChunk],
         merged: list[FusedHit],
     ) -> None:
-        query = Query(
-            query_id=query_id,
-            family_id=family_id,
-            query_text=query_text,
-            model_name=model_name,
-            fallback=fallback,
-            created_at=created_at,
-        )
+        query_id = query.query_id
+        model_name = query.model_name
+        created_at = query.created_at
         self._repo.save_query(query)
 
         hits: list[RetrievalHit] = []

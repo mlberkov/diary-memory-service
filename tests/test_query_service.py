@@ -224,6 +224,52 @@ def test_empty_query_persists_query_with_zero_hits() -> None:
     assert store.len_retrieval_hits() == 0
 
 
+def test_successful_retrieval_attaches_answer_context() -> None:
+    """Slice 4.1: every successful retrieval carries an assembled context."""
+    store = MockDiaryStore()
+    _ingest(store, "2026-05-09\nMorning routine\nTried a new book")
+    query = _wire(store)
+
+    result = query.answer(_ask("book"))
+
+    assert result.fallback is FallbackMode.NONE
+    assert result.context is not None
+    persisted = next(iter(store._queries.values()))
+    assert result.context.query_id == persisted.query_id
+    assert result.context.query_text == "book"
+    assert result.context.model_name == MockEmbeddingClient().model_name
+    assert result.context.created_at == persisted.created_at
+    # Context chunk order matches the evidence (RRF rank).
+    assert [c.chunk_id for c in result.context.ordered_chunks] == [
+        e.chunk_id for e in result.evidence
+    ]
+
+
+def test_no_evidence_attaches_empty_answer_context() -> None:
+    store = MockDiaryStore()
+    _ingest(store, "2026-05-09\nMorning routine")
+    query = _wire(store)
+
+    result = query.answer(_ask("snowstorm"))
+
+    assert result.fallback is FallbackMode.NO_EVIDENCE
+    assert result.context is not None
+    assert result.context.query_text == "snowstorm"
+    assert result.context.ordered_chunks == ()
+
+
+def test_empty_query_attaches_empty_answer_context() -> None:
+    store = MockDiaryStore()
+    query = _wire(store)
+
+    result = query.answer(_ask("   "))
+
+    assert result.fallback is FallbackMode.NO_EVIDENCE
+    assert result.context is not None
+    assert result.context.query_text == ""
+    assert result.context.ordered_chunks == ()
+
+
 def test_invalid_constructor_arguments() -> None:
     store = MockDiaryStore()
     client = MockEmbeddingClient()

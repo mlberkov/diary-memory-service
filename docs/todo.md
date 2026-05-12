@@ -2,10 +2,10 @@
 
 Top of list = pick next. Each item maps to a row in `docs/execution-map.md`. When a slice is done, remove it and add the next downstream slice.
 
-## Phase 4 — Grounded answer pipeline (next)
+## Phase 4 — Answer prompt + chat client + AnswerTrace (next)
 - Owner: agent
-- Map: execution-map 4.1 → 4.4
-- Concrete: build the answer side of R-5 on top of the now-persisted retrieval-side traces (D-032). Context assembler over the merged `retrieval_hits`; versioned answer prompt; structured answer schema with explicit fallback modes (no-evidence, weak-evidence, ambiguous, provider-unavailable); evidence rendering in the Telegram reply. Persistence: `AnswerTrace(query_id, prompt_version, context_chunk_ids, answer_text, confidence_band, fallback_mode, model_name, token_counts, latency_ms, created_at)` — its own table, FK to `queries.query_id`.
+- Map: execution-map 4.2 → 4.4
+- Concrete: now that Slice 4.1 has the channel-neutral `AnswerContext` plumbed through `QueryService.answer`, build the answer-side of R-5 on top of it. A `ChatClient` Protocol with a mock implementation (honest provenance, `model_name="mock"`); a versioned answer prompt + structured answer schema fed from `AnswerContext.ordered_chunks`; explicit fallback modes (no-evidence, weak-evidence, ambiguous, provider-unavailable); `AnswerTrace(query_id, prompt_version, context_chunk_ids, answer_text, confidence_band, fallback_mode, model_name, token_counts, latency_ms, created_at)` — its own table, FK to `queries.query_id`. Bound the packet — pick one slice (e.g. ChatClient seam + AnswerTrace persistence on the success / no-evidence contours) and defer prompt versioning, weak-evidence grading, and Telegram citation rendering to follow-on packets.
 
 ## Next quality-decision packet — search-quality fork
 - Owner: agent + human (decision boundary)
@@ -24,6 +24,16 @@ Top of list = pick next. Each item maps to a row in `docs/execution-map.md`. Whe
 - A-35 leaves failed embeddings sticky: a chunk with `embedding_status='failed'` stays that way until manual intervention. Once Phase 6 (provider hardening) is on the horizon, ship a reconciliation job that retries `failed` chunks with bounded backoff and a dead-letter strategy, plus the corresponding observability (logs / metrics on retry success/failure).
 
 ---
+
+Closed in the Slice 4.1 context-assembler packet:
+- `src/diary_rag/core/diary/models.py` — channel-neutral `AnswerContext` (`query_id`, `query_text`, `ordered_chunks: tuple[EventChunk, ...]`, `model_name`, `created_at`); minimal canonical payload, no presentation shapes baked into the domain model. `AnswerResult` gains an optional `context: AnswerContext | None = None` field so the upcoming chat-client / answer-trace packets consume the assembled view without another refactor.
+- `src/diary_rag/core/diary/__init__.py` — exports `AnswerContext`.
+- `src/diary_rag/services/context_assembler.py` (new) — pure `assemble_answer_context(query, merged)` mapping. Order is preserved from RRF (chunk-id dedup and tie-break already applied upstream); family scoping stays upstream (R-3); the assembler does no re-scoping and no re-dedup.
+- `src/diary_rag/services/query_service.py` — `QueryService.answer` builds the `Query` once per call and invokes `assemble_answer_context` after RRF; attaches the resulting `AnswerContext` to `AnswerResult.context` in the success, no-evidence, and empty-query branches. The `NotImplementedError` fallback in `Dispatcher` continues to construct an `AnswerResult` with `context=None` (no retrieval call ran). `retrieval.hybrid` log line and persisted `Query` / `RetrievalHit` rows unchanged.
+- New tests: `tests/test_context_assembler.py` covers query-identity propagation, empty-input shape, RRF order preservation, immutable-tuple type, and the fallback-agnostic mapping.
+- Extended tests: `tests/test_query_service.py` adds three context-attachment assertions (success / no-evidence / empty-query). Other test files unchanged.
+- Docs: `execution-map.md` row 4.1 updated to reflect the landed seam; `todo.md` opens 4.2 (chat client + AnswerTrace) as the next packet. No new invariants — R-5 / I-9 wording is unchanged (answer-side `AnswerTrace` still deferred).
+- **Explicitly not in this packet:** `ChatClient` Protocol; mock / OpenAI chat clients; `AnswerTrace` dataclass / repo seam / DB tables; versioned answer prompt; weak-evidence / ambiguous / provider-unavailable fallback grading; Telegram citation rendering or reply-layout changes; schema migrations; new boot gates; renames deferred under D-026; retrieval-quality changes.
 
 Closed in the Slice 3.5 retrieval-trace persistence packet (D-032):
 - `src/diary_rag/core/diary/models.py` — `RetrievalLeg` (`StrEnum`), `Query`, `RetrievalHit` channel-neutral dataclasses; exported from `core/diary/__init__.py`.

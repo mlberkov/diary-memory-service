@@ -6,6 +6,7 @@ date-line parser used by the ingestion path.
 """
 
 from diary_rag.core.diary.models import (
+    AnswerContext,
     AnswerResult,
     DiaryEntry,
     EventChunk,
@@ -20,6 +21,7 @@ from diary_rag.core.diary.models import (
 from diary_rag.core.diary.parser import ParsedEntry, parse_diary_entry
 
 __all__ = [
+    "AnswerContext",
     "AnswerResult",
     "DiaryEntry",
     "Evidence",
