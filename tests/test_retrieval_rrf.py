@@ -31,7 +31,7 @@ def test_single_leg_passes_through_order() -> None:
 
     fused = reciprocal_rank_fusion([[a, b, c]], top_k=10)
 
-    assert [x.chunk_id for x in fused] == ["a", "b", "c"]
+    assert [h.chunk.chunk_id for h in fused] == ["a", "b", "c"]
 
 
 def test_both_legs_agree_promotes_shared_top() -> None:
@@ -41,7 +41,7 @@ def test_both_legs_agree_promotes_shared_top() -> None:
 
     fused = reciprocal_rank_fusion([dense, sparse], top_k=10)
 
-    assert fused[0].chunk_id == "b"
+    assert fused[0].chunk.chunk_id == "b"
 
 
 def test_legs_disagree_uses_summed_reciprocal_rank() -> None:
@@ -60,7 +60,7 @@ def test_legs_disagree_uses_summed_reciprocal_rank() -> None:
     assert score_a == score_c
     assert score_a > score_b
     # First-appearance order resolves the a/c tie: dense lists a before c.
-    assert [x.chunk_id for x in fused] == ["a", "c", "b"]
+    assert [h.chunk.chunk_id for h in fused] == ["a", "c", "b"]
 
 
 def test_both_legs_agree_promotes_shared_top_via_doubled_rank_one() -> None:
@@ -72,7 +72,7 @@ def test_both_legs_agree_promotes_shared_top_via_doubled_rank_one() -> None:
 
     fused = reciprocal_rank_fusion([dense, sparse], top_k=10, k=DEFAULT_RRF_K)
 
-    assert fused[0].chunk_id == "a"
+    assert fused[0].chunk.chunk_id == "a"
 
 
 def test_top_k_truncates_output() -> None:
@@ -80,7 +80,7 @@ def test_top_k_truncates_output() -> None:
 
     fused = reciprocal_rank_fusion([chunks], top_k=3)
 
-    assert [x.chunk_id for x in fused] == ["a", "b", "c"]
+    assert [h.chunk.chunk_id for h in fused] == ["a", "b", "c"]
 
 
 def test_empty_inputs_return_empty() -> None:
@@ -96,7 +96,7 @@ def test_zero_top_k_returns_empty_even_with_inputs() -> None:
 def test_one_empty_leg_is_passthrough_of_other() -> None:
     a, b = _chunk("a"), _chunk("b")
     fused = reciprocal_rank_fusion([[a, b], []], top_k=5)
-    assert [x.chunk_id for x in fused] == ["a", "b"]
+    assert [h.chunk.chunk_id for h in fused] == ["a", "b"]
 
 
 def test_disjoint_legs_interleave_by_rank() -> None:
@@ -108,10 +108,27 @@ def test_disjoint_legs_interleave_by_rank() -> None:
 
     # Rank-1 of each leg outranks rank-2 of either: a and c tie at score 1/(60+1),
     # then b and d tie at 1/(60+2). Tie-break uses first-appearance order: a, c, b, d.
-    assert [x.chunk_id for x in fused] == ["a", "c", "b", "d"]
+    assert [h.chunk.chunk_id for h in fused] == ["a", "c", "b", "d"]
 
 
 def test_invalid_k_raises() -> None:
     a = _chunk("a")
     with pytest.raises(ValueError, match="k must be positive"):
         reciprocal_rank_fusion([[a]], top_k=5, k=0)
+
+
+def test_fused_score_is_monotone_non_increasing() -> None:
+    """Output ordering is best-first by fused score; ties resolve deterministically.
+
+    The score field is the canonical merged-row score persisted to
+    ``retrieval_hits`` in Slice 3.5.
+    """
+    chunks = [_chunk(c) for c in "abcdef"]
+    dense = chunks
+    sparse = list(reversed(chunks))
+
+    fused = reciprocal_rank_fusion([dense, sparse], top_k=6)
+
+    scores = [h.score for h in fused]
+    assert scores == sorted(scores, reverse=True)
+    assert all(s > 0.0 for s in scores)

@@ -42,7 +42,15 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-from diary_rag.core.diary.models import DiaryEntry, EventChunk, SourceMessage
+from diary_rag.core.diary.models import (
+    DiaryEntry,
+    EventChunk,
+    FallbackMode,
+    Query,
+    RetrievalHit,
+    RetrievalLeg,
+    SourceMessage,
+)
 from diary_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
 from diary_rag.core.routing import RouteKind
 
@@ -428,6 +436,95 @@ class PostgresDiaryStore:
             if cur.rowcount != 1:
                 raise KeyError(f"unknown chunk_id={chunk_id}")
             conn.commit()
+
+    def save_query(self, query: Query) -> None:
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO queries "
+                "(query_id, family_id, query_text, model_name, fallback, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (
+                    query.query_id,
+                    query.family_id,
+                    query.query_text,
+                    query.model_name,
+                    query.fallback.value,
+                    query.created_at,
+                ),
+            )
+            conn.commit()
+
+    def save_retrieval_hits(self, hits: list[RetrievalHit]) -> None:
+        if not hits:
+            return
+        params = [
+            (
+                h.retrieval_hit_id,
+                h.query_id,
+                h.chunk_id,
+                h.leg.value,
+                h.rank,
+                h.score,
+                h.model_name,
+                h.created_at,
+            )
+            for h in hits
+        ]
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO retrieval_hits "
+                "(retrieval_hit_id, query_id, chunk_id, leg, rank, score, "
+                " model_name, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                params,
+            )
+            conn.commit()
+
+    def get_query(self, query_id: str) -> Query | None:
+        with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                "SELECT query_id, family_id, query_text, model_name, fallback, "
+                "       created_at "
+                "  FROM queries "
+                " WHERE query_id = %s",
+                (query_id,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return Query(
+            query_id=row["query_id"],
+            family_id=row["family_id"],
+            query_text=row["query_text"],
+            model_name=row["model_name"],
+            fallback=FallbackMode(row["fallback"]),
+            created_at=row["created_at"],
+        )
+
+    def get_retrieval_hits_for_query(self, query_id: str) -> list[RetrievalHit]:
+        with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                "SELECT retrieval_hit_id, query_id, chunk_id, leg, rank, score, "
+                "       model_name, created_at "
+                "  FROM retrieval_hits "
+                " WHERE query_id = %s "
+                " ORDER BY leg ASC, rank ASC",
+                (query_id,),
+            )
+            rows = cur.fetchall()
+        return [
+            RetrievalHit(
+                retrieval_hit_id=r["retrieval_hit_id"],
+                query_id=r["query_id"],
+                chunk_id=r["chunk_id"],
+                leg=RetrievalLeg(r["leg"]),
+                rank=int(r["rank"]),
+                score=float(r["score"]),
+                model_name=r["model_name"],
+                created_at=r["created_at"],
+            )
+            for r in rows
+        ]
 
 
 def _row_to_source(row: dict[str, Any]) -> SourceMessage:

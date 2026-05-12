@@ -32,7 +32,15 @@ import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
-from diary_rag.core.diary.models import DiaryEntry, EventChunk, SourceMessage
+from diary_rag.core.diary.models import (
+    DiaryEntry,
+    EventChunk,
+    FallbackMode,
+    Query,
+    RetrievalHit,
+    RetrievalLeg,
+    SourceMessage,
+)
 from diary_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
 from diary_rag.core.routing import RouteKind
 
@@ -101,6 +109,32 @@ CREATE INDEX IF NOT EXISTS idx_embedding_records_chunk_id
 
 CREATE INDEX IF NOT EXISTS idx_embedding_records_source_message_id
     ON embedding_records(source_message_id);
+
+CREATE TABLE IF NOT EXISTS queries (
+    query_id     TEXT PRIMARY KEY,
+    family_id    TEXT NOT NULL,
+    query_text   TEXT NOT NULL,
+    model_name   TEXT NOT NULL,
+    fallback     TEXT NOT NULL
+        CHECK (fallback IN ('none','no_evidence','invalid_input')),
+    created_at   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_queries_family_id ON queries(family_id);
+
+CREATE TABLE IF NOT EXISTS retrieval_hits (
+    retrieval_hit_id TEXT PRIMARY KEY,
+    query_id         TEXT NOT NULL REFERENCES queries(query_id),
+    chunk_id         TEXT NOT NULL REFERENCES event_chunks(chunk_id),
+    leg              TEXT NOT NULL CHECK (leg IN ('dense','sparse','merged')),
+    rank             INTEGER NOT NULL CHECK (rank >= 1),
+    score            REAL NOT NULL,
+    model_name       TEXT NOT NULL,
+    created_at       TEXT NOT NULL,
+    UNIQUE (query_id, chunk_id, leg)
+);
+
+CREATE INDEX IF NOT EXISTS idx_retrieval_hits_query_id ON retrieval_hits(query_id);
 """
 
 
@@ -384,6 +418,93 @@ class SqliteDiaryStore:
             if cur.rowcount != 1:
                 raise KeyError(f"unknown chunk_id={chunk_id}")
             conn.commit()
+
+    def save_query(self, query: Query) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO queries "
+                "(query_id, family_id, query_text, model_name, fallback, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    query.query_id,
+                    query.family_id,
+                    query.query_text,
+                    query.model_name,
+                    query.fallback.value,
+                    query.created_at.isoformat(),
+                ),
+            )
+            conn.commit()
+
+    def save_retrieval_hits(self, hits: list[RetrievalHit]) -> None:
+        if not hits:
+            return
+        params = [
+            (
+                h.retrieval_hit_id,
+                h.query_id,
+                h.chunk_id,
+                h.leg.value,
+                h.rank,
+                h.score,
+                h.model_name,
+                h.created_at.isoformat(),
+            )
+            for h in hits
+        ]
+        with self._connect() as conn:
+            conn.executemany(
+                "INSERT INTO retrieval_hits "
+                "(retrieval_hit_id, query_id, chunk_id, leg, rank, score, "
+                " model_name, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                params,
+            )
+            conn.commit()
+
+    def get_query(self, query_id: str) -> Query | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT query_id, family_id, query_text, model_name, fallback, "
+                "       created_at "
+                "  FROM queries "
+                " WHERE query_id = ?",
+                (query_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return Query(
+            query_id=row["query_id"],
+            family_id=row["family_id"],
+            query_text=row["query_text"],
+            model_name=row["model_name"],
+            fallback=FallbackMode(row["fallback"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
+
+    def get_retrieval_hits_for_query(self, query_id: str) -> list[RetrievalHit]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT retrieval_hit_id, query_id, chunk_id, leg, rank, score, "
+                "       model_name, created_at "
+                "  FROM retrieval_hits "
+                " WHERE query_id = ? "
+                " ORDER BY leg ASC, rank ASC",
+                (query_id,),
+            ).fetchall()
+        return [
+            RetrievalHit(
+                retrieval_hit_id=r["retrieval_hit_id"],
+                query_id=r["query_id"],
+                chunk_id=r["chunk_id"],
+                leg=RetrievalLeg(r["leg"]),
+                rank=int(r["rank"]),
+                score=float(r["score"]),
+                model_name=r["model_name"],
+                created_at=datetime.fromisoformat(r["created_at"]),
+            )
+            for r in rows
+        ]
 
 
 def _row_to_source(row: sqlite3.Row) -> SourceMessage:

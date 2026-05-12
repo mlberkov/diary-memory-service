@@ -63,6 +63,7 @@ def get_dispatcher() -> Dispatcher:
             DiaryService(store, embedding_client=embedding_client),
             QueryService(
                 store,
+                store,
                 embedding_client,
                 top_k=settings.retrieval_top_k,
                 candidate_k=settings.retrieval_candidate_k,

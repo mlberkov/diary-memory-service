@@ -34,7 +34,7 @@ def _client_with_fresh_store() -> tuple[TestClient, MockDiaryStore]:
     settings = _settings()
     dispatcher = Dispatcher(
         DiaryService(store, embedding_client=embed),
-        QueryService(store, embed),
+        QueryService(store, store, embed),
         ExportService(store),
         settings,
     )
@@ -95,16 +95,22 @@ def test_entry_then_ask_returns_grounded_reply_with_date() -> None:
         "- [2026-05-09] Tried a new book\n"
         "(hybrid retrieval — dense+sparse RRF)"
     )
+    # Slice 3.5: successful /ask persists one Query row + retrieval hits.
+    assert store.len_queries() == 1
+    assert store.len_retrieval_hits() > 0
 
 
 def test_ask_with_no_match_returns_no_evidence_fallback() -> None:
-    client, _ = _client_with_fresh_store()
+    client, store = _client_with_fresh_store()
 
     _post(client, _update("/note 2026-05-09\nMorning routine", update_id=1))
     resp = _post(client, _update("/ask snowstorm", update_id=2, message_id=2))
 
     assert resp.status_code == 200
     assert resp.json()["text"] == "No memories matched 'snowstorm'."
+    # Slice 3.5: NO_EVIDENCE still persists one Query row with zero hits.
+    assert store.len_queries() == 1
+    assert store.len_retrieval_hits() == 0
 
 
 def test_entry_with_invalid_first_line_returns_invalid_input_and_persists_source() -> None:

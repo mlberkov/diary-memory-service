@@ -92,6 +92,34 @@ Production schema evolution must be solved before any non-local deployment.
 ### Webhook idempotency (R-2 / D-023)
 Repeated delivery of the same Telegram message-state — same `(external_chat_id, external_message_id, edit_seq)` — does not create duplicate rows. The webhook returns the same functional 200 reply and logs `effective_path=replay` instead of `fresh`. Operationally, `effective_path=replay` is normal; investigate only if the *first* call for a given key never appears with `effective_path=fresh`.
 
+### Retrieval traces (D-032)
+Every `/ask` call writes one row to `queries` and zero-or-more rows to `retrieval_hits` so an operator can inspect what each leg saw and what survived RRF without rerunning the query. Successful retrieval persists per-leg rows (one per chunk in `dense_candidates`, one per chunk in `sparse_candidates`) plus merged rows (one per chunk in the RRF-fused top-k). `NO_EVIDENCE` (empty query or empty merged set) persists the `Query` row with zero `retrieval_hits` rows.
+
+Most recent traces, full picture across legs:
+
+```sql
+SELECT q.query_id, q.created_at, q.query_text, q.fallback,
+       h.leg, h.rank, h.score, h.chunk_id
+  FROM queries q LEFT JOIN retrieval_hits h ON h.query_id = q.query_id
+ WHERE q.family_id = '<chat_id>'
+ ORDER BY q.created_at DESC, h.leg, h.rank
+ LIMIT 50;
+```
+
+Failed answers only (queries where retrieval found nothing):
+
+```sql
+SELECT q.query_id, q.created_at, q.query_text
+  FROM queries q
+ WHERE q.family_id = '<chat_id>' AND q.fallback = 'no_evidence'
+ ORDER BY q.created_at DESC
+ LIMIT 20;
+```
+
+The `score` column carries the RRF contribution per leg (`1.0 / (RRF_K + rank)` with `RRF_K = 60`) on dense/sparse rows and the fused RRF score on merged rows; backend-native scores (cosine distance, `ts_rank_cd`) are intentionally not surfaced (D-025 / D-032). `model_name` carries the embedding model on dense and merged rows and the FTS dictionary string `"simple"` on sparse rows.
+
+A-34 destructive-upgrade discipline applies: existing local Postgres volumes that pre-date the `queries` and `retrieval_hits` tables must be reset via `docker compose down -v` before the bootstrap DDL applies cleanly. Answer-side `AnswerTrace` persistence remains deferred to Phase 4.
+
 ### Hybrid retrieval (D-025)
 `/ask` runs the baseline hybrid path: a single query-embedding call followed by dense + sparse legs against `SearchRepository`, fused with service-layer RRF. Every retrieval call logs `retrieval.hybrid family_id=… model=… dense_n=… sparse_n=… merged_n=…` so an operator can confirm both legs ran. The dispatcher reply trailer for a successful answer is `(hybrid retrieval — dense+sparse RRF)`; an empty merged set returns `FallbackMode.NO_EVIDENCE` with the plain "No memories matched 'X'." reply.
 

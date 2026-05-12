@@ -26,7 +26,7 @@ def _dispatcher(settings: Settings) -> tuple[Dispatcher, MockDiaryStore]:
     return (
         Dispatcher(
             DiaryService(store, embedding_client=embed),
-            QueryService(store, embed),
+            QueryService(store, store, embed),
             ExportService(store),
             settings,
         ),

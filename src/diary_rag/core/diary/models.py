@@ -117,13 +117,93 @@ class IngestResult:
 
 
 @dataclass(frozen=True, slots=True)
+class AnswerContext:
+    """Channel-neutral input to the answer-prompt step (Slice 4.1).
+
+    The assembled view of one ``/ask`` call: the persisted ``Query``
+    identity plus the chunks that survived RRF fusion in retrieval rank
+    order. Mutable presentation shapes (date grouping, prompt rendering,
+    citation layout) belong to consumers — this stays the minimal
+    canonical payload every Phase-4 consumer can rely on.
+    """
+
+    query_id: str
+    query_text: str
+    ordered_chunks: tuple[EventChunk, ...]
+    model_name: str
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class AnswerResult:
-    """Outcome of ``QueryService.answer`` (I-9, R-5)."""
+    """Outcome of ``QueryService.answer`` (I-9, R-5).
+
+    ``context`` carries the assembled :class:`AnswerContext` for the
+    successful retrieval, no-evidence, and empty-query paths so the
+    follow-on chat-client / answer-trace packets can consume it without
+    a further refactor. It is ``None`` only when no retrieval call ran
+    at all — the dispatcher uses that branch for backends that raise
+    ``NotImplementedError`` from the search seam.
+    """
 
     fallback: FallbackMode
     query_text: str
     evidence: list[Evidence] = field(default_factory=list)
+    context: AnswerContext | None = None
 
     @property
     def context_chunk_ids(self) -> list[str]:
         return [e.chunk_id for e in self.evidence]
+
+
+class RetrievalLeg(StrEnum):
+    """Which retrieval pass produced a ``RetrievalHit`` row (Slice 3.5)."""
+
+    DENSE = "dense"
+    SPARSE = "sparse"
+    MERGED = "merged"
+
+
+@dataclass(frozen=True, slots=True)
+class Query:
+    """Persisted record of a single ``/ask`` call (Slice 3.5).
+
+    ``query_text`` is the normalized payload (whitespace stripped, trailing
+    ``?.!,;:`` removed). ``model_name`` is the embedding client's
+    ``model_name`` at call time. ``fallback`` mirrors the ``AnswerResult``
+    outcome — ``NO_EVIDENCE`` when the query was empty after normalization
+    or when both retrieval legs returned no chunks.
+    """
+
+    query_id: str
+    family_id: str
+    query_text: str
+    model_name: str
+    fallback: FallbackMode
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievalHit:
+    """One row per (query, chunk, leg) tuple (Slice 3.5).
+
+    ``leg`` distinguishes which retrieval pass produced the row:
+    ``DENSE`` and ``SPARSE`` carry the candidates each independent leg
+    returned (up to ``candidate_k`` each); ``MERGED`` carries the chunks
+    that survived service-layer RRF fusion (up to ``top_k``). ``rank`` is
+    1-based within the leg. ``score`` is the RRF contribution for the
+    per-leg rows (``1 / (RRF_K + rank)``) and the fused RRF score on the
+    merged rows; backend-native scores (cosine distance, ``ts_rank_cd``)
+    are intentionally not surfaced — D-025 noted that RRF uses ranks, not
+    calibrated scores. ``model_name`` is the embedding model on dense and
+    merged rows; the FTS dictionary (``"simple"``) on sparse rows.
+    """
+
+    retrieval_hit_id: str
+    query_id: str
+    chunk_id: str
+    leg: RetrievalLeg
+    rank: int
+    score: float
+    model_name: str
+    created_at: datetime

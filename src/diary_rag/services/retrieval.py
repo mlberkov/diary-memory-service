@@ -9,15 +9,28 @@ avoid — only positions matter.
 The merge lives in the service layer because the two legs are produced
 independently by ``SearchRepository.dense_candidates`` and
 ``sparse_candidates``; there is no backend-specific logic here.
+
+Slice 3.5 surfaces the fused score per chunk as ``FusedHit.score`` so
+``QueryService`` can persist the merged-row scores in a ``RetrievalHit``
+trace; the formula and tie-breaking rule are unchanged.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from diary_rag.core.diary.models import EventChunk
 
 DEFAULT_RRF_K = 60
+
+
+@dataclass(frozen=True, slots=True)
+class FusedHit:
+    """A merged chunk plus its fused RRF score."""
+
+    chunk: EventChunk
+    score: float
 
 
 def reciprocal_rank_fusion(
@@ -25,7 +38,7 @@ def reciprocal_rank_fusion(
     *,
     top_k: int,
     k: int = DEFAULT_RRF_K,
-) -> list[EventChunk]:
+) -> list[FusedHit]:
     """Fuse independently-ranked candidate lists by Reciprocal Rank Fusion.
 
     Ties (same fused score) break on first-appearance order across the
@@ -52,7 +65,9 @@ def reciprocal_rank_fusion(
         chunks_by_id.keys(),
         key=lambda cid: (-fused_score[cid], first_seen[cid]),
     )
-    return [chunks_by_id[cid] for cid in ordered_ids[:top_k]]
+    return [
+        FusedHit(chunk=chunks_by_id[cid], score=fused_score[cid]) for cid in ordered_ids[:top_k]
+    ]
 
 
-__all__ = ["DEFAULT_RRF_K", "reciprocal_rank_fusion"]
+__all__ = ["DEFAULT_RRF_K", "FusedHit", "reciprocal_rank_fusion"]
