@@ -158,6 +158,26 @@ def test_mock_save_answer_trace_with_empty_context_chunk_ids() -> None:
     assert fetched.latency_ms == 0
 
 
+_NEW_FALLBACK_MODES = [
+    FallbackMode.WEAK_EVIDENCE,
+    FallbackMode.AMBIGUOUS,
+    FallbackMode.PROVIDER_UNAVAILABLE,
+    FallbackMode.PARSE_FAILURE,
+]
+
+
+@pytest.mark.parametrize("mode", _NEW_FALLBACK_MODES)
+def test_mock_round_trips_new_fallback_modes(mode: FallbackMode) -> None:
+    """Slice 4.3b: each new FallbackMode round-trips through the mock store."""
+    store = MockDiaryStore()
+    store.save_query(_query(fallback=mode))
+    trace = _trace(fallback_mode=mode, latency_ms=11, token_counts={"prompt": 3})
+    store.save_answer_trace(trace)
+    fetched = store.get_answer_trace_for_query("q1")
+    assert fetched is not None
+    assert fetched.fallback_mode is mode
+
+
 # ---------------------------------------------------------------------------
 # SqliteDiaryStore
 # ---------------------------------------------------------------------------
@@ -210,6 +230,18 @@ def test_sqlite_save_answer_trace_with_empty_context_chunk_ids(tmp_path: Path) -
     assert fetched.token_counts == {}
 
 
+@pytest.mark.parametrize("mode", _NEW_FALLBACK_MODES)
+def test_sqlite_round_trips_new_fallback_modes(tmp_path: Path, mode: FallbackMode) -> None:
+    """Slice 4.3b: the widened CHECK admits each new mode on sqlite."""
+    store = _sqlite_store(tmp_path)
+    store.save_query(_query(fallback=mode))
+    trace = _trace(fallback_mode=mode, latency_ms=11, token_counts={"prompt": 3})
+    store.save_answer_trace(trace)
+    fetched = store.get_answer_trace_for_query("q1")
+    assert fetched is not None
+    assert fetched.fallback_mode is mode
+
+
 # ---------------------------------------------------------------------------
 # PostgresDiaryStore
 # ---------------------------------------------------------------------------
@@ -223,6 +255,7 @@ pgmark = pytest.mark.skipif(
 
 if PG_DSN is not None:
     import psycopg
+    from psycopg.types.json import Jsonb
 
     from diary_rag.storage.postgres import PostgresDiaryStore
 
@@ -289,3 +322,48 @@ def test_pg_save_answer_trace_with_empty_context_chunk_ids(
     assert fetched is not None
     assert fetched.context_chunk_ids == ()
     assert fetched.token_counts == {}
+
+
+@pgmark
+@pytest.mark.parametrize("mode", _NEW_FALLBACK_MODES)
+def test_pg_round_trips_new_fallback_modes(
+    pg_store: PostgresDiaryStore, mode: FallbackMode
+) -> None:
+    """Slice 4.3b: the widened CHECK admits each new mode on postgres."""
+    pg_store.save_query(_query(fallback=mode))
+    trace = _trace(fallback_mode=mode, latency_ms=11, token_counts={"prompt": 3})
+    pg_store.save_answer_trace(trace)
+    fetched = pg_store.get_answer_trace_for_query("q1")
+    assert fetched is not None
+    assert fetched.fallback_mode is mode
+
+
+@pgmark
+def test_pg_rejects_unknown_answer_trace_fallback_mode(
+    pg_store: PostgresDiaryStore,
+) -> None:
+    """The CHECK constraint still rejects values outside the FallbackMode set."""
+    pg_store.save_query(_query())
+    assert PG_DSN is not None
+    with (
+        psycopg.connect(PG_DSN, autocommit=True) as conn,
+        conn.cursor() as cur,
+        pytest.raises(psycopg.errors.CheckViolation),
+    ):
+        cur.execute(
+            "INSERT INTO answer_traces (answer_trace_id, query_id, prompt_version, "
+            "context_chunk_ids, answer_text, fallback_mode, model_name, token_counts, "
+            "latency_ms, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (
+                "a-bad",
+                "q1",
+                "v1",
+                [],
+                "",
+                "not_a_real_mode",
+                "mock",
+                Jsonb({}),
+                0,
+                _now(),
+            ),
+        )

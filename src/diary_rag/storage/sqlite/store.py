@@ -118,7 +118,10 @@ CREATE TABLE IF NOT EXISTS queries (
     query_text   TEXT NOT NULL,
     model_name   TEXT NOT NULL,
     fallback     TEXT NOT NULL
-        CHECK (fallback IN ('none','no_evidence','invalid_input')),
+        CHECK (fallback IN (
+            'none','no_evidence','invalid_input',
+            'weak_evidence','ambiguous','provider_unavailable','parse_failure'
+        )),
     created_at   TEXT NOT NULL
 );
 
@@ -145,7 +148,10 @@ CREATE TABLE IF NOT EXISTS answer_traces (
     context_chunk_ids TEXT NOT NULL,
     answer_text       TEXT NOT NULL,
     fallback_mode     TEXT NOT NULL
-        CHECK (fallback_mode IN ('none','no_evidence','invalid_input')),
+        CHECK (fallback_mode IN (
+            'none','no_evidence','invalid_input',
+            'weak_evidence','ambiguous','provider_unavailable','parse_failure'
+        )),
     model_name        TEXT NOT NULL,
     token_counts      TEXT NOT NULL,
     latency_ms        INTEGER NOT NULL CHECK (latency_ms >= 0),

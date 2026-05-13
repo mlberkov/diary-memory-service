@@ -23,11 +23,33 @@ class FallbackMode(StrEnum):
     ``NONE`` means the requested path produced a real result. Anything
     else is an explicit fallback that the reply layer must surface
     (Runtime invariant R-6).
+
+    Ingest-side: ``INVALID_INPUT`` for a non-ISO first line.
+
+    Answer-side (Slice 4.3b, D-035):
+
+    - ``NO_EVIDENCE`` — retrieval returned no chunks (empty query or
+      empty retrieval), or retrieval returned chunks but the LLM emitted
+      ``uncertainty="no_evidence"`` declaring them not-evidence.
+    - ``WEAK_EVIDENCE`` — LLM emitted ``uncertainty="uncertain"`` over a
+      non-empty context.
+    - ``AMBIGUOUS`` — LLM emitted ``uncertainty="ambiguous"`` indicating
+      the question itself was unclear.
+    - ``PROVIDER_UNAVAILABLE`` — chat client raised
+      :class:`~diary_rag.core.answers.ChatProviderUnavailableError`;
+      no LLM output was produced.
+    - ``PARSE_FAILURE`` — chat client returned text that
+      :func:`~diary_rag.core.diary.answer_schema.parse_structured_answer`
+      rejected with a :class:`StructuredAnswerError`.
     """
 
     NONE = "none"
     NO_EVIDENCE = "no_evidence"
     INVALID_INPUT = "invalid_input"
+    WEAK_EVIDENCE = "weak_evidence"
+    AMBIGUOUS = "ambiguous"
+    PROVIDER_UNAVAILABLE = "provider_unavailable"
+    PARSE_FAILURE = "parse_failure"
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,28 +214,35 @@ class Query:
 
 @dataclass(frozen=True, slots=True)
 class AnswerTrace:
-    """Answer-side provenance for one ``/ask`` call (Slice 4.3a, D-034).
+    """Answer-side provenance for one ``/ask`` call (R-5; D-034, D-035).
 
-    Persisted on the success and no-evidence/empty-query contours so the
-    answer-side half of R-5 is enforced in code: every reply has a row
-    that records ``prompt_version``, ``context_chunk_ids``,
-    ``answer_text``, ``model_name``, ``token_counts``, ``latency_ms``,
-    and ``fallback_mode``.
+    Every reply writes one row recording ``prompt_version``,
+    ``context_chunk_ids``, ``answer_text``, ``model_name``,
+    ``token_counts``, ``latency_ms``, and ``fallback_mode``. The shape
+    per contour (Slice 4.3b, D-035):
 
-    On the success contour ``fallback_mode`` is ``NONE``, ``answer_text``
-    is the LLM-produced string, ``context_chunk_ids`` mirrors the chunks
-    in ``AnswerContext.ordered_chunks``, and ``latency_ms`` /
-    ``token_counts`` come straight from the
-    :class:`~diary_rag.core.answers.ChatResponse`.
-
-    On the no-evidence and empty-query contours ``fallback_mode`` is
-    ``NO_EVIDENCE`` (preserving the existing ``Query.fallback`` semantics
-    from D-032 — this is not a remap), ``answer_text`` is empty,
-    ``context_chunk_ids`` is empty, and no chat call ran (so
-    ``latency_ms`` is ``0`` and ``token_counts`` is empty).
-
-    Weak-evidence / ambiguous / provider-unavailable grading and the
-    corresponding marker semantics remain deferred to Slice 4.3.
+    - ``NONE`` (success): ``answer_text`` is the LLM-produced string;
+      ``context_chunk_ids`` mirrors ``AnswerContext.ordered_chunks``;
+      ``latency_ms`` / ``token_counts`` come from
+      :class:`~diary_rag.core.answers.ChatResponse`.
+    - ``NO_EVIDENCE`` (empty query or empty retrieval): ``answer_text``
+      is ``""``; ``context_chunk_ids`` is empty; no chat call ran so
+      ``latency_ms`` is ``0`` and ``token_counts`` is ``{}``.
+    - ``NO_EVIDENCE`` (LLM marker — retrieval returned chunks but the
+      model declared them not-evidence): ``answer_text`` is the LLM
+      output; ``context_chunk_ids`` mirrors ``AnswerContext.ordered_chunks``;
+      ``latency_ms`` / ``token_counts`` come from the response.
+    - ``WEAK_EVIDENCE`` / ``AMBIGUOUS``: same shape as the success path —
+      the LLM produced output over a non-empty context, the marker just
+      grades how usable it is.
+    - ``PROVIDER_UNAVAILABLE``: ``answer_text`` is ``""``;
+      ``context_chunk_ids`` mirrors the context that *would* have been
+      sent; no usable response, so ``latency_ms`` is ``0`` and
+      ``token_counts`` is ``{}``.
+    - ``PARSE_FAILURE``: ``answer_text`` is ``response.raw_text`` (the
+      provider did produce output — preserving it is the truthful
+      provenance); ``context_chunk_ids`` mirrors the context;
+      ``latency_ms`` / ``token_counts`` come from the response.
     """
 
     answer_trace_id: str

@@ -26,19 +26,28 @@ attaches the resulting :class:`AnswerContext` to the returned
 ``AnswerResult`` so the upcoming Phase-4 answer-prompt and chat-client
 packets can consume the assembled context without another refactor.
 
-Slice 4.3a (D-034): the answer-side half of R-5 lands here. On the
-success contour the service builds the versioned answer prompt from the
-assembled context, invokes the configured ``ChatClient``, parses the
-structured response (I-9 citation grounding enforced at the contract
-boundary), and persists one ``AnswerTrace`` row carrying
-``prompt_version``, ``context_chunk_ids``, ``answer_text``,
-``model_name``, ``token_counts``, ``latency_ms``, and ``fallback_mode``.
-On the no-evidence and empty-query contours the trace is persisted with
-empty ``context_chunk_ids``, empty ``answer_text``, ``latency_ms=0``,
-empty ``token_counts``, and ``fallback_mode=NO_EVIDENCE`` (preserving
-the existing ``Query.fallback`` semantics from D-032 — not a remap); no
-chat call runs. Weak-evidence / ambiguous / provider-unavailable
-grading and parse-failure handling remain deferred to Slice 4.3.
+Slice 4.3a (D-034): the answer-side half of R-5 landed here on the
+success and no-evidence/empty-query contours. Slice 4.3b (D-035) closes
+the remaining contours: weak-evidence, ambiguous, the LLM-marker
+``no_evidence`` sub-branch, provider-unavailable, and parse-failure.
+``Query.fallback`` and ``AnswerTrace.fallback_mode`` are written as one
+decision per call so they always agree.
+
+Grading flow on the success branch of retrieval:
+
+1. Build the versioned answer prompt from the assembled context.
+2. Call the configured ``ChatClient``. A
+   :class:`~diary_rag.core.answers.ChatProviderUnavailableError` is
+   caught once and graded as ``PROVIDER_UNAVAILABLE`` (no retry, no
+   repair — recovery is Phase-6 work).
+3. Parse the response with ``parse_structured_answer``. Any
+   :class:`~diary_rag.core.diary.answer_schema.StructuredAnswerError` is
+   caught and graded as ``PARSE_FAILURE``; the trace preserves
+   ``response.raw_text`` as ``answer_text`` for forensics.
+4. Map the structured answer's ``uncertainty`` marker to
+   ``FallbackMode``: ``confident → NONE``, ``uncertain → WEAK_EVIDENCE``,
+   ``no_evidence → NO_EVIDENCE`` (LLM declared the retrieved chunks
+   not-evidence), ``ambiguous → AMBIGUOUS``.
 
 ``ChatResponse.latency_ms`` is the single source of truth for chat-call
 latency; this service does not measure latency independently.
@@ -49,7 +58,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from diary_rag.core.answers import ChatClient
+from diary_rag.core.answers import ChatClient, ChatProviderUnavailableError
 from diary_rag.core.diary import (
     AnswerResult,
     AnswerTrace,
@@ -60,7 +69,11 @@ from diary_rag.core.diary import (
     RetrievalLeg,
 )
 from diary_rag.core.diary.answer_prompt import PROMPT_VERSION, build_answer_prompt
-from diary_rag.core.diary.answer_schema import parse_structured_answer
+from diary_rag.core.diary.answer_schema import (
+    StructuredAnswerError,
+    UncertaintyMarker,
+    parse_structured_answer,
+)
 from diary_rag.core.diary.models import AnswerContext, EventChunk
 from diary_rag.core.embeddings import EmbeddingClient
 from diary_rag.core.routing import InboundMessage
@@ -77,6 +90,13 @@ DEFAULT_CANDIDATE_K = 20
 
 _TRAILING_QUERY_PUNCT = "?.!,;:"
 _SPARSE_MODEL_NAME = "simple"
+
+_MARKER_TO_FALLBACK: dict[UncertaintyMarker, FallbackMode] = {
+    "confident": FallbackMode.NONE,
+    "uncertain": FallbackMode.WEAK_EVIDENCE,
+    "no_evidence": FallbackMode.NO_EVIDENCE,
+    "ambiguous": FallbackMode.AMBIGUOUS,
+}
 
 
 def _normalize_query(payload: str) -> str:
@@ -119,35 +139,35 @@ class QueryService:
             raise ValueError("InboundMessage.external_chat_id is required (R-3)")
 
         query_text = _normalize_query(message.payload)
-        now = datetime.now(tz=UTC)
+        created_at = datetime.now(tz=UTC)
         query_id = str(uuid4())
         model_name = self._embed.model_name
 
         if not query_text:
-            query = Query(
+            return self._finalize(
                 query_id=query_id,
                 family_id=family_id,
                 query_text=query_text,
                 model_name=model_name,
+                created_at=created_at,
                 fallback=FallbackMode.NO_EVIDENCE,
-                created_at=now,
-            )
-            self._persist_trace(query=query, dense_hits=[], sparse_hits=[], merged=[])
-            context = assemble_answer_context(query, [])
-            answer_trace_id = self._persist_no_evidence_answer_trace(query=query, context=context)
-            log.info(
-                "retrieval.hybrid query_id=%s family_id=%s model=%s "
-                "dense_n=0 sparse_n=0 merged_n=0 fallback=no_evidence "
-                "answer_trace_id=%s",
-                query_id,
-                family_id,
-                model_name,
-                answer_trace_id,
-            )
-            return AnswerResult(
-                fallback=FallbackMode.NO_EVIDENCE,
-                query_text=query_text,
-                context=context,
+                dense_hits=[],
+                sparse_hits=[],
+                merged=[],
+                context=AnswerContext(
+                    query_id=query_id,
+                    query_text=query_text,
+                    ordered_chunks=(),
+                    model_name=model_name,
+                    created_at=created_at,
+                ),
+                evidence=[],
+                trace_answer_text="",
+                trace_model_name=self._chat.model_name,
+                trace_token_counts={},
+                trace_latency_ms=0,
+                trace_context_chunk_ids=(),
+                answer_text=None,
             )
 
         query_embedding = self._embed.embed([query_text])[0]
@@ -158,73 +178,21 @@ class QueryService:
         sparse_hits = self._search.sparse_candidates(family_id, query_text, self._candidate_k)
         merged = reciprocal_rank_fusion([dense_hits, sparse_hits], top_k=self._top_k)
 
-        fallback = FallbackMode.NONE if merged else FallbackMode.NO_EVIDENCE
-        query = Query(
+        # The persisted Query is constructed inside `_finalize` so its
+        # `fallback` matches the AnswerTrace's `fallback_mode` by construction
+        # (Decision 2, D-035). The provisional Query here only seeds
+        # `assemble_answer_context`, which reads identity + text + timestamp
+        # but not the fallback.
+        provisional_query = Query(
             query_id=query_id,
             family_id=family_id,
             query_text=query_text,
             model_name=model_name,
-            fallback=fallback,
-            created_at=now,
+            fallback=FallbackMode.NONE,
+            created_at=created_at,
         )
-        self._persist_trace(
-            query=query, dense_hits=dense_hits, sparse_hits=sparse_hits, merged=merged
-        )
-
-        context = assemble_answer_context(query, merged)
-        if not merged:
-            answer_trace_id = self._persist_no_evidence_answer_trace(query=query, context=context)
-            log.info(
-                "retrieval.hybrid query_id=%s family_id=%s model=%s "
-                "dense_n=%d sparse_n=%d merged_n=%d fallback=%s "
-                "answer_trace_id=%s",
-                query_id,
-                family_id,
-                model_name,
-                len(dense_hits),
-                len(sparse_hits),
-                len(merged),
-                fallback.value,
-                answer_trace_id,
-            )
-            return AnswerResult(
-                fallback=FallbackMode.NO_EVIDENCE,
-                query_text=query_text,
-                context=context,
-            )
-
-        prompt = build_answer_prompt(context)
-        response = self._chat.complete(prompt)
-        structured = parse_structured_answer(response.raw_text, context=context)
-
-        trace = AnswerTrace(
-            answer_trace_id=str(uuid4()),
-            query_id=query_id,
-            prompt_version=prompt.prompt_version,
-            context_chunk_ids=tuple(c.chunk_id for c in context.ordered_chunks),
-            answer_text=structured.answer_text,
-            fallback_mode=FallbackMode.NONE,
-            model_name=response.model_name,
-            token_counts=dict(response.token_counts),
-            latency_ms=response.latency_ms,
-            created_at=datetime.now(tz=UTC),
-        )
-        self._repo.save_answer_trace(trace)
-
-        log.info(
-            "retrieval.hybrid query_id=%s family_id=%s model=%s "
-            "dense_n=%d sparse_n=%d merged_n=%d fallback=%s "
-            "answer_trace_id=%s",
-            query_id,
-            family_id,
-            model_name,
-            len(dense_hits),
-            len(sparse_hits),
-            len(merged),
-            fallback.value,
-            trace.answer_trace_id,
-        )
-
+        context = assemble_answer_context(provisional_query, merged)
+        context_chunk_ids = tuple(c.chunk_id for c in context.ordered_chunks)
         evidence = [
             Evidence(
                 chunk_id=h.chunk.chunk_id,
@@ -233,37 +201,221 @@ class QueryService:
             )
             for h in merged
         ]
-        return AnswerResult(
-            fallback=FallbackMode.NONE,
+
+        if not merged:
+            return self._finalize(
+                query_id=query_id,
+                family_id=family_id,
+                query_text=query_text,
+                model_name=model_name,
+                created_at=created_at,
+                fallback=FallbackMode.NO_EVIDENCE,
+                dense_hits=dense_hits,
+                sparse_hits=sparse_hits,
+                merged=merged,
+                context=context,
+                evidence=evidence,
+                trace_answer_text="",
+                trace_model_name=self._chat.model_name,
+                trace_token_counts={},
+                trace_latency_ms=0,
+                trace_context_chunk_ids=(),
+                answer_text=None,
+            )
+
+        prompt = build_answer_prompt(context)
+
+        try:
+            response = self._chat.complete(prompt)
+        except ChatProviderUnavailableError:
+            return self._finalize(
+                query_id=query_id,
+                family_id=family_id,
+                query_text=query_text,
+                model_name=model_name,
+                created_at=created_at,
+                fallback=FallbackMode.PROVIDER_UNAVAILABLE,
+                dense_hits=dense_hits,
+                sparse_hits=sparse_hits,
+                merged=merged,
+                context=context,
+                evidence=evidence,
+                trace_answer_text="",
+                trace_model_name=self._chat.model_name,
+                trace_token_counts={},
+                trace_latency_ms=0,
+                trace_context_chunk_ids=context_chunk_ids,
+                answer_text=None,
+            )
+
+        try:
+            structured = parse_structured_answer(response.raw_text, context=context)
+        except StructuredAnswerError:
+            return self._finalize(
+                query_id=query_id,
+                family_id=family_id,
+                query_text=query_text,
+                model_name=model_name,
+                created_at=created_at,
+                fallback=FallbackMode.PARSE_FAILURE,
+                dense_hits=dense_hits,
+                sparse_hits=sparse_hits,
+                merged=merged,
+                context=context,
+                evidence=evidence,
+                trace_answer_text=response.raw_text,
+                trace_model_name=response.model_name,
+                trace_token_counts=dict(response.token_counts),
+                trace_latency_ms=response.latency_ms,
+                trace_context_chunk_ids=context_chunk_ids,
+                answer_text=None,
+            )
+
+        graded = _MARKER_TO_FALLBACK[structured.uncertainty]
+        return self._finalize(
+            query_id=query_id,
+            family_id=family_id,
             query_text=query_text,
-            evidence=evidence,
+            model_name=model_name,
+            created_at=created_at,
+            fallback=graded,
+            dense_hits=dense_hits,
+            sparse_hits=sparse_hits,
+            merged=merged,
             context=context,
+            evidence=evidence,
+            trace_answer_text=structured.answer_text,
+            trace_model_name=response.model_name,
+            trace_token_counts=dict(response.token_counts),
+            trace_latency_ms=response.latency_ms,
+            trace_context_chunk_ids=context_chunk_ids,
             answer_text=structured.answer_text,
         )
 
-    def _persist_no_evidence_answer_trace(self, *, query: Query, context: AnswerContext) -> str:
-        """Persist the answer-side trace for a no-evidence reply.
+    def _finalize(
+        self,
+        *,
+        query_id: str,
+        family_id: str,
+        query_text: str,
+        model_name: str,
+        created_at: datetime,
+        fallback: FallbackMode,
+        dense_hits: list[EventChunk],
+        sparse_hits: list[EventChunk],
+        merged: list[FusedHit],
+        context: AnswerContext,
+        evidence: list[Evidence],
+        trace_answer_text: str,
+        trace_model_name: str,
+        trace_token_counts: dict[str, int],
+        trace_latency_ms: int,
+        trace_context_chunk_ids: tuple[str, ...],
+        answer_text: str | None,
+    ) -> AnswerResult:
+        """Persist Query + retrieval hits + AnswerTrace; emit the log line; build the result.
 
-        Mirrors the existing ``Query.fallback=NO_EVIDENCE`` semantics
-        (D-032 schema permits the value on the empty-query path);
-        ``context_chunk_ids`` is empty, no chat call ran. ``prompt_version``
-        records the contract version in effect at the time of the call —
-        R-5 requires it even on fallback modes.
+        All non-error and error branches converge here so ``Query.fallback``
+        and ``AnswerTrace.fallback_mode`` are written from one decision
+        (Decision 2, D-035).
+        """
+        query = Query(
+            query_id=query_id,
+            family_id=family_id,
+            query_text=query_text,
+            model_name=model_name,
+            fallback=fallback,
+            created_at=created_at,
+        )
+        self._persist_trace(
+            query=query, dense_hits=dense_hits, sparse_hits=sparse_hits, merged=merged
+        )
+        answer_trace_id = self._persist_answer_trace(
+            query_id=query_id,
+            context_chunk_ids=trace_context_chunk_ids,
+            answer_text=trace_answer_text,
+            fallback_mode=fallback,
+            model_name=trace_model_name,
+            token_counts=trace_token_counts,
+            latency_ms=trace_latency_ms,
+        )
+        self._log(
+            query_id=query_id,
+            family_id=family_id,
+            model_name=model_name,
+            dense_n=len(dense_hits),
+            sparse_n=len(sparse_hits),
+            merged_n=len(merged),
+            fallback=fallback,
+            answer_trace_id=answer_trace_id,
+        )
+        return AnswerResult(
+            fallback=fallback,
+            query_text=query_text,
+            evidence=evidence,
+            context=context,
+            answer_text=answer_text,
+        )
+
+    def _persist_answer_trace(
+        self,
+        *,
+        query_id: str,
+        context_chunk_ids: tuple[str, ...],
+        answer_text: str,
+        fallback_mode: FallbackMode,
+        model_name: str,
+        token_counts: dict[str, int],
+        latency_ms: int,
+    ) -> str:
+        """Persist one ``AnswerTrace`` row per ``/ask`` call (R-5, D-035).
+
+        Every contour goes through this one entry point so the trace
+        shape per ``FallbackMode`` matches the contract table in D-035
+        by construction. ``prompt_version`` is the contract version in
+        effect at the time of the call; it is recorded even on fallback
+        modes where no prompt was sent because R-5 requires it.
         """
         trace = AnswerTrace(
             answer_trace_id=str(uuid4()),
-            query_id=query.query_id,
+            query_id=query_id,
             prompt_version=PROMPT_VERSION,
-            context_chunk_ids=tuple(c.chunk_id for c in context.ordered_chunks),
-            answer_text="",
-            fallback_mode=FallbackMode.NO_EVIDENCE,
-            model_name=self._chat.model_name,
-            token_counts={},
-            latency_ms=0,
+            context_chunk_ids=context_chunk_ids,
+            answer_text=answer_text,
+            fallback_mode=fallback_mode,
+            model_name=model_name,
+            token_counts=token_counts,
+            latency_ms=latency_ms,
             created_at=datetime.now(tz=UTC),
         )
         self._repo.save_answer_trace(trace)
         return trace.answer_trace_id
+
+    def _log(
+        self,
+        *,
+        query_id: str,
+        family_id: str,
+        model_name: str,
+        dense_n: int,
+        sparse_n: int,
+        merged_n: int,
+        fallback: FallbackMode,
+        answer_trace_id: str,
+    ) -> None:
+        log.info(
+            "retrieval.hybrid query_id=%s family_id=%s model=%s "
+            "dense_n=%d sparse_n=%d merged_n=%d fallback=%s "
+            "answer_trace_id=%s",
+            query_id,
+            family_id,
+            model_name,
+            dense_n,
+            sparse_n,
+            merged_n,
+            fallback.value,
+            answer_trace_id,
+        )
 
     def _persist_trace(
         self,

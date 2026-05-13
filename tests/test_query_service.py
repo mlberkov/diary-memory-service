@@ -8,13 +8,16 @@ fuses the two ranked lists in the service layer.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 import pytest
 
 from diary_rag.adapters.answers import MockChatClient
 from diary_rag.adapters.embeddings import MockEmbeddingClient
+from diary_rag.core.answers import ChatProviderUnavailableError, ChatResponse
 from diary_rag.core.diary import FallbackMode, RetrievalLeg
+from diary_rag.core.diary.answer_prompt import AnswerPrompt
 from diary_rag.core.routing import InboundMessage, RouteKind
 from diary_rag.services import DiaryService, QueryService
 from diary_rag.storage.mock import MockDiaryStore
@@ -349,3 +352,208 @@ def test_empty_query_persists_answer_trace_with_empty_context() -> None:
     assert trace.answer_text == ""
     assert trace.token_counts == {}
     assert trace.latency_ms == 0
+
+
+# --- Slice 4.3b: stub chat clients for the four new contours -----------------
+
+
+class _MarkerChatClient:
+    """Stub chat client that emits a configured ``UncertaintyMarker``.
+
+    Used to drive ``QueryService`` through the weak-evidence, ambiguous,
+    and LLM-marker no_evidence contours without relying on a real
+    provider. ``model_name`` carries the marker so the trace assertion
+    cannot be confused with the production ``MockChatClient``.
+    """
+
+    def __init__(
+        self,
+        marker: str,
+        *,
+        cite_all: bool = True,
+        answer_text: str = "stub answer",
+    ) -> None:
+        self._marker = marker
+        self._cite_all = cite_all
+        self._answer_text = answer_text
+
+    @property
+    def model_name(self) -> str:
+        return f"stub-{self._marker}"
+
+    def complete(self, prompt: AnswerPrompt) -> ChatResponse:
+        citations = list(prompt.cited_chunk_ids) if self._cite_all else []
+        raw = json.dumps(
+            {
+                "answer_text": self._answer_text,
+                "cited_chunk_ids": citations,
+                "uncertainty": self._marker,
+            }
+        )
+        return ChatResponse(
+            raw_text=raw,
+            model_name=self.model_name,
+            token_counts={"prompt": 7, "completion": 11},
+            latency_ms=42,
+        )
+
+
+class _UnavailableChatClient:
+    @property
+    def model_name(self) -> str:
+        return "stub-unavailable"
+
+    def complete(self, prompt: AnswerPrompt) -> ChatResponse:
+        raise ChatProviderUnavailableError("test: provider down")
+
+
+class _MalformedChatClient:
+    @property
+    def model_name(self) -> str:
+        return "stub-malformed"
+
+    def complete(self, prompt: AnswerPrompt) -> ChatResponse:
+        return ChatResponse(
+            raw_text="this is not JSON {",
+            model_name=self.model_name,
+            token_counts={"prompt": 5, "completion": 0},
+            latency_ms=33,
+        )
+
+
+def _wire_with_chat(store: MockDiaryStore, chat: object, *, top_k: int = 5) -> QueryService:
+    return QueryService(
+        store,
+        store,
+        MockEmbeddingClient(),
+        chat,  # type: ignore[arg-type]
+        top_k=top_k,
+    )
+
+
+def test_weak_evidence_marker_grades_query_and_trace(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """``uncertainty="uncertain"`` → ``FallbackMode.WEAK_EVIDENCE`` on Query + trace."""
+    store = MockDiaryStore()
+    _ingest(store, "2026-05-09\nMorning routine\nTried a new book")
+    query = _wire_with_chat(store, _MarkerChatClient("uncertain"))
+
+    with caplog.at_level("INFO"):
+        result = query.answer(_ask("book"))
+
+    assert result.fallback is FallbackMode.WEAK_EVIDENCE
+    assert result.evidence  # retrieval still succeeded
+    assert result.answer_text == "stub answer"
+
+    persisted = next(iter(store._queries.values()))
+    assert persisted.fallback is FallbackMode.WEAK_EVIDENCE
+    trace = store.get_answer_trace_for_query(persisted.query_id)
+    assert trace is not None
+    assert trace.fallback_mode is FallbackMode.WEAK_EVIDENCE
+    assert trace.answer_text == "stub answer"
+    assert trace.model_name == "stub-uncertain"
+    assert trace.latency_ms == 42
+    assert trace.token_counts == {"prompt": 7, "completion": 11}
+    assert tuple(trace.context_chunk_ids) == tuple(e.chunk_id for e in result.evidence)
+    assert "fallback=weak_evidence" in caplog.text
+
+
+def test_ambiguous_marker_grades_query_and_trace() -> None:
+    store = MockDiaryStore()
+    _ingest(store, "2026-05-09\nMorning routine\nTried a new book")
+    query = _wire_with_chat(store, _MarkerChatClient("ambiguous"))
+
+    result = query.answer(_ask("book"))
+
+    assert result.fallback is FallbackMode.AMBIGUOUS
+    assert result.evidence
+    assert result.answer_text == "stub answer"
+
+    persisted = next(iter(store._queries.values()))
+    assert persisted.fallback is FallbackMode.AMBIGUOUS
+    trace = store.get_answer_trace_for_query(persisted.query_id)
+    assert trace is not None
+    assert trace.fallback_mode is FallbackMode.AMBIGUOUS
+    assert trace.answer_text == "stub answer"
+    assert trace.model_name == "stub-ambiguous"
+    assert trace.latency_ms == 42
+
+
+def test_llm_no_evidence_marker_preserves_llm_text_and_context_ids() -> None:
+    """LLM-marker NO_EVIDENCE: retrieval found chunks; model judged them not-evidence.
+
+    Distinct from empty-retrieval NO_EVIDENCE: the trace records the
+    LLM's answer text and the retrieved ``context_chunk_ids``; the
+    ``AnswerResult.evidence`` list stays non-empty so the Dispatcher
+    can disambiguate at the reply surface (Decision 8, D-035).
+    """
+    store = MockDiaryStore()
+    _ingest(store, "2026-05-09\nMorning routine\nTried a new book")
+    query = _wire_with_chat(
+        store,
+        _MarkerChatClient("no_evidence", cite_all=False, answer_text="not evidence"),
+    )
+
+    result = query.answer(_ask("book"))
+
+    assert result.fallback is FallbackMode.NO_EVIDENCE
+    assert result.evidence  # retrieval found chunks
+    assert result.answer_text == "not evidence"
+
+    persisted = next(iter(store._queries.values()))
+    assert persisted.fallback is FallbackMode.NO_EVIDENCE
+    trace = store.get_answer_trace_for_query(persisted.query_id)
+    assert trace is not None
+    assert trace.fallback_mode is FallbackMode.NO_EVIDENCE
+    assert trace.answer_text == "not evidence"
+    assert tuple(trace.context_chunk_ids) == tuple(e.chunk_id for e in result.evidence)
+    assert trace.latency_ms == 42
+    assert trace.token_counts == {"prompt": 7, "completion": 11}
+
+
+def test_provider_unavailable_grades_query_and_trace() -> None:
+    store = MockDiaryStore()
+    _ingest(store, "2026-05-09\nMorning routine\nTried a new book")
+    query = _wire_with_chat(store, _UnavailableChatClient())
+
+    result = query.answer(_ask("book"))
+
+    assert result.fallback is FallbackMode.PROVIDER_UNAVAILABLE
+    assert result.evidence  # retrieval still produced candidates
+    assert result.answer_text is None
+
+    persisted = next(iter(store._queries.values()))
+    assert persisted.fallback is FallbackMode.PROVIDER_UNAVAILABLE
+    trace = store.get_answer_trace_for_query(persisted.query_id)
+    assert trace is not None
+    assert trace.fallback_mode is FallbackMode.PROVIDER_UNAVAILABLE
+    assert trace.answer_text == ""
+    assert trace.model_name == "stub-unavailable"
+    assert trace.latency_ms == 0
+    assert trace.token_counts == {}
+    assert tuple(trace.context_chunk_ids) == tuple(e.chunk_id for e in result.evidence)
+
+
+def test_parse_failure_grades_query_and_trace_with_raw_text() -> None:
+    """PARSE_FAILURE preserves ``response.raw_text`` as trace.answer_text (forensics)."""
+    store = MockDiaryStore()
+    _ingest(store, "2026-05-09\nMorning routine\nTried a new book")
+    query = _wire_with_chat(store, _MalformedChatClient())
+
+    result = query.answer(_ask("book"))
+
+    assert result.fallback is FallbackMode.PARSE_FAILURE
+    assert result.evidence
+    assert result.answer_text is None  # no usable structured answer
+
+    persisted = next(iter(store._queries.values()))
+    assert persisted.fallback is FallbackMode.PARSE_FAILURE
+    trace = store.get_answer_trace_for_query(persisted.query_id)
+    assert trace is not None
+    assert trace.fallback_mode is FallbackMode.PARSE_FAILURE
+    assert trace.answer_text == "this is not JSON {"
+    assert trace.model_name == "stub-malformed"
+    assert trace.latency_ms == 33
+    assert trace.token_counts == {"prompt": 5, "completion": 0}
+    assert tuple(trace.context_chunk_ids) == tuple(e.chunk_id for e in result.evidence)

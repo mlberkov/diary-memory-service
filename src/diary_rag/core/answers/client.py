@@ -44,3 +44,14 @@ class ChatClient(Protocol):
     def model_name(self) -> str: ...
 
     def complete(self, prompt: AnswerPrompt) -> ChatResponse: ...
+
+
+class ChatProviderUnavailableError(RuntimeError):
+    """The chat provider is unreachable / unusable for this call (D-035).
+
+    Real provider adapters raise this on timeout, HTTP failure, auth
+    failure, or any other condition that prevents producing a usable
+    :class:`ChatResponse`. ``QueryService.answer`` catches the exception
+    once and grades the call as ``FallbackMode.PROVIDER_UNAVAILABLE`` —
+    no retry, no repair (recovery workflows are Phase-6 work).
+    """

@@ -15,9 +15,11 @@ from typing import Final, Literal, cast
 
 from diary_rag.core.diary.models import AnswerContext
 
-UncertaintyMarker = Literal["confident", "uncertain", "no_evidence"]
+UncertaintyMarker = Literal["confident", "uncertain", "no_evidence", "ambiguous"]
 
-_VALID_UNCERTAINTY: Final[frozenset[str]] = frozenset({"confident", "uncertain", "no_evidence"})
+_VALID_UNCERTAINTY: Final[frozenset[str]] = frozenset(
+    {"confident", "uncertain", "no_evidence", "ambiguous"}
+)
 _REQUIRED_FIELDS: Final[frozenset[str]] = frozenset(
     {"answer_text", "cited_chunk_ids", "uncertainty"}
 )
@@ -53,7 +55,8 @@ def parse_structured_answer(raw: str, *, context: AnswerContext) -> StructuredAn
 
     ``cited_chunk_ids`` must be a subset of the chunk_ids in
     ``context.ordered_chunks``. Empty ``cited_chunk_ids`` is permitted
-    only when ``uncertainty == "no_evidence"``.
+    only when ``uncertainty == "no_evidence"``; ``"uncertain"`` and
+    ``"ambiguous"`` therefore require non-empty citations.
     """
     try:
         payload = json.loads(raw)

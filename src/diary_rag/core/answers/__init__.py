@@ -10,6 +10,10 @@ persists (``model_name``, ``token_counts``, ``latency_ms``).
 latency — no other layer measures it independently.
 """
 
-from diary_rag.core.answers.client import ChatClient, ChatResponse
+from diary_rag.core.answers.client import (
+    ChatClient,
+    ChatProviderUnavailableError,
+    ChatResponse,
+)
 
-__all__ = ["ChatClient", "ChatResponse"]
+__all__ = ["ChatClient", "ChatProviderUnavailableError", "ChatResponse"]
