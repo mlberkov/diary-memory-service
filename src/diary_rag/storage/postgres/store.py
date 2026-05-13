@@ -34,15 +34,18 @@ calibrate scores across legs.
 
 from __future__ import annotations
 
+import json
 from importlib import resources
 from typing import Any
 
 from pgvector.psycopg import register_vector
 from psycopg import Connection
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from diary_rag.core.diary.models import (
+    AnswerTrace,
     DiaryEntry,
     EventChunk,
     FallbackMode,
@@ -525,6 +528,60 @@ class PostgresDiaryStore:
             )
             for r in rows
         ]
+
+    def save_answer_trace(self, trace: AnswerTrace) -> None:
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO answer_traces "
+                "(answer_trace_id, query_id, prompt_version, context_chunk_ids, "
+                " answer_text, fallback_mode, model_name, token_counts, "
+                " latency_ms, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    trace.answer_trace_id,
+                    trace.query_id,
+                    trace.prompt_version,
+                    list(trace.context_chunk_ids),
+                    trace.answer_text,
+                    trace.fallback_mode.value,
+                    trace.model_name,
+                    Jsonb(trace.token_counts),
+                    trace.latency_ms,
+                    trace.created_at,
+                ),
+            )
+            conn.commit()
+
+    def get_answer_trace_for_query(self, query_id: str) -> AnswerTrace | None:
+        with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                "SELECT answer_trace_id, query_id, prompt_version, context_chunk_ids, "
+                "       answer_text, fallback_mode, model_name, token_counts, "
+                "       latency_ms, created_at "
+                "  FROM answer_traces "
+                " WHERE query_id = %s",
+                (query_id,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        token_counts_raw = row["token_counts"]
+        if isinstance(token_counts_raw, str):
+            token_counts = json.loads(token_counts_raw)
+        else:
+            token_counts = dict(token_counts_raw)
+        return AnswerTrace(
+            answer_trace_id=row["answer_trace_id"],
+            query_id=row["query_id"],
+            prompt_version=row["prompt_version"],
+            context_chunk_ids=tuple(row["context_chunk_ids"]),
+            answer_text=row["answer_text"],
+            fallback_mode=FallbackMode(row["fallback_mode"]),
+            model_name=row["model_name"],
+            token_counts=token_counts,
+            latency_ms=int(row["latency_ms"]),
+            created_at=row["created_at"],
+        )
 
 
 def _row_to_source(row: dict[str, Any]) -> SourceMessage:

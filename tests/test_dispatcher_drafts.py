@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from diary_rag.adapters.answers import MockChatClient
 from diary_rag.adapters.embeddings import MockEmbeddingClient
 from diary_rag.config import Settings
 from diary_rag.core.diary.models import SourceMessage
@@ -23,10 +24,11 @@ def _settings(*, default: int = 5, maximum: int = 20) -> Settings:
 def _dispatcher(settings: Settings) -> tuple[Dispatcher, MockDiaryStore]:
     store = MockDiaryStore()
     embed = MockEmbeddingClient()
+    chat = MockChatClient()
     return (
         Dispatcher(
             DiaryService(store, embedding_client=embed),
-            QueryService(store, store, embed),
+            QueryService(store, store, embed, chat),
             ExportService(store),
             settings,
         ),

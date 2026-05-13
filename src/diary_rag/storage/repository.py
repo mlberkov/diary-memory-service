@@ -33,6 +33,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from diary_rag.core.diary.models import (
+    AnswerTrace,
     DiaryEntry,
     EventChunk,
     Query,
@@ -137,3 +138,15 @@ class DiaryRepository(Protocol):
 
         Ordering is stable for inspection: ``(leg ASC, rank ASC)``.
         """
+
+    def save_answer_trace(self, trace: AnswerTrace) -> None:
+        """Persist one ``AnswerTrace`` row per ``/ask`` reply (Slice 4.3a, D-034).
+
+        Backends enforce ``UNIQUE (query_id)`` so a single ``Query`` has at
+        most one ``AnswerTrace`` — the answer-side counterpart of the
+        D-032 retrieval traces. The caller is ``QueryService.answer`` on
+        the success and no-evidence/empty-query contours.
+        """
+
+    def get_answer_trace_for_query(self, query_id: str) -> AnswerTrace | None:
+        """Fetch the ``AnswerTrace`` for a query, or ``None`` (Slice 4.3a)."""

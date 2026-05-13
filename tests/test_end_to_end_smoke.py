@@ -10,16 +10,21 @@ matches only on identical text (mock embeddings encode text identity).
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
+from diary_rag.adapters.answers import MockChatClient
 from diary_rag.adapters.embeddings import MockEmbeddingClient
 from diary_rag.adapters.telegram.webhook import get_dispatcher
 from diary_rag.app import create_app
 from diary_rag.config import Settings
+from diary_rag.core.answers import ChatClient, ChatResponse
+from diary_rag.core.diary import FallbackMode
+from diary_rag.core.diary.answer_prompt import AnswerPrompt
 from diary_rag.services import DiaryService, Dispatcher, ExportService, QueryService
 from diary_rag.storage.mock import MockDiaryStore
 
@@ -28,13 +33,16 @@ def _settings() -> Settings:
     return Settings(_env_file=None, telegram_webhook_secret="test-secret")  # type: ignore[call-arg]
 
 
-def _client_with_fresh_store() -> tuple[TestClient, MockDiaryStore]:
+def _client_with_fresh_store(
+    *, chat_client: ChatClient | None = None
+) -> tuple[TestClient, MockDiaryStore]:
     store = MockDiaryStore()
     embed = MockEmbeddingClient()
+    chat: ChatClient = chat_client if chat_client is not None else MockChatClient()
     settings = _settings()
     dispatcher = Dispatcher(
         DiaryService(store, embedding_client=embed),
-        QueryService(store, store, embed),
+        QueryService(store, store, embed, chat),
         ExportService(store),
         settings,
     )
@@ -98,6 +106,13 @@ def test_entry_then_ask_returns_grounded_reply_with_date() -> None:
     # Slice 3.5: successful /ask persists one Query row + retrieval hits.
     assert store.len_queries() == 1
     assert store.len_retrieval_hits() > 0
+    # Slice 4.3a: successful /ask also persists one AnswerTrace.
+    assert store.len_answer_traces() == 1
+    persisted_query = next(iter(store._queries.values()))
+    trace = store.get_answer_trace_for_query(persisted_query.query_id)
+    assert trace is not None
+    assert trace.fallback_mode is FallbackMode.NONE
+    assert trace.answer_text  # mock chat produced a grounded answer
 
 
 def test_ask_with_no_match_returns_no_evidence_fallback() -> None:
@@ -111,6 +126,14 @@ def test_ask_with_no_match_returns_no_evidence_fallback() -> None:
     # Slice 3.5: NO_EVIDENCE still persists one Query row with zero hits.
     assert store.len_queries() == 1
     assert store.len_retrieval_hits() == 0
+    # Slice 4.3a: NO_EVIDENCE still persists one AnswerTrace, with no LLM call.
+    assert store.len_answer_traces() == 1
+    persisted_query = next(iter(store._queries.values()))
+    trace = store.get_answer_trace_for_query(persisted_query.query_id)
+    assert trace is not None
+    assert trace.fallback_mode is FallbackMode.NO_EVIDENCE
+    assert trace.context_chunk_ids == ()
+    assert trace.answer_text == ""
 
 
 def test_entry_with_invalid_first_line_returns_invalid_input_and_persists_source() -> None:
@@ -263,3 +286,56 @@ def test_edited_message_is_distinct_state_from_original() -> None:
     assert store.len_sources() == 2
     assert store.len_entries() == 2
     assert store.len_chunks() == 5
+
+
+class _WeakEvidenceChatClient:
+    """Stub chat client that emits ``uncertainty="uncertain"`` for the smoke test."""
+
+    @property
+    def model_name(self) -> str:
+        return "stub-uncertain"
+
+    def complete(self, prompt: AnswerPrompt) -> ChatResponse:
+        raw = json.dumps(
+            {
+                "answer_text": "Could be the book or the routine.",
+                "cited_chunk_ids": list(prompt.cited_chunk_ids),
+                "uncertainty": "uncertain",
+            }
+        )
+        return ChatResponse(
+            raw_text=raw,
+            model_name=self.model_name,
+            token_counts={"prompt": 9, "completion": 6},
+            latency_ms=21,
+        )
+
+
+def test_weak_evidence_marker_surfaces_trailer_and_persists_trace(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Slice 4.3b: an LLM ``uncertain`` marker grades the call as WEAK_EVIDENCE end-to-end."""
+    client, store = _client_with_fresh_store(chat_client=_WeakEvidenceChatClient())
+
+    _post(client, _update("/note 2026-05-09\nTried a new book", update_id=1))
+
+    with caplog.at_level(logging.INFO, logger="diary_rag.services.query_service"):
+        resp = _post(client, _update("/ask book", update_id=2, message_id=2))
+
+    assert resp.status_code == 200
+    text = resp.json()["text"]
+    assert "(weak evidence — model expressed uncertainty)" in text
+    assert "[2026-05-09] Tried a new book" in text
+
+    # Persisted Query.fallback matches AnswerTrace.fallback_mode (D-035).
+    persisted_query = next(iter(store._queries.values()))
+    assert persisted_query.fallback is FallbackMode.WEAK_EVIDENCE
+    trace = store.get_answer_trace_for_query(persisted_query.query_id)
+    assert trace is not None
+    assert trace.fallback_mode is FallbackMode.WEAK_EVIDENCE
+    assert trace.answer_text == "Could be the book or the routine."
+    assert trace.model_name == "stub-uncertain"
+    assert trace.latency_ms == 21
+
+    # Log line carries the new fallback value.
+    assert "fallback=weak_evidence" in caplog.text

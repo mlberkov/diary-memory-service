@@ -19,10 +19,14 @@ The dense leg additionally requires `embedding_status='ready'` (D-025): chunks w
 ## R-5. Provenance on every answer
 No answer is returned to a user without an `AnswerTrace` row that records `context_chunk_ids` (possibly empty in fallback modes), `prompt_version`, and `fallback_mode`.
 
-The retrieval-side half of this invariant is enforced as of Slice 3.5 (D-032): every `/ask` call writes one `Query` row and zero-or-more `RetrievalHit` rows (`leg ∈ {dense, sparse, merged}`, 1-based `rank`, RRF-contribution `score`). Answer-side `AnswerTrace` persistence (prompt version, model name, generated text) remains deferred to Phase 4 and lands with its own table.
+The retrieval-side half of this invariant is enforced as of Slice 3.5 (D-032): every `/ask` call writes one `Query` row and zero-or-more `RetrievalHit` rows (`leg ∈ {dense, sparse, merged}`, 1-based `rank`, RRF-contribution `score`).
+
+Answer-side trace persistence is enforced on every `/ask` reply as of Slice 4.3b (D-035): one `AnswerTrace` row is written per call (FK to `queries.query_id`, UNIQUE on `query_id`) recording `prompt_version`, `context_chunk_ids`, `answer_text`, `model_name`, `token_counts`, `latency_ms`, and `fallback_mode`. `Query.fallback` and `AnswerTrace.fallback_mode` are written from one decision per call so they always agree. Slice 4.3a (D-034) landed the seam on the success and no-evidence/empty-query contours; Slice 4.3b extended it to weak-evidence, ambiguous, the LLM-marker `no_evidence` sub-branch, provider-unavailable, and parse-failure. Live provider integration remains deferred to Phase 6.
 
 ## R-6. Requested vs effective path
 When a fallback is taken (no evidence, weak evidence, ambiguous query, provider unavailable, optional feature disabled), the response and the log distinguish the *requested* path from the *effective* path. No silent degradation.
+
+Surface-level signaling is enforced as of Slice 4.3b (D-035): the dispatcher switches `_format_answer_reply` on `AnswerResult.fallback` and emits a distinct reply per mode — RRF trailer on success, dedicated trailers on `weak_evidence` and `ambiguous`, retry-hint replies on `provider_unavailable` and `parse_failure`. The `no_evidence` enum value has two effective paths (empty retrieval vs LLM-marker over non-empty retrieval); the dispatcher disambiguates on `bool(AnswerResult.evidence)` and produces a distinct reply for each. The `retrieval.hybrid` log line carries `fallback=…` so the effective path is also visible in logs.
 
 ## R-7. Provider call observability
 Every provider call (embedding, chat, search backend) is logged with: provider, model, input hash, latency, token counts (when available), and outcome class.

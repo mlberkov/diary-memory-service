@@ -648,3 +648,108 @@ Slice 4.1 plumbed `AnswerContext` through `QueryService.answer` but left no call
 - New: `src/diary_rag/core/diary/answer_prompt.py`, `src/diary_rag/core/diary/answer_schema.py`, `tests/test_answer_prompt.py`, `tests/test_answer_schema.py`.
 - Changed: `src/diary_rag/core/diary/__init__.py` (re-exports). No other source file changed; no `QueryService.answer`, dispatcher, retrieval, repository, or schema changes.
 - Out of scope (unchanged or deferred): `ChatClient` Protocol, `MockChatClient`, OpenAI adapter (next packet); `AnswerTrace` schema and persistence (subsequent packet); fallback grading beyond the literal marker shape (Slice 4.3); Telegram citation rendering or dispatcher rewiring (Slice 4.4); search-quality fork (D-025 follow-up); `RouteKind.ENTRY → NOTE` / `DiaryEntry` / `family_id` / `diary_rag` package renames (D-026); schema migration tooling (A-34).
+
+## D-034 — Slice 4.3a: ChatClient seam + AnswerTrace persistence on the success / no-evidence contours
+
+### Decision
+Slice 4.3a is the first caller of the D-033 contract. It introduces a channel-neutral `ChatClient` Protocol, a deterministic `MockChatClient`, and the answer-side `AnswerTrace` persistence that closes the answer-side half of R-5 on the two contours that exist today (success and no-evidence/empty-query). Weak-evidence / ambiguous / provider-unavailable grading and the corresponding marker semantics stay deferred to Slice 4.3 proper. Real provider adapters remain deferred.
+
+- **Channel-neutral seam.** `core/answers/client.py` adds the `ChatClient` Protocol (`model_name: str` property, `complete(prompt: AnswerPrompt) -> ChatResponse`) and the frozen-slotted `ChatResponse(raw_text, model_name, token_counts, latency_ms)` dataclass. No provider SDK imports in core (I-11). `ChatResponse.latency_ms` is the single source of truth for chat-call latency; `QueryService` persists it directly and does not re-measure with `time.perf_counter()`.
+- **Mock adapter, honest provenance.** `adapters/answers/mock.py` adds `MockChatClient` with `model_name="mock"` (D-024-style provenance applied to the chat seam) and `latency_ms=0` (a mock has no real provider latency to attribute; reporting anything else would be dishonest). The emitted `raw_text` is JSON that round-trips through `parse_structured_answer(..., context=...)`: `cited_chunk_ids = prompt.cited_chunk_ids`, `uncertainty="confident"` (or `"no_evidence"` for empty citations), deterministic answer text.
+- **Single factory.** `adapters/answers/factory.py` adds `build_chat_client(settings)`. The literal `Settings.chat_backend` is `Literal["mock"]` for now; real adapters extend the literal in a later packet.
+- **Domain model.** `core/diary/models.py` adds `AnswerTrace` (`answer_trace_id`, `query_id`, `prompt_version`, `context_chunk_ids: tuple[str, ...]`, `answer_text`, `fallback_mode`, `model_name`, `token_counts: dict[str, int]`, `latency_ms`, `created_at`). `AnswerResult` gains an optional `answer_text: str | None = None` so the success path can carry the LLM output alongside the existing evidence list; the Telegram reply layer keeps reading `evidence` in this packet (Slice 4.4 switches to `answer_text` + citations).
+- **No `confidence_band` field.** TechSpec §5 names `confidence_band` on `AnswerTrace`; this packet does **not** introduce it. Marker semantics richer than `{confident, uncertain, no_evidence}` are a Slice 4.3 contract decision; pre-committing here would force a premature column.
+- **Repository seam = two methods.** `DiaryRepository` Protocol gains exactly `save_answer_trace(trace: AnswerTrace) -> None` and `get_answer_trace_for_query(query_id: str) -> AnswerTrace | None`. No test-only helpers on the Protocol. `MockDiaryStore` adds a `len_answer_traces()` helper for parity with `len_queries()` / `len_retrieval_hits()`; this helper is mock-specific (it follows the established test-helper pattern; not part of the Protocol).
+- **All three backends implement the seam.** Mock keeps the row in a process-local dict keyed by `query_id`. SQLite adds the `answer_traces` table to its in-file DDL with `context_chunk_ids` and `token_counts` serialised as JSON `TEXT`. Postgres uses a `TEXT[]` for `context_chunk_ids` and `JSONB` for `token_counts`. All three enforce `UNIQUE (query_id)`.
+- **Postgres schema.** One new table in `schema.sql`:
+  ```sql
+  CREATE TABLE IF NOT EXISTS answer_traces (
+      answer_trace_id   TEXT PRIMARY KEY,
+      query_id          TEXT NOT NULL UNIQUE REFERENCES queries(query_id),
+      prompt_version    TEXT NOT NULL,
+      context_chunk_ids TEXT[] NOT NULL,
+      answer_text       TEXT NOT NULL,
+      fallback_mode     TEXT NOT NULL
+          CHECK (fallback_mode IN ('none','no_evidence','invalid_input')),
+      model_name        TEXT NOT NULL,
+      token_counts      JSONB NOT NULL,
+      latency_ms        INTEGER NOT NULL CHECK (latency_ms >= 0),
+      created_at        TIMESTAMPTZ NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_answer_traces_query_id ON answer_traces(query_id);
+  ```
+  The `fallback_mode` CHECK reuses the `FallbackMode` value set already in use on `queries.fallback`.
+- **QueryService wiring.** `__init__` adds `chat_client: ChatClient` as a required positional parameter (one new constructor arg, mirroring the Slice 3.5 pattern). `answer()` is updated:
+  - **Empty-query branch.** Already returns `FallbackMode.NO_EVIDENCE` today (`Query.fallback` semantics unchanged from D-032). After the existing `_persist_trace(...)`, persist an `AnswerTrace` with empty `context_chunk_ids`, empty `answer_text`, `latency_ms=0`, empty `token_counts`, and `fallback_mode=NO_EVIDENCE`. **Not a remap** — the `AnswerTrace.fallback_mode` value mirrors the existing `Query.fallback` value.
+  - **No-evidence branch (merged empty after retrieval).** Same shape as the empty-query trace. No LLM call.
+  - **Success branch.** Build `AnswerPrompt` from `AnswerContext` (R-8 cross-family guard now actually runs), call `chat_client.complete(prompt)`, parse the response with `parse_structured_answer(raw_text, context=context)` (I-9 citation grounding now hit on every success), persist the `AnswerTrace` with `latency_ms=response.latency_ms` (no independent measurement), and return `AnswerResult` carrying both the existing `evidence` list and the new `answer_text`.
+- **Parse-failure handling deferred.** If `parse_structured_answer` raises a typed `StructuredAnswerError` subclass on the success branch, the exception propagates. No retry loop, no repair prompt, no malformed-JSON recovery workflow. The mock always produces valid output; the path exists for the real-provider future and is not exercised in this packet. Slice 4.3 introduces the marker and the grading.
+- **Observability.** The `retrieval.hybrid` log line gains `answer_trace_id=…` on all three branches so an operator can pivot from log to trace row in one SQL.
+- **Boot gate (R-10) extended.** `app._verify_chat_contour(settings)` instantiates the configured chat client and asserts a non-empty `model_name`. Failure aborts boot, mirroring the embedding contour gate.
+- **Settings + .env.** `Settings.chat_backend: Literal["mock"]` is added. The pre-existing `Settings.chat_model: str` placeholder is retained (the mock ignores it; real providers will populate it in a later packet). `.env.example` documents the new `CHAT_BACKEND` knob.
+- **Destructive local upgrade (A-34).** Existing local Postgres volumes that pre-date the `answer_traces` table must be reset (`docker compose down -v`) before the bootstrap DDL applies cleanly. No migration tool yet; consistent with D-022 / D-023 / D-024 / D-025 / D-032.
+
+### Why
+D-033 left the prompt/parse contract dangling with no caller; D-032 left R-5's answer-side half explicitly deferred. Building the chat seam without the trace would leave the contract called but the runtime invariant still half-satisfied; building the trace without the seam would persist synthetic data the LLM never produced (dishonest provenance). Bundling them mirrors D-032's pattern (it bundled the retrieval seam with its trace rows) and produces the smallest validation-driven step that closes both gaps on the two contours that exist today, without committing to the fallback-grading contract that Slice 4.3 owns.
+
+### Consequence
+- I-9 in `INVARIANTS.md` and R-5 in `RUNTIME-INVARIANTS.md` tightened in place to record that answer-side trace persistence is now enforced on the success and no-evidence/empty-query contours. No new I- or R- numbers; weak-evidence / ambiguous / provider-unavailable grading remains deferred to Slice 4.3.
+- New runtime dependencies: none. Existing `psycopg.types.json.Jsonb` covers the JSONB binding.
+- New: `src/diary_rag/core/answers/__init__.py`, `src/diary_rag/core/answers/client.py`, `src/diary_rag/adapters/answers/__init__.py`, `src/diary_rag/adapters/answers/mock.py`, `src/diary_rag/adapters/answers/factory.py`, `tests/test_chat_client_mock.py`, `tests/test_storage_answer_traces.py`.
+- Changed: `src/diary_rag/core/diary/models.py` (`AnswerTrace`; optional `AnswerResult.answer_text`); `src/diary_rag/core/diary/__init__.py` (re-export `AnswerTrace`); `src/diary_rag/storage/repository.py` (two new Protocol methods); `src/diary_rag/storage/mock/store.py`, `storage/sqlite/store.py`, `storage/postgres/store.py` (implementations + new tables); `src/diary_rag/storage/postgres/schema.sql` (one new table); `src/diary_rag/services/query_service.py` (new constructor arg, success + no-evidence wiring, log-line extension); `src/diary_rag/adapters/telegram/webhook.py` (build chat client; pass to `QueryService`); `src/diary_rag/config.py` (`chat_backend` literal); `src/diary_rag/app.py` (`_verify_chat_contour`); `.env.example` (chat stanza). Existing tests that constructed a `QueryService` directly pass `MockChatClient()` as the new fourth positional argument (five call sites updated). `tests/test_query_service.py` gains three answer-trace persistence cases. `tests/test_end_to_end_smoke.py` gains two answer-trace assertions on the existing success and no-evidence cases.
+- No schema migration tool (A-34 unchanged); A-34 destructive-upgrade discipline applies to the new table.
+- Out of scope (unchanged or deferred): real OpenAI / Anthropic chat adapter; weak-evidence / ambiguous / provider-unavailable grading (Slice 4.3); `confidence_band` semantics (Slice 4.3); Telegram citation rendering / reply rewriting (Slice 4.4); parse-failure repair / retry loops; metadata filtering / Slice 3.4; retrieval-quality changes; BM25 / reranker / Qdrant / halfvec / HNSW; user-facing `/trace` command; schema migration tooling (A-34); the `RouteKind.ENTRY → NOTE` / `DiaryEntry` / `family_id` / `diary_rag` package renames (D-026).
+
+---
+
+## D-035 — Slice 4.3b: answer-side fallback grading (weak-evidence / ambiguous / provider-unavailable / parse-failure)
+
+### Decision
+Slice 4.3b closes the answer-side grading contours that Slice 4.3a explicitly deferred. The packet extends the shared `FallbackMode` enum with four new answer-side members, extends the LLM-facing `UncertaintyMarker` with `"ambiguous"`, adds a typed `ChatProviderUnavailableError` in `core/answers/client.py`, and reorganises `QueryService.answer` so every contour writes `Query.fallback` and `AnswerTrace.fallback_mode` from one decision (they always agree). The Dispatcher gains surface-level R-6 signaling per `FallbackMode`, including a sub-branch on `bool(AnswerResult.evidence)` that distinguishes the two `NO_EVIDENCE` effective paths. No real provider adapter, no retry / repair loop, no Telegram answer-text / citation rewrite (Slice 4.4 owns that), no `confidence_band` column.
+
+- **`FallbackMode` extension.** `WEAK_EVIDENCE`, `AMBIGUOUS`, `PROVIDER_UNAVAILABLE`, `PARSE_FAILURE` added to the shared StrEnum. `INVALID_INPUT` continues to belong to ingest-side `DiaryService` and is unaffected. Postgres CHECK constraints on `queries.fallback` and `answer_traces.fallback_mode` widened to admit the four new values (SQLite mirrors the same set in its in-file DDL).
+- **`UncertaintyMarker` extension + tightened citation rule.** `UncertaintyMarker = Literal["confident", "uncertain", "no_evidence", "ambiguous"]`. `parse_structured_answer` continues to require `cited_chunk_ids ⊆ AnswerContext.ordered_chunks` and now states explicitly that empty `cited_chunk_ids` is permitted **only** when `uncertainty == "no_evidence"`; `"uncertain"` and `"ambiguous"` therefore require non-empty citations. Marker → `FallbackMode` mapping (applied in `QueryService.answer`): `confident → NONE`, `uncertain → WEAK_EVIDENCE`, `no_evidence → NO_EVIDENCE` (the LLM declared the retrieved chunks not-evidence), `ambiguous → AMBIGUOUS`.
+- **`ChatProviderUnavailableError`.** Typed exception added to `core/answers/client.py` (re-exported from `core/answers/__init__.py`). Real provider adapters raise it on timeout / HTTP failure / auth failure in Phase 6. `MockChatClient` never raises naturally; tests use minimal stub chat clients defined inline. `QueryService.answer` catches it **once** and grades the call as `PROVIDER_UNAVAILABLE` — no retry, no repair. Recovery workflows belong to Phase 6.
+- **`StructuredAnswerError` propagation is now caught.** `QueryService.answer` wraps `parse_structured_answer` and catches the base `StructuredAnswerError` (covers `MalformedAnswerJSONError`, `AnswerSchemaMismatchError`, `FabricatedCitationError`). The trace preserves `response.raw_text` as `answer_text` for forensics. `CrossFamilyContextError` from `build_answer_prompt` continues to propagate uncaught — it is an R-8 programming-error signal, not a graded fallback.
+- **Truthful trace shape per contour** (the contract; tests assert this table verbatim):
+
+  | `fallback_mode` | `answer_text` | `context_chunk_ids` | `token_counts` | `latency_ms` |
+  | --- | --- | --- | --- | --- |
+  | `NONE` | LLM output | from `AnswerContext` | from response | from response |
+  | `NO_EVIDENCE` (empty query) | `""` | `()` | `{}` | `0` |
+  | `NO_EVIDENCE` (empty retrieval) | `""` | `()` | `{}` | `0` |
+  | `NO_EVIDENCE` (LLM marker) | LLM output | from `AnswerContext` | from response | from response |
+  | `WEAK_EVIDENCE` | LLM output | from `AnswerContext` | from response | from response |
+  | `AMBIGUOUS` | LLM output | from `AnswerContext` | from response | from response |
+  | `PROVIDER_UNAVAILABLE` | `""` | from `AnswerContext` | `{}` | `0` |
+  | `PARSE_FAILURE` | `response.raw_text` | from `AnswerContext` | from response | from response |
+
+  `model_name` follows the existing rule: `response.model_name` when a response exists, else `chat_client.model_name` (empty query, empty retrieval, provider unavailable).
+- **`Query.fallback` mirrors `AnswerTrace.fallback_mode`.** The `Query` row is the lifecycle view of the `/ask` call; the effective path is the same on both rows by construction. `QueryService.answer` defers Query construction until the grading decision is made; a single `_finalize(...)` helper writes the Query, the retrieval hits, and the answer trace from one set of arguments. The earlier `_persist_no_evidence_answer_trace` generalises to a single `_persist_answer_trace(...)` entry point so the table above is enforced in code.
+- **`confidence_band` explicitly deferred.** TechSpec §5 lists a `confidence_band` field on `AnswerTrace`. This packet does **not** introduce a stored column. The truthful surface today is `fallback_mode` plus the LLM marker: a `confidence_band` column would store derived data and widen schema scope (extra CHECK, extra A-34 friction) without adding information. A future packet may introduce it if a richer semantic emerges.
+- **Dispatcher reply text per `FallbackMode` (channel-neutral; Telegram wording stays out of core).**
+  - `NONE` — evidence list + `(hybrid retrieval — dense+sparse RRF)` trailer (unchanged).
+  - `NO_EVIDENCE` with empty `AnswerResult.evidence` (empty query or empty retrieval) — `"No memories matched '…'."` (unchanged).
+  - `NO_EVIDENCE` with non-empty `AnswerResult.evidence` (LLM marker) — `"Found possible matches but couldn't ground an answer for '…'. Try refining the question."` (no evidence list, no RRF trailer). The two `NO_EVIDENCE` sub-paths produce byte-distinct replies so the user can tell them apart (R-6).
+  - `WEAK_EVIDENCE` — evidence list + new trailer `"(weak evidence — model expressed uncertainty)"`.
+  - `AMBIGUOUS` — evidence list + new trailer `"(ambiguous question — refine and ask again)"`.
+  - `PROVIDER_UNAVAILABLE` — `"Couldn't generate an answer — chat provider is unavailable. Try again later."` (no evidence list, no trailer).
+  - `PARSE_FAILURE` — `"Couldn't generate an answer — provider response was unparseable. Try again."` (no evidence list, no trailer).
+  Heuristic-route marker continues to append on the ASK contour for every `FallbackMode`.
+- **Log line.** `retrieval.hybrid` already carries `fallback=…` and `answer_trace_id=…`; the new `FallbackMode` values appear in `fallback=…` automatically.
+- **Destructive local upgrade (A-34).** Existing local Postgres volumes that pre-date the widened CHECK constraints must be reset (`docker compose down -v`) before the bootstrap DDL applies cleanly. No migration tool yet; consistent with D-022 / D-023 / D-024 / D-025 / D-032 / D-034.
+
+### Why
+D-034 deliberately landed only the success and no-evidence/empty-query contours so the chat seam and the trace shape could be validated before the harder grading questions were settled. R-6 lists four fallback conditions (no-evidence, weak-evidence, ambiguous, provider-unavailable) that demand requested-vs-effective signaling; D-033's parse-failure path is the fifth, deferred at the time. Closing all four answer-side contours together produces the smallest validation-driven step that satisfies R-5 and R-6 end-to-end. Bundling them avoids the half-state where the trace records `fallback_mode=NONE` even though the LLM emitted `uncertainty="uncertain"`, and avoids a Slice-4.4 reply rewrite that has to special-case half-graded outcomes.
+
+The `NO_EVIDENCE` sub-branch in the Dispatcher is the load-bearing R-6 detail in this packet: the same enum value covers two meaningfully different effective paths (empty retrieval vs LLM-marker over non-empty retrieval). Rendering both as "No memories matched '…'" would be untruthful for the second path. The Dispatcher disambiguates on `bool(AnswerResult.evidence)` and produces a distinct reply for the LLM-marker path so the user can tell what actually happened.
+
+### Consequence
+- I-9 in `INVARIANTS.md` and R-5 + R-6 in `RUNTIME-INVARIANTS.md` tightened in place to record that answer-side trace persistence and surface-level requested-vs-effective signaling are enforced on every `/ask` reply. No new I- or R- numbers.
+- New runtime dependencies: none.
+- New: `tests/test_dispatcher_retrieval_fallback.py` gains six new cases (one per new contour plus the dedicated LLM-marker `NO_EVIDENCE` distinctness case and a heuristic-marker case); other test files extended in place.
+- Changed: `src/diary_rag/core/diary/models.py` (`FallbackMode` + `AnswerTrace` docstring); `src/diary_rag/core/diary/answer_schema.py` (`UncertaintyMarker` extension + docstring); `src/diary_rag/core/answers/client.py` (`ChatProviderUnavailableError`); `src/diary_rag/core/answers/__init__.py` (re-export); `src/diary_rag/services/query_service.py` (grading flow + `_finalize` + `_persist_answer_trace` + module-level marker map); `src/diary_rag/services/dispatcher.py` (`_format_answer_reply` switch + four new module-level reply constants); `src/diary_rag/storage/postgres/schema.sql` and `src/diary_rag/storage/sqlite/store.py` (widened CHECK on `fallback` / `fallback_mode`); `tests/test_query_service.py`, `tests/test_storage_answer_traces.py`, `tests/test_answer_schema.py`, `tests/test_end_to_end_smoke.py`, `tests/test_dispatcher_retrieval_fallback.py` (new cases).
+- `MockChatClient` unchanged — honest-provenance discipline preserved.
+- No schema migration tool (A-34 unchanged); A-34 destructive-upgrade discipline applies to the widened CHECK constraints.
+- `assumptions.md` not touched. Internal contract decisions (the four new `FallbackMode` members, the marker mapping, the trace shape per contour, the `confidence_band` deferral) belong in this decision-log entry, not in open assumptions.
+- Out of scope (unchanged or deferred): real OpenAI / Anthropic chat adapter (Phase 6); Telegram answer-text rendering / citation rendering / reply rewrite (Slice 4.4); retry / repair / recovery loops; `confidence_band` column; metadata filtering / Slice 3.4; retrieval-quality changes; BM25 / reranker / Qdrant / halfvec / HNSW; schema migration tooling; the `RouteKind.ENTRY → NOTE` / `DiaryEntry` / `family_id` / `diary_rag` package renames (D-026).

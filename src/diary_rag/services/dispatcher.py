@@ -84,19 +84,63 @@ def _format_draft_reply(result: IngestResult) -> str:
 
 
 _RETRIEVAL_TRAILER = "(hybrid retrieval — dense+sparse RRF)"
+_TRAILER_WEAK_EVIDENCE = "(weak evidence — model expressed uncertainty)"
+_TRAILER_AMBIGUOUS = "(ambiguous question — refine and ask again)"
+_REPLY_PROVIDER_UNAVAILABLE = (
+    "Couldn't generate an answer — chat provider is unavailable. Try again later."
+)
+_REPLY_PARSE_FAILURE = "Couldn't generate an answer — provider response was unparseable. Try again."
 
 
-def _format_answer_reply(result: AnswerResult) -> str:
-    if result.fallback is FallbackMode.NO_EVIDENCE:
-        if not result.query_text:
-            return "No query text provided."
-        return f"No memories matched '{result.query_text}'."
+def _format_evidence_lines(result: AnswerResult) -> list[str]:
     count = len(result.evidence)
     plural = "memory" if count == 1 else "memories"
     lines = [f"Found {count} {plural}:"]
     lines.extend(f"- [{e.entry_date.isoformat()}] {e.chunk_text}" for e in result.evidence)
-    lines.append(_RETRIEVAL_TRAILER)
-    return "\n".join(lines)
+    return lines
+
+
+def _format_answer_reply(result: AnswerResult) -> str:
+    """Render the answer reply per :class:`FallbackMode` (D-035).
+
+    ``NO_EVIDENCE`` has two distinct effective paths — empty retrieval
+    and LLM-marker — that must produce different surface text per R-6.
+    The Dispatcher disambiguates on ``bool(result.evidence)``.
+    """
+    fallback = result.fallback
+
+    if fallback is FallbackMode.NONE:
+        lines = _format_evidence_lines(result)
+        lines.append(_RETRIEVAL_TRAILER)
+        return "\n".join(lines)
+
+    if fallback is FallbackMode.WEAK_EVIDENCE:
+        lines = _format_evidence_lines(result)
+        lines.append(_TRAILER_WEAK_EVIDENCE)
+        return "\n".join(lines)
+
+    if fallback is FallbackMode.AMBIGUOUS:
+        lines = _format_evidence_lines(result)
+        lines.append(_TRAILER_AMBIGUOUS)
+        return "\n".join(lines)
+
+    if fallback is FallbackMode.PROVIDER_UNAVAILABLE:
+        return _REPLY_PROVIDER_UNAVAILABLE
+
+    if fallback is FallbackMode.PARSE_FAILURE:
+        return _REPLY_PARSE_FAILURE
+
+    if fallback is FallbackMode.NO_EVIDENCE:
+        if not result.query_text:
+            return "No query text provided."
+        if result.evidence:
+            return (
+                f"Found possible matches but couldn't ground an answer for "
+                f"'{result.query_text}'. Try refining the question."
+            )
+        return f"No memories matched '{result.query_text}'."
+
+    return _REPLY_UNKNOWN
 
 
 def _append_marker(reply: str, marker: str) -> str:

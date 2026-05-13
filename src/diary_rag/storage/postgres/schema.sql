@@ -31,14 +31,19 @@
 -- Slice 3.5: retrieval-trace persistence adds the ``queries`` and
 -- ``retrieval_hits`` tables; ``QueryService.answer`` writes one query row
 -- per ``/ask`` plus per-leg + merged hit rows so an operator can inspect
--- what each leg saw and what survived RRF via plain SQL. AnswerTrace
--- persistence (Phase 4) lands on its own packet.
+-- what each leg saw and what survived RRF via plain SQL.
+--
+-- Slice 4.3a (D-034): answer-side trace persistence adds the
+-- ``answer_traces`` table; ``QueryService.answer`` writes one trace row
+-- per /ask reply on the success and no-evidence/empty-query contours.
+-- Weak-evidence / ambiguous / provider-unavailable grading is deferred
+-- to Slice 4.3.
 --
 -- Bootstrapped by PostgresDiaryStore at __init__; safe to re-run on a fresh
 -- database. Note: there is no migration tool yet
--- (D-022/D-023/D-024/D-025/Slice-3.5), so existing local volumes that
--- pre-date these tables must be reset (drop the named volume) before this
--- DDL applies cleanly. See RUNBOOK.md.
+-- (D-022/D-023/D-024/D-025/Slice-3.5/D-034), so existing local volumes
+-- that pre-date these tables must be reset (drop the named volume)
+-- before this DDL applies cleanly. See RUNBOOK.md.
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -120,8 +125,11 @@ CREATE INDEX IF NOT EXISTS idx_embedding_records_family_id
 -- One queries row per /ask call; zero-or-more retrieval_hits rows per
 -- call carrying leg in {dense, sparse, merged}, 1-based rank, and the
 -- RRF-contribution score (1/(K+rank) on per-leg rows; fused score on
--- merged rows). Answer-side AnswerTrace persistence is deferred to
--- Phase 4 and adds its own table later.
+-- merged rows). Slice 4.3a (D-034) added answer_traces below.
+-- Slice 4.3b (D-035) widened queries.fallback to carry the answer-side
+-- modes graded in QueryService.answer (weak_evidence / ambiguous /
+-- provider_unavailable / parse_failure) so Query.fallback and the
+-- paired AnswerTrace.fallback_mode are aligned by construction.
 
 CREATE TABLE IF NOT EXISTS queries (
     query_id     TEXT PRIMARY KEY,
@@ -129,7 +137,10 @@ CREATE TABLE IF NOT EXISTS queries (
     query_text   TEXT NOT NULL,
     model_name   TEXT NOT NULL,
     fallback     TEXT NOT NULL
-        CHECK (fallback IN ('none','no_evidence','invalid_input')),
+        CHECK (fallback IN (
+            'none','no_evidence','invalid_input',
+            'weak_evidence','ambiguous','provider_unavailable','parse_failure'
+        )),
     created_at   TIMESTAMPTZ NOT NULL
 );
 
@@ -148,3 +159,30 @@ CREATE TABLE IF NOT EXISTS retrieval_hits (
 );
 
 CREATE INDEX IF NOT EXISTS idx_retrieval_hits_query_id ON retrieval_hits(query_id);
+
+-- Slice 4.3a (D-034): answer-side trace persistence. One row per /ask
+-- reply. UNIQUE on query_id pins the one-trace-per-query shape.
+-- fallback_mode mirrors FallbackMode and uses the same CHECK set as
+-- queries.fallback. token_counts is provider-attributed and free-form
+-- (JSONB so future backends can store richer shapes without a schema
+-- change). Slice 4.3b (D-035) widened the CHECK set to include the
+-- four new answer-side modes.
+
+CREATE TABLE IF NOT EXISTS answer_traces (
+    answer_trace_id   TEXT PRIMARY KEY,
+    query_id          TEXT NOT NULL UNIQUE REFERENCES queries(query_id),
+    prompt_version    TEXT NOT NULL,
+    context_chunk_ids TEXT[] NOT NULL,
+    answer_text       TEXT NOT NULL,
+    fallback_mode     TEXT NOT NULL
+        CHECK (fallback_mode IN (
+            'none','no_evidence','invalid_input',
+            'weak_evidence','ambiguous','provider_unavailable','parse_failure'
+        )),
+    model_name        TEXT NOT NULL,
+    token_counts      JSONB NOT NULL,
+    latency_ms        INTEGER NOT NULL CHECK (latency_ms >= 0),
+    created_at        TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_answer_traces_query_id ON answer_traces(query_id);

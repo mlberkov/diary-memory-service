@@ -30,6 +30,7 @@ import re
 from dataclasses import replace
 
 from diary_rag.core.diary.models import (
+    AnswerTrace,
     DiaryEntry,
     EventChunk,
     Query,
@@ -58,6 +59,7 @@ class MockDiaryStore:
         self._embeddings: dict[tuple[str, str], EmbeddingRecord] = {}
         self._queries: dict[str, Query] = {}
         self._retrieval_hits: dict[str, RetrievalHit] = {}
+        self._answer_traces: dict[str, AnswerTrace] = {}
 
     def save_source_message(self, source: SourceMessage) -> None:
         key = (source.external_chat_id, source.external_message_id, source.edit_seq)
@@ -232,6 +234,14 @@ class MockDiaryStore:
         rows.sort(key=lambda h: (h.leg.value, h.rank))
         return rows
 
+    def save_answer_trace(self, trace: AnswerTrace) -> None:
+        if trace.query_id in self._answer_traces:
+            raise ValueError(f"duplicate answer_trace for query_id={trace.query_id}")
+        self._answer_traces[trace.query_id] = trace
+
+    def get_answer_trace_for_query(self, query_id: str) -> AnswerTrace | None:
+        return self._answer_traces.get(query_id)
+
     def len_sources(self) -> int:
         return len(self._sources)
 
@@ -250,6 +260,9 @@ class MockDiaryStore:
     def len_retrieval_hits(self) -> int:
         return len(self._retrieval_hits)
 
+    def len_answer_traces(self) -> int:
+        return len(self._answer_traces)
+
     def clear(self) -> None:
         self._sources.clear()
         self._idempotency.clear()
@@ -258,6 +271,7 @@ class MockDiaryStore:
         self._embeddings.clear()
         self._queries.clear()
         self._retrieval_hits.clear()
+        self._answer_traces.clear()
 
 
 def _cosine_distance(a: list[float], b: list[float]) -> float:

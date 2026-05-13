@@ -20,6 +20,7 @@ from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 
+from diary_rag.adapters.answers import build_chat_client
 from diary_rag.adapters.embeddings import build_embedding_client
 from diary_rag.adapters.telegram.client import HttpxTelegramClient, TelegramClient
 from diary_rag.adapters.telegram.commands import parse_command
@@ -59,12 +60,14 @@ def get_dispatcher() -> Dispatcher:
         settings = get_settings()
         store = _build_store(settings)
         embedding_client = build_embedding_client(settings)
+        chat_client = build_chat_client(settings)
         _dispatcher = Dispatcher(
             DiaryService(store, embedding_client=embedding_client),
             QueryService(
                 store,
                 store,
                 embedding_client,
+                chat_client,
                 top_k=settings.retrieval_top_k,
                 candidate_k=settings.retrieval_candidate_k,
             ),
@@ -73,11 +76,14 @@ def get_dispatcher() -> Dispatcher:
         )
         log.info(
             "dispatcher.built storage_backend=%s embedding_backend=%s "
-            "embedding_model=%s embedding_dim=%d top_k=%d candidate_k=%d",
+            "embedding_model=%s embedding_dim=%d chat_backend=%s "
+            "chat_model=%s top_k=%d candidate_k=%d",
             settings.storage_backend,
             settings.embedding_backend,
             embedding_client.model_name,
             embedding_client.dimension,
+            settings.chat_backend,
+            chat_client.model_name,
             settings.retrieval_top_k,
             settings.retrieval_candidate_k,
         )

@@ -118,7 +118,34 @@ SELECT q.query_id, q.created_at, q.query_text
 
 The `score` column carries the RRF contribution per leg (`1.0 / (RRF_K + rank)` with `RRF_K = 60`) on dense/sparse rows and the fused RRF score on merged rows; backend-native scores (cosine distance, `ts_rank_cd`) are intentionally not surfaced (D-025 / D-032). `model_name` carries the embedding model on dense and merged rows and the FTS dictionary string `"simple"` on sparse rows.
 
-A-34 destructive-upgrade discipline applies: existing local Postgres volumes that pre-date the `queries` and `retrieval_hits` tables must be reset via `docker compose down -v` before the bootstrap DDL applies cleanly. Answer-side `AnswerTrace` persistence remains deferred to Phase 4.
+A-34 destructive-upgrade discipline applies: existing local Postgres volumes that pre-date the `queries` and `retrieval_hits` tables must be reset via `docker compose down -v` before the bootstrap DDL applies cleanly.
+
+### Answer traces (D-034, D-035)
+Every `/ask` reply writes one row to `answer_traces` (FK to `queries.query_id`, UNIQUE on `query_id`) so an operator can inspect the LLM-side outcome and provenance per reply. `Query.fallback` and `AnswerTrace.fallback_mode` are always equal — the service writes them as one decision per call (D-035).
+
+`fallback_mode` values and what each one means:
+
+- `none` — success. `answer_text` is the LLM-produced reply; `context_chunk_ids` mirrors the chunks sent; `latency_ms` / `token_counts` come from the provider.
+- `no_evidence` — two sub-paths share this value:
+  - **Empty retrieval** (also empty query): `context_chunk_ids` is empty, `answer_text` is `""`, `latency_ms=0`, `token_counts={}` — no LLM call ran.
+  - **LLM marker**: retrieval returned chunks but the model emitted `uncertainty="no_evidence"`. The trace keeps the retrieved `context_chunk_ids` for forensics and `answer_text` is the LLM's response. The dispatcher reply distinguishes the two paths.
+- `weak_evidence` — LLM emitted `uncertainty="uncertain"`. Trace has the LLM output and the retrieved context.
+- `ambiguous` — LLM emitted `uncertainty="ambiguous"`. Trace has the LLM output and the retrieved context.
+- `provider_unavailable` — the chat client raised `ChatProviderUnavailableError`. `answer_text=""`, `token_counts={}`, `latency_ms=0`; `context_chunk_ids` is what *would* have been sent.
+- `parse_failure` — the chat returned text that `parse_structured_answer` rejected. `answer_text` is `response.raw_text` (truthful provenance for forensics); `token_counts` and `latency_ms` come from the response.
+
+Most recent answer traces joined to their query:
+
+```sql
+SELECT q.created_at, q.query_text, a.fallback_mode, a.model_name,
+       a.latency_ms, a.prompt_version, a.context_chunk_ids, a.answer_text
+  FROM queries q JOIN answer_traces a ON a.query_id = q.query_id
+ WHERE q.family_id = '<chat_id>'
+ ORDER BY q.created_at DESC
+ LIMIT 20;
+```
+
+A-34 destructive-upgrade discipline applies: existing local Postgres volumes that pre-date the Slice 4.3b CHECK widening on `queries.fallback` and `answer_traces.fallback_mode` must be reset via `docker compose down -v` before the bootstrap DDL applies cleanly. Real provider adapters remain deferred to Phase 6.
 
 ### Hybrid retrieval (D-025)
 `/ask` runs the baseline hybrid path: a single query-embedding call followed by dense + sparse legs against `SearchRepository`, fused with service-layer RRF. Every retrieval call logs `retrieval.hybrid family_id=… model=… dense_n=… sparse_n=… merged_n=…` so an operator can confirm both legs ran. The dispatcher reply trailer for a successful answer is `(hybrid retrieval — dense+sparse RRF)`; an empty merged set returns `FallbackMode.NO_EVIDENCE` with the plain "No memories matched 'X'." reply.

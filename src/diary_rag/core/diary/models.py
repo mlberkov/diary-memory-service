@@ -23,11 +23,33 @@ class FallbackMode(StrEnum):
     ``NONE`` means the requested path produced a real result. Anything
     else is an explicit fallback that the reply layer must surface
     (Runtime invariant R-6).
+
+    Ingest-side: ``INVALID_INPUT`` for a non-ISO first line.
+
+    Answer-side (Slice 4.3b, D-035):
+
+    - ``NO_EVIDENCE`` — retrieval returned no chunks (empty query or
+      empty retrieval), or retrieval returned chunks but the LLM emitted
+      ``uncertainty="no_evidence"`` declaring them not-evidence.
+    - ``WEAK_EVIDENCE`` — LLM emitted ``uncertainty="uncertain"`` over a
+      non-empty context.
+    - ``AMBIGUOUS`` — LLM emitted ``uncertainty="ambiguous"`` indicating
+      the question itself was unclear.
+    - ``PROVIDER_UNAVAILABLE`` — chat client raised
+      :class:`~diary_rag.core.answers.ChatProviderUnavailableError`;
+      no LLM output was produced.
+    - ``PARSE_FAILURE`` — chat client returned text that
+      :func:`~diary_rag.core.diary.answer_schema.parse_structured_answer`
+      rejected with a :class:`StructuredAnswerError`.
     """
 
     NONE = "none"
     NO_EVIDENCE = "no_evidence"
     INVALID_INPUT = "invalid_input"
+    WEAK_EVIDENCE = "weak_evidence"
+    AMBIGUOUS = "ambiguous"
+    PROVIDER_UNAVAILABLE = "provider_unavailable"
+    PARSE_FAILURE = "parse_failure"
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,12 +166,19 @@ class AnswerResult:
     a further refactor. It is ``None`` only when no retrieval call ran
     at all — the dispatcher uses that branch for backends that raise
     ``NotImplementedError`` from the search seam.
+
+    ``answer_text`` carries the LLM-produced answer on the success path
+    (Slice 4.3a, D-034). It is ``None`` on no-evidence / empty-query
+    contours where no chat call ran, and on the no-retrieval-call branch.
+    The Telegram reply layer still renders the evidence-bullets shape in
+    this packet; Slice 4.4 will switch it to consume ``answer_text``.
     """
 
     fallback: FallbackMode
     query_text: str
     evidence: list[Evidence] = field(default_factory=list)
     context: AnswerContext | None = None
+    answer_text: str | None = None
 
     @property
     def context_chunk_ids(self) -> list[str]:
@@ -180,6 +209,51 @@ class Query:
     query_text: str
     model_name: str
     fallback: FallbackMode
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class AnswerTrace:
+    """Answer-side provenance for one ``/ask`` call (R-5; D-034, D-035).
+
+    Every reply writes one row recording ``prompt_version``,
+    ``context_chunk_ids``, ``answer_text``, ``model_name``,
+    ``token_counts``, ``latency_ms``, and ``fallback_mode``. The shape
+    per contour (Slice 4.3b, D-035):
+
+    - ``NONE`` (success): ``answer_text`` is the LLM-produced string;
+      ``context_chunk_ids`` mirrors ``AnswerContext.ordered_chunks``;
+      ``latency_ms`` / ``token_counts`` come from
+      :class:`~diary_rag.core.answers.ChatResponse`.
+    - ``NO_EVIDENCE`` (empty query or empty retrieval): ``answer_text``
+      is ``""``; ``context_chunk_ids`` is empty; no chat call ran so
+      ``latency_ms`` is ``0`` and ``token_counts`` is ``{}``.
+    - ``NO_EVIDENCE`` (LLM marker — retrieval returned chunks but the
+      model declared them not-evidence): ``answer_text`` is the LLM
+      output; ``context_chunk_ids`` mirrors ``AnswerContext.ordered_chunks``;
+      ``latency_ms`` / ``token_counts`` come from the response.
+    - ``WEAK_EVIDENCE`` / ``AMBIGUOUS``: same shape as the success path —
+      the LLM produced output over a non-empty context, the marker just
+      grades how usable it is.
+    - ``PROVIDER_UNAVAILABLE``: ``answer_text`` is ``""``;
+      ``context_chunk_ids`` mirrors the context that *would* have been
+      sent; no usable response, so ``latency_ms`` is ``0`` and
+      ``token_counts`` is ``{}``.
+    - ``PARSE_FAILURE``: ``answer_text`` is ``response.raw_text`` (the
+      provider did produce output — preserving it is the truthful
+      provenance); ``context_chunk_ids`` mirrors the context;
+      ``latency_ms`` / ``token_counts`` come from the response.
+    """
+
+    answer_trace_id: str
+    query_id: str
+    prompt_version: str
+    context_chunk_ids: tuple[str, ...]
+    answer_text: str
+    fallback_mode: FallbackMode
+    model_name: str
+    token_counts: dict[str, int]
+    latency_ms: int
     created_at: datetime
 
 

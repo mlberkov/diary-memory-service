@@ -180,3 +180,46 @@ def test_parse_accepts_uncertain_marker_with_subset_citations() -> None:
 
     assert parsed.cited_chunk_ids == ("c-0",)
     assert parsed.uncertainty == "uncertain"
+
+
+def test_parse_accepts_ambiguous_marker_with_subset_citations() -> None:
+    """Slice 4.3b: ``"ambiguous"`` joins the marker set and requires citations."""
+    context = _context(_chunk("c-0"), _chunk("c-1"))
+    raw = _payload(cited_chunk_ids=["c-0"], uncertainty="ambiguous")
+
+    parsed = parse_structured_answer(raw, context=context)
+
+    assert parsed.cited_chunk_ids == ("c-0",)
+    assert parsed.uncertainty == "ambiguous"
+
+
+def test_empty_citations_rejected_when_marker_is_uncertain() -> None:
+    context = _context(_chunk("c-0"))
+    raw = _payload(cited_chunk_ids=[], uncertainty="uncertain")
+
+    with pytest.raises(AnswerSchemaMismatchError):
+        parse_structured_answer(raw, context=context)
+
+
+def test_empty_citations_rejected_when_marker_is_ambiguous() -> None:
+    context = _context(_chunk("c-0"))
+    raw = _payload(cited_chunk_ids=[], uncertainty="ambiguous")
+
+    with pytest.raises(AnswerSchemaMismatchError):
+        parse_structured_answer(raw, context=context)
+
+
+@pytest.mark.parametrize(
+    "marker",
+    ["confident", "uncertain", "no_evidence", "ambiguous"],
+)
+def test_parse_round_trips_each_uncertainty_marker(marker: str) -> None:
+    """All four members of the extended ``UncertaintyMarker`` parse cleanly."""
+    context = _context(_chunk("c-0"))
+    citations: list[str] = [] if marker == "no_evidence" else ["c-0"]
+    raw = _payload(cited_chunk_ids=citations, uncertainty=marker)
+
+    parsed = parse_structured_answer(raw, context=context)
+
+    assert parsed.uncertainty == marker
+    assert parsed.cited_chunk_ids == tuple(citations)

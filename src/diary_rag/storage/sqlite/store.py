@@ -28,11 +28,13 @@ SQLite still gets a clean reply from ``/ask``.
 from __future__ import annotations
 
 import array
+import json
 import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
 from diary_rag.core.diary.models import (
+    AnswerTrace,
     DiaryEntry,
     EventChunk,
     FallbackMode,
@@ -116,7 +118,10 @@ CREATE TABLE IF NOT EXISTS queries (
     query_text   TEXT NOT NULL,
     model_name   TEXT NOT NULL,
     fallback     TEXT NOT NULL
-        CHECK (fallback IN ('none','no_evidence','invalid_input')),
+        CHECK (fallback IN (
+            'none','no_evidence','invalid_input',
+            'weak_evidence','ambiguous','provider_unavailable','parse_failure'
+        )),
     created_at   TEXT NOT NULL
 );
 
@@ -135,6 +140,25 @@ CREATE TABLE IF NOT EXISTS retrieval_hits (
 );
 
 CREATE INDEX IF NOT EXISTS idx_retrieval_hits_query_id ON retrieval_hits(query_id);
+
+CREATE TABLE IF NOT EXISTS answer_traces (
+    answer_trace_id   TEXT PRIMARY KEY,
+    query_id          TEXT NOT NULL UNIQUE REFERENCES queries(query_id),
+    prompt_version    TEXT NOT NULL,
+    context_chunk_ids TEXT NOT NULL,
+    answer_text       TEXT NOT NULL,
+    fallback_mode     TEXT NOT NULL
+        CHECK (fallback_mode IN (
+            'none','no_evidence','invalid_input',
+            'weak_evidence','ambiguous','provider_unavailable','parse_failure'
+        )),
+    model_name        TEXT NOT NULL,
+    token_counts      TEXT NOT NULL,
+    latency_ms        INTEGER NOT NULL CHECK (latency_ms >= 0),
+    created_at        TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_answer_traces_query_id ON answer_traces(query_id);
 """
 
 
@@ -505,6 +529,54 @@ class SqliteDiaryStore:
             )
             for r in rows
         ]
+
+    def save_answer_trace(self, trace: AnswerTrace) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO answer_traces "
+                "(answer_trace_id, query_id, prompt_version, context_chunk_ids, "
+                " answer_text, fallback_mode, model_name, token_counts, "
+                " latency_ms, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    trace.answer_trace_id,
+                    trace.query_id,
+                    trace.prompt_version,
+                    json.dumps(list(trace.context_chunk_ids)),
+                    trace.answer_text,
+                    trace.fallback_mode.value,
+                    trace.model_name,
+                    json.dumps(trace.token_counts, sort_keys=True),
+                    trace.latency_ms,
+                    trace.created_at.isoformat(),
+                ),
+            )
+            conn.commit()
+
+    def get_answer_trace_for_query(self, query_id: str) -> AnswerTrace | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT answer_trace_id, query_id, prompt_version, context_chunk_ids, "
+                "       answer_text, fallback_mode, model_name, token_counts, "
+                "       latency_ms, created_at "
+                "  FROM answer_traces "
+                " WHERE query_id = ?",
+                (query_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return AnswerTrace(
+            answer_trace_id=row["answer_trace_id"],
+            query_id=row["query_id"],
+            prompt_version=row["prompt_version"],
+            context_chunk_ids=tuple(json.loads(row["context_chunk_ids"])),
+            answer_text=row["answer_text"],
+            fallback_mode=FallbackMode(row["fallback_mode"]),
+            model_name=row["model_name"],
+            token_counts=json.loads(row["token_counts"]),
+            latency_ms=int(row["latency_ms"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
 
 
 def _row_to_source(row: sqlite3.Row) -> SourceMessage:
