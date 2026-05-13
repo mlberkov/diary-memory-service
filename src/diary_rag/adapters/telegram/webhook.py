@@ -218,6 +218,37 @@ def register_telegram_webhook(app: FastAPI) -> None:
                 sent,
             )
             return {}
+        if result.source_blocks is not None:
+            messages = pack_drafts_into_messages(result.reply_text, result.source_blocks)
+            total = len(messages)
+            sent = 0
+            for body in messages:
+                try:
+                    telegram_client.send_message(chat_id=inbound.external_chat_id, text=body)
+                except Exception as exc:
+                    log.warning(
+                        "sources.delivery_failed chat_id=%s sent=%d total=%d error_class=%s",
+                        inbound.external_chat_id,
+                        sent,
+                        total,
+                        exc.__class__.__name__,
+                    )
+                    with contextlib.suppress(Exception):
+                        telegram_client.send_message(
+                            chat_id=inbound.external_chat_id,
+                            text=(
+                                f"Couldn't deliver all sources (sent {sent}/{total}). Try again."
+                            ),
+                        )
+                    return {}
+                sent += 1
+            log.info(
+                "sources.delivered chat_id=%s chunk_count=%d messages_sent=%d",
+                inbound.external_chat_id,
+                len(result.source_blocks),
+                sent,
+            )
+            return {}
         return build_send_message_payload(inbound.external_chat_id, result.reply_text)
 
 

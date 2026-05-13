@@ -119,7 +119,9 @@ def test_weak_evidence_appends_marker_trailer() -> None:
 
     assert result.metadata["fallback"] == FallbackMode.WEAK_EVIDENCE.value
     assert "(weak evidence — model expressed uncertainty)" in result.reply_text
-    assert "[2026-05-09] Walked the dog" in result.reply_text
+    # Slice 4.4 (D-036): body is answer_text, not evidence bullets.
+    assert "Maybe a book." in result.reply_text
+    assert "Walked the dog" not in result.reply_text
 
 
 def test_ambiguous_appends_marker_trailer() -> None:
@@ -136,7 +138,8 @@ def test_ambiguous_appends_marker_trailer() -> None:
 
     assert result.metadata["fallback"] == FallbackMode.AMBIGUOUS.value
     assert "(ambiguous question — refine and ask again)" in result.reply_text
-    assert "[2026-05-09] Walked the dog" in result.reply_text
+    assert "Could mean several things." in result.reply_text
+    assert "Walked the dog" not in result.reply_text
 
 
 def test_llm_marker_no_evidence_distinct_from_empty_retrieval() -> None:

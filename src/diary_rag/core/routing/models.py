@@ -27,6 +27,7 @@ class RouteKind(StrEnum):
     DRAFT = "draft"
     DRAFTS = "drafts"
     EXPORT = "export"
+    SOURCES = "sources"
     CLARIFY = "clarify"
     UNKNOWN = "unknown"
 
@@ -80,7 +81,11 @@ class DispatchResult:
     ``sendDocument``). ``drafts`` carries a list of source messages that
     the adapter should render as a combined ordered response (one
     transport message by default; multi-message split only when forced
-    by the transport size cap). When both are ``None`` the adapter
+    by the transport size cap). ``source_blocks`` carries pre-rendered
+    string blocks for ``/sources`` (D-036) — the chunks retrieval
+    selected for the chat's most recent ``/ask`` turn, rendered as-is.
+    The adapter packs them with the same combined-message semantics
+    used for ``drafts``. When all three are ``None`` the adapter
     delivers ``reply_text`` only.
     """
 
@@ -89,3 +94,4 @@ class DispatchResult:
     metadata: Mapping[str, str] = field(default_factory=dict)
     document: ExportPayload | None = None
     drafts: list[SourceMessage] | None = None
+    source_blocks: list[str] | None = None

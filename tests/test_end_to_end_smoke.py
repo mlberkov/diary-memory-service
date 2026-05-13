@@ -98,11 +98,14 @@ def test_entry_then_ask_returns_grounded_reply_with_date() -> None:
     body = ask_resp.json()
     assert body["method"] == "sendMessage"
     assert body["chat_id"] == 42
-    assert body["text"] == (
-        "Found 1 memory:\n"
-        "- [2026-05-09] Tried a new book\n"
-        "(hybrid retrieval — dense+sparse RRF)"
-    )
+    # Slice 4.4 (D-036): reply body is the LLM answer_text (mock-deterministic),
+    # followed by the unchanged retrieval trailer. Cited chunk text is not in
+    # the default reply; /sources exposes it on demand.
+    text = body["text"]
+    assert text.startswith("Mock answer grounded in 1 diary chunk(s):")
+    assert text.endswith("(hybrid retrieval — dense+sparse RRF)")
+    assert "Found 1 memory" not in text
+    assert "Tried a new book" not in text
     # Slice 3.5: successful /ask persists one Query row + retrieval hits.
     assert store.len_queries() == 1
     assert store.len_retrieval_hits() > 0
@@ -178,12 +181,13 @@ def test_question_plain_text_returns_grounded_reply_via_heuristic() -> None:
     resp = _post(client, _update("recipe?", update_id=2, message_id=2))
 
     assert resp.status_code == 200
-    assert resp.json()["text"] == (
-        "Found 1 memory:\n"
-        "- [2026-05-10] Learned a new recipe\n"
-        "(hybrid retrieval — dense+sparse RRF)\n"
-        "(routed as question — send /ask next time to be explicit)"
-    )
+    text = resp.json()["text"]
+    # Slice 4.4 (D-036): answer_text body + retrieval trailer + heuristic marker.
+    assert text.startswith("Mock answer grounded in 1 diary chunk(s):")
+    assert "(hybrid retrieval — dense+sparse RRF)" in text
+    assert text.endswith("(routed as question — send /ask next time to be explicit)")
+    assert "Found 1 memory" not in text
+    assert "Learned a new recipe" not in text
 
 
 def test_ambiguous_plain_text_persists_as_draft_under_no_command_default() -> None:
@@ -325,7 +329,9 @@ def test_weak_evidence_marker_surfaces_trailer_and_persists_trace(
     assert resp.status_code == 200
     text = resp.json()["text"]
     assert "(weak evidence — model expressed uncertainty)" in text
-    assert "[2026-05-09] Tried a new book" in text
+    # Slice 4.4 (D-036): body is the LLM answer_text, not the evidence line.
+    assert "Could be the book or the routine." in text
+    assert "Tried a new book" not in text
 
     # Persisted Query.fallback matches AnswerTrace.fallback_mode (D-035).
     persisted_query = next(iter(store._queries.values()))
@@ -339,3 +345,32 @@ def test_weak_evidence_marker_surfaces_trailer_and_persists_trace(
 
     # Log line carries the new fallback value.
     assert "fallback=weak_evidence" in caplog.text
+
+
+def test_sources_after_ask_returns_selected_chunks() -> None:
+    """Slice 4.4 (D-036): /sources after a successful /ask renders the selected chunks."""
+    client, _ = _client_with_fresh_store()
+
+    _post(
+        client,
+        _update("/note 2026-05-09\nHad a calm morning\nTried a new book", update_id=1),
+    )
+    _post(client, _update("/ask book", update_id=2, message_id=2))
+
+    resp = _post(client, _update("/sources", update_id=3, message_id=3))
+
+    assert resp.status_code == 200
+    body = resp.json()
+    # Outbound delivery happens via send_message; the webhook returns {}.
+    assert body == {}
+
+
+def test_sources_without_prior_ask_returns_fail_closed_reply() -> None:
+    """Slice 4.4 (D-036): /sources with no cached selected-chunks fails closed."""
+    client, _ = _client_with_fresh_store()
+
+    resp = _post(client, _update("/sources", update_id=1))
+
+    assert resp.status_code == 200
+    text = resp.json()["text"]
+    assert text == "No selected chunks available — ask a question with /ask first."
