@@ -16,10 +16,12 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from diary_rag.adapters.answers import MockChatClient
 from diary_rag.adapters.embeddings import MockEmbeddingClient
 from diary_rag.adapters.telegram.webhook import get_dispatcher
 from diary_rag.app import create_app
 from diary_rag.config import Settings
+from diary_rag.core.diary import FallbackMode
 from diary_rag.services import DiaryService, Dispatcher, ExportService, QueryService
 from diary_rag.storage.mock import MockDiaryStore
 
@@ -31,10 +33,11 @@ def _settings() -> Settings:
 def _client_with_fresh_store() -> tuple[TestClient, MockDiaryStore]:
     store = MockDiaryStore()
     embed = MockEmbeddingClient()
+    chat = MockChatClient()
     settings = _settings()
     dispatcher = Dispatcher(
         DiaryService(store, embedding_client=embed),
-        QueryService(store, store, embed),
+        QueryService(store, store, embed, chat),
         ExportService(store),
         settings,
     )
@@ -98,6 +101,13 @@ def test_entry_then_ask_returns_grounded_reply_with_date() -> None:
     # Slice 3.5: successful /ask persists one Query row + retrieval hits.
     assert store.len_queries() == 1
     assert store.len_retrieval_hits() > 0
+    # Slice 4.3a: successful /ask also persists one AnswerTrace.
+    assert store.len_answer_traces() == 1
+    persisted_query = next(iter(store._queries.values()))
+    trace = store.get_answer_trace_for_query(persisted_query.query_id)
+    assert trace is not None
+    assert trace.fallback_mode is FallbackMode.NONE
+    assert trace.answer_text  # mock chat produced a grounded answer
 
 
 def test_ask_with_no_match_returns_no_evidence_fallback() -> None:
@@ -111,6 +121,14 @@ def test_ask_with_no_match_returns_no_evidence_fallback() -> None:
     # Slice 3.5: NO_EVIDENCE still persists one Query row with zero hits.
     assert store.len_queries() == 1
     assert store.len_retrieval_hits() == 0
+    # Slice 4.3a: NO_EVIDENCE still persists one AnswerTrace, with no LLM call.
+    assert store.len_answer_traces() == 1
+    persisted_query = next(iter(store._queries.values()))
+    trace = store.get_answer_trace_for_query(persisted_query.query_id)
+    assert trace is not None
+    assert trace.fallback_mode is FallbackMode.NO_EVIDENCE
+    assert trace.context_chunk_ids == ()
+    assert trace.answer_text == ""
 
 
 def test_entry_with_invalid_first_line_returns_invalid_input_and_persists_source() -> None:

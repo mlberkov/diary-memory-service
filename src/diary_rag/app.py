@@ -5,9 +5,16 @@ Boot gates (R-10, D-024): on app creation we build the configured
 match ``Settings.embedding_model`` / ``Settings.embedding_dimension``;
 a mismatch raises before any traffic is served. When
 ``storage_backend == "postgres"`` we additionally probe ``pg_extension``
-to confirm pgvector is installed. The full set of R-10 probes (schema
-version, full provider reachability) lands with the migration packet —
-this slice only covers what Phase 3.1+3.2 actually depends on.
+to confirm pgvector is installed.
+
+Slice 4.3a (D-034): the chat-client contour is gated the same way —
+``build_chat_client(settings)`` must produce a client with a non-empty
+``model_name``. Real provider integration lands later; for now the only
+supported backend is ``mock``.
+
+The full set of R-10 probes (schema version, full provider reachability)
+lands with the migration packet — this slice only covers what the
+current phase actually depends on.
 """
 
 from __future__ import annotations
@@ -15,6 +22,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from diary_rag import __version__
+from diary_rag.adapters.answers import build_chat_client
 from diary_rag.adapters.embeddings import build_embedding_client
 from diary_rag.adapters.telegram import register_telegram_webhook
 from diary_rag.config import Settings, get_settings
@@ -60,6 +68,15 @@ def _verify_embedding_contour(settings: Settings) -> None:
         )
 
 
+def _verify_chat_contour(settings: Settings) -> None:
+    try:
+        client = build_chat_client(settings)
+    except ValueError as exc:
+        raise BootHealthError(f"chat client build failed: {exc}") from exc
+    if not client.model_name:
+        raise BootHealthError("chat client reported an empty model_name")
+
+
 def _verify_pgvector(settings: Settings) -> None:
     if settings.storage_backend != "postgres":
         return
@@ -88,6 +105,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     log = get_logger(__name__)
 
     _verify_embedding_contour(effective_settings)
+    _verify_chat_contour(effective_settings)
     _verify_pgvector(effective_settings)
 
     app = FastAPI(
@@ -110,11 +128,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.dependency_overrides[get_settings] = lambda: explicit_settings
 
     log.info(
-        "app.created env=%s version=%s embedding_backend=%s embedding_dim=%d",
+        "app.created env=%s version=%s embedding_backend=%s embedding_dim=%d " "chat_backend=%s",
         effective_settings.app_env,
         __version__,
         effective_settings.embedding_backend,
         effective_settings.embedding_dimension,
+        effective_settings.chat_backend,
     )
     return app
 

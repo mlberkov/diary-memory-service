@@ -23,6 +23,7 @@ from diary_rag.core.diary.answer_schema import (
 from diary_rag.core.diary.models import (
     AnswerContext,
     AnswerResult,
+    AnswerTrace,
     DiaryEntry,
     EventChunk,
     Evidence,
@@ -41,6 +42,7 @@ __all__ = [
     "AnswerPrompt",
     "AnswerResult",
     "AnswerSchemaMismatchError",
+    "AnswerTrace",
     "CrossFamilyContextError",
     "DiaryEntry",
     "Evidence",

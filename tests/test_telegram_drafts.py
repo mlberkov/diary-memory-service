@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from diary_rag.adapters.answers import MockChatClient
 from diary_rag.adapters.embeddings import MockEmbeddingClient
 from diary_rag.adapters.telegram.webhook import get_dispatcher, get_telegram_client
 from diary_rag.app import create_app
@@ -77,9 +78,10 @@ def _build_client(
 ) -> tuple[TestClient, MockDiaryStore, Any]:
     store = MockDiaryStore()
     embed = MockEmbeddingClient()
+    chat = MockChatClient()
     dispatcher = Dispatcher(
         DiaryService(store, embedding_client=embed),
-        QueryService(store, store, embed),
+        QueryService(store, store, embed, chat),
         ExportService(store),
         settings,
     )

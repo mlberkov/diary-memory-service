@@ -18,15 +18,30 @@ Slice 3.5: every call writes a ``Query`` row and zero-or-more
 what survived RRF via plain SQL. Successful retrieval writes per-leg
 rows for every candidate plus merged rows for every chunk in the
 returned evidence; ``NO_EVIDENCE`` (empty query or empty merged) still
-writes the ``Query`` row with zero hits. Answer-side ``AnswerTrace``
-persistence remains deferred to Phase 4.
+writes the ``Query`` row with zero hits.
 
 Slice 4.1: after RRF the service invokes
 :func:`diary_rag.services.context_assembler.assemble_answer_context` and
 attaches the resulting :class:`AnswerContext` to the returned
 ``AnswerResult`` so the upcoming Phase-4 answer-prompt and chat-client
 packets can consume the assembled context without another refactor.
-The Telegram reply layer keeps reading ``evidence`` unchanged.
+
+Slice 4.3a (D-034): the answer-side half of R-5 lands here. On the
+success contour the service builds the versioned answer prompt from the
+assembled context, invokes the configured ``ChatClient``, parses the
+structured response (I-9 citation grounding enforced at the contract
+boundary), and persists one ``AnswerTrace`` row carrying
+``prompt_version``, ``context_chunk_ids``, ``answer_text``,
+``model_name``, ``token_counts``, ``latency_ms``, and ``fallback_mode``.
+On the no-evidence and empty-query contours the trace is persisted with
+empty ``context_chunk_ids``, empty ``answer_text``, ``latency_ms=0``,
+empty ``token_counts``, and ``fallback_mode=NO_EVIDENCE`` (preserving
+the existing ``Query.fallback`` semantics from D-032 — not a remap); no
+chat call runs. Weak-evidence / ambiguous / provider-unavailable
+grading and parse-failure handling remain deferred to Slice 4.3.
+
+``ChatResponse.latency_ms`` is the single source of truth for chat-call
+latency; this service does not measure latency independently.
 """
 
 from __future__ import annotations
@@ -34,15 +49,19 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from diary_rag.core.answers import ChatClient
 from diary_rag.core.diary import (
     AnswerResult,
+    AnswerTrace,
     Evidence,
     FallbackMode,
     Query,
     RetrievalHit,
     RetrievalLeg,
 )
-from diary_rag.core.diary.models import EventChunk
+from diary_rag.core.diary.answer_prompt import PROMPT_VERSION, build_answer_prompt
+from diary_rag.core.diary.answer_schema import parse_structured_answer
+from diary_rag.core.diary.models import AnswerContext, EventChunk
 from diary_rag.core.embeddings import EmbeddingClient
 from diary_rag.core.routing import InboundMessage
 from diary_rag.logging import get_logger
@@ -78,6 +97,7 @@ class QueryService:
         repo: DiaryRepository,
         search_repo: SearchRepository,
         embedding_client: EmbeddingClient,
+        chat_client: ChatClient,
         *,
         top_k: int = DEFAULT_TOP_K,
         candidate_k: int = DEFAULT_CANDIDATE_K,
@@ -89,6 +109,7 @@ class QueryService:
         self._repo = repo
         self._search = search_repo
         self._embed = embedding_client
+        self._chat = chat_client
         self._top_k = top_k
         self._candidate_k = candidate_k
 
@@ -112,17 +133,21 @@ class QueryService:
                 created_at=now,
             )
             self._persist_trace(query=query, dense_hits=[], sparse_hits=[], merged=[])
+            context = assemble_answer_context(query, [])
+            answer_trace_id = self._persist_no_evidence_answer_trace(query=query, context=context)
             log.info(
                 "retrieval.hybrid query_id=%s family_id=%s model=%s "
-                "dense_n=0 sparse_n=0 merged_n=0 fallback=no_evidence",
+                "dense_n=0 sparse_n=0 merged_n=0 fallback=no_evidence "
+                "answer_trace_id=%s",
                 query_id,
                 family_id,
                 model_name,
+                answer_trace_id,
             )
             return AnswerResult(
                 fallback=FallbackMode.NO_EVIDENCE,
                 query_text=query_text,
-                context=assemble_answer_context(query, []),
+                context=context,
             )
 
         query_embedding = self._embed.embed([query_text])[0]
@@ -146,9 +171,50 @@ class QueryService:
             query=query, dense_hits=dense_hits, sparse_hits=sparse_hits, merged=merged
         )
 
+        context = assemble_answer_context(query, merged)
+        if not merged:
+            answer_trace_id = self._persist_no_evidence_answer_trace(query=query, context=context)
+            log.info(
+                "retrieval.hybrid query_id=%s family_id=%s model=%s "
+                "dense_n=%d sparse_n=%d merged_n=%d fallback=%s "
+                "answer_trace_id=%s",
+                query_id,
+                family_id,
+                model_name,
+                len(dense_hits),
+                len(sparse_hits),
+                len(merged),
+                fallback.value,
+                answer_trace_id,
+            )
+            return AnswerResult(
+                fallback=FallbackMode.NO_EVIDENCE,
+                query_text=query_text,
+                context=context,
+            )
+
+        prompt = build_answer_prompt(context)
+        response = self._chat.complete(prompt)
+        structured = parse_structured_answer(response.raw_text, context=context)
+
+        trace = AnswerTrace(
+            answer_trace_id=str(uuid4()),
+            query_id=query_id,
+            prompt_version=prompt.prompt_version,
+            context_chunk_ids=tuple(c.chunk_id for c in context.ordered_chunks),
+            answer_text=structured.answer_text,
+            fallback_mode=FallbackMode.NONE,
+            model_name=response.model_name,
+            token_counts=dict(response.token_counts),
+            latency_ms=response.latency_ms,
+            created_at=datetime.now(tz=UTC),
+        )
+        self._repo.save_answer_trace(trace)
+
         log.info(
             "retrieval.hybrid query_id=%s family_id=%s model=%s "
-            "dense_n=%d sparse_n=%d merged_n=%d fallback=%s",
+            "dense_n=%d sparse_n=%d merged_n=%d fallback=%s "
+            "answer_trace_id=%s",
             query_id,
             family_id,
             model_name,
@@ -156,15 +222,8 @@ class QueryService:
             len(sparse_hits),
             len(merged),
             fallback.value,
+            trace.answer_trace_id,
         )
-
-        context = assemble_answer_context(query, merged)
-        if not merged:
-            return AnswerResult(
-                fallback=FallbackMode.NO_EVIDENCE,
-                query_text=query_text,
-                context=context,
-            )
 
         evidence = [
             Evidence(
@@ -179,7 +238,32 @@ class QueryService:
             query_text=query_text,
             evidence=evidence,
             context=context,
+            answer_text=structured.answer_text,
         )
+
+    def _persist_no_evidence_answer_trace(self, *, query: Query, context: AnswerContext) -> str:
+        """Persist the answer-side trace for a no-evidence reply.
+
+        Mirrors the existing ``Query.fallback=NO_EVIDENCE`` semantics
+        (D-032 schema permits the value on the empty-query path);
+        ``context_chunk_ids`` is empty, no chat call ran. ``prompt_version``
+        records the contract version in effect at the time of the call —
+        R-5 requires it even on fallback modes.
+        """
+        trace = AnswerTrace(
+            answer_trace_id=str(uuid4()),
+            query_id=query.query_id,
+            prompt_version=PROMPT_VERSION,
+            context_chunk_ids=tuple(c.chunk_id for c in context.ordered_chunks),
+            answer_text="",
+            fallback_mode=FallbackMode.NO_EVIDENCE,
+            model_name=self._chat.model_name,
+            token_counts={},
+            latency_ms=0,
+            created_at=datetime.now(tz=UTC),
+        )
+        self._repo.save_answer_trace(trace)
+        return trace.answer_trace_id
 
     def _persist_trace(
         self,

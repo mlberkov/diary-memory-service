@@ -144,12 +144,19 @@ class AnswerResult:
     a further refactor. It is ``None`` only when no retrieval call ran
     at all — the dispatcher uses that branch for backends that raise
     ``NotImplementedError`` from the search seam.
+
+    ``answer_text`` carries the LLM-produced answer on the success path
+    (Slice 4.3a, D-034). It is ``None`` on no-evidence / empty-query
+    contours where no chat call ran, and on the no-retrieval-call branch.
+    The Telegram reply layer still renders the evidence-bullets shape in
+    this packet; Slice 4.4 will switch it to consume ``answer_text``.
     """
 
     fallback: FallbackMode
     query_text: str
     evidence: list[Evidence] = field(default_factory=list)
     context: AnswerContext | None = None
+    answer_text: str | None = None
 
     @property
     def context_chunk_ids(self) -> list[str]:
@@ -180,6 +187,44 @@ class Query:
     query_text: str
     model_name: str
     fallback: FallbackMode
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class AnswerTrace:
+    """Answer-side provenance for one ``/ask`` call (Slice 4.3a, D-034).
+
+    Persisted on the success and no-evidence/empty-query contours so the
+    answer-side half of R-5 is enforced in code: every reply has a row
+    that records ``prompt_version``, ``context_chunk_ids``,
+    ``answer_text``, ``model_name``, ``token_counts``, ``latency_ms``,
+    and ``fallback_mode``.
+
+    On the success contour ``fallback_mode`` is ``NONE``, ``answer_text``
+    is the LLM-produced string, ``context_chunk_ids`` mirrors the chunks
+    in ``AnswerContext.ordered_chunks``, and ``latency_ms`` /
+    ``token_counts`` come straight from the
+    :class:`~diary_rag.core.answers.ChatResponse`.
+
+    On the no-evidence and empty-query contours ``fallback_mode`` is
+    ``NO_EVIDENCE`` (preserving the existing ``Query.fallback`` semantics
+    from D-032 — this is not a remap), ``answer_text`` is empty,
+    ``context_chunk_ids`` is empty, and no chat call ran (so
+    ``latency_ms`` is ``0`` and ``token_counts`` is empty).
+
+    Weak-evidence / ambiguous / provider-unavailable grading and the
+    corresponding marker semantics remain deferred to Slice 4.3.
+    """
+
+    answer_trace_id: str
+    query_id: str
+    prompt_version: str
+    context_chunk_ids: tuple[str, ...]
+    answer_text: str
+    fallback_mode: FallbackMode
+    model_name: str
+    token_counts: dict[str, int]
+    latency_ms: int
     created_at: datetime
 
 

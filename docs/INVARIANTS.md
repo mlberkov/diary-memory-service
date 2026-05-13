@@ -33,7 +33,9 @@ Every answer references the chunks used as evidence (`AnswerTrace.context_chunk_
 
 Retrieval-side trace persistence is enforced as of Slice 3.5 (D-032): every `/ask` call writes a `Query` row plus zero-or-more `RetrievalHit` rows carrying `leg ∈ {dense, sparse, merged}` so the chunks each leg saw and the chunks that survived RRF are inspectable via plain SQL. Answer-side `AnswerTrace` persistence remains deferred to Phase 4.
 
-Citation grounding is enforced in code as of Slice 4.2 (D-033): `parse_structured_answer` (in `src/diary_rag/core/diary/answer_schema.py`) requires `StructuredAnswer.cited_chunk_ids` to be a subset of the `chunk_id`s in the `AnswerContext` that built the prompt; fabricated citations raise `FabricatedCitationError`. Empty `cited_chunk_ids` is permitted only when `uncertainty == "no_evidence"`. Live LLM invocation and `AnswerTrace` persistence remain deferred.
+Citation grounding is enforced in code as of Slice 4.2 (D-033): `parse_structured_answer` (in `src/diary_rag/core/diary/answer_schema.py`) requires `StructuredAnswer.cited_chunk_ids` to be a subset of the `chunk_id`s in the `AnswerContext` that built the prompt; fabricated citations raise `FabricatedCitationError`. Empty `cited_chunk_ids` is permitted only when `uncertainty == "no_evidence"`.
+
+Answer-side trace persistence is enforced on the success and no-evidence/empty-query contours as of Slice 4.3a (D-034): every `/ask` call that produces a reply also writes an `AnswerTrace` row recording `prompt_version`, `context_chunk_ids`, `answer_text`, `model_name`, `token_counts`, `latency_ms`, and `fallback_mode`. Live provider integration and weak-evidence / ambiguous / provider-unavailable grading remain deferred to Slice 4.3.
 
 ## I-10. Optional AI is optional
 Query rewriting, semantic expansion, reranking, and answer-style modes are feature-flagged. The base ingestion → retrieval → answer flow must work end-to-end with all enhancements disabled.

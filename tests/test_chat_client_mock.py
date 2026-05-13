@@ -1,0 +1,98 @@
+"""Unit tests for :class:`MockChatClient` (Slice 4.3a, D-034).
+
+The mock is the test/dev default; it must be deterministic, must keep
+its provider identity honest (``model_name == "mock"`` and
+``latency_ms == 0``), and must emit a ``raw_text`` that round-trips
+through :func:`parse_structured_answer` so ``QueryService`` can run the
+contract end-to-end against it.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, date, datetime
+
+from diary_rag.adapters.answers import MockChatClient
+from diary_rag.core.diary import build_answer_prompt, parse_structured_answer
+from diary_rag.core.diary.models import AnswerContext, EventChunk
+from diary_rag.core.embeddings import EmbeddingStatus
+
+
+def _make_chunk(chunk_id: str, text: str) -> EventChunk:
+    return EventChunk(
+        chunk_id=chunk_id,
+        diary_entry_id="entry-1",
+        source_message_id="src-1",
+        family_id="fam-1",
+        author_user_id="user-1",
+        entry_date=date(2026, 5, 13),
+        event_index=0,
+        chunk_text=text,
+        created_at=datetime(2026, 5, 13, tzinfo=UTC),
+        embedding_status=EmbeddingStatus.READY,
+    )
+
+
+def _make_context(*chunks: EventChunk) -> AnswerContext:
+    return AnswerContext(
+        query_id="qry-1",
+        query_text="what happened?",
+        ordered_chunks=tuple(chunks),
+        model_name="mock",
+        created_at=datetime(2026, 5, 13, tzinfo=UTC),
+    )
+
+
+def test_mock_client_reports_mock_model_name() -> None:
+    client = MockChatClient()
+    assert client.model_name == "mock"
+
+
+def test_mock_client_is_deterministic_for_same_prompt() -> None:
+    client = MockChatClient()
+    context = _make_context(_make_chunk("c1", "walked the dog"))
+    prompt = build_answer_prompt(context)
+    a = client.complete(prompt)
+    b = client.complete(prompt)
+    assert a == b
+
+
+def test_mock_client_round_trips_through_structured_parser() -> None:
+    client = MockChatClient()
+    context = _make_context(_make_chunk("c1", "walked the dog"))
+    prompt = build_answer_prompt(context)
+    response = client.complete(prompt)
+    structured = parse_structured_answer(response.raw_text, context=context)
+    assert structured.uncertainty == "confident"
+    assert structured.cited_chunk_ids == ("c1",)
+
+
+def test_mock_client_preserves_cited_chunk_ids() -> None:
+    client = MockChatClient()
+    context = _make_context(
+        _make_chunk("c1", "walked the dog"),
+        _make_chunk("c2", "made pasta"),
+    )
+    prompt = build_answer_prompt(context)
+    response = client.complete(prompt)
+    structured = parse_structured_answer(response.raw_text, context=context)
+    assert structured.cited_chunk_ids == ("c1", "c2")
+
+
+def test_mock_client_returns_zero_latency_ms() -> None:
+    client = MockChatClient()
+    context = _make_context(_make_chunk("c1", "walked the dog"))
+    prompt = build_answer_prompt(context)
+    response = client.complete(prompt)
+    assert response.latency_ms == 0
+    assert response.model_name == "mock"
+    assert response.token_counts.keys() == {"prompt", "completion"}
+
+
+def test_mock_client_no_evidence_path_round_trips() -> None:
+    client = MockChatClient()
+    context = _make_context()
+    prompt = build_answer_prompt(context)
+    response = client.complete(prompt)
+    structured = parse_structured_answer(response.raw_text, context=context)
+    assert structured.uncertainty == "no_evidence"
+    assert structured.cited_chunk_ids == ()
