@@ -7,10 +7,11 @@ a mismatch raises before any traffic is served. When
 ``storage_backend == "postgres"`` we additionally probe ``pg_extension``
 to confirm pgvector is installed.
 
-Slice 4.3a (D-034): the chat-client contour is gated the same way —
+Slice 4.5 (D-037): the chat-client contour is gated the same way —
 ``build_chat_client(settings)`` must produce a client with a non-empty
-``model_name``. Real provider integration lands later; for now the only
-supported backend is ``mock``.
+``model_name``. When ``chat_backend == "openai"`` the gate additionally
+asserts ``chat_model == "gpt-4.1"`` (the canonical Slice 4.5 contour);
+the ``OpenAIChatClient`` constructor refuses an empty ``OPENAI_API_KEY``.
 
 The full set of R-10 probes (schema version, full provider reachability)
 lands with the migration packet — this slice only covers what the
@@ -39,6 +40,7 @@ class BootHealthError(RuntimeError):
 # silently produce vectors the durable backend cannot store.
 _CANONICAL_DIMENSION = 3072
 _CANONICAL_OPENAI_MODEL = "text-embedding-3-large"
+_CANONICAL_OPENAI_CHAT_MODEL = "gpt-4.1"
 
 
 def _verify_embedding_contour(settings: Settings) -> None:
@@ -69,6 +71,12 @@ def _verify_embedding_contour(settings: Settings) -> None:
 
 
 def _verify_chat_contour(settings: Settings) -> None:
+    if settings.chat_backend == "openai" and settings.chat_model != _CANONICAL_OPENAI_CHAT_MODEL:
+        raise BootHealthError(
+            "chat model mismatch: "
+            f"settings={settings.chat_model!r} "
+            f"canonical={_CANONICAL_OPENAI_CHAT_MODEL!r}"
+        )
     try:
         client = build_chat_client(settings)
     except ValueError as exc:
@@ -128,12 +136,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.dependency_overrides[get_settings] = lambda: explicit_settings
 
     log.info(
-        "app.created env=%s version=%s embedding_backend=%s embedding_dim=%d " "chat_backend=%s",
+        "app.created env=%s version=%s embedding_backend=%s embedding_dim=%d "
+        "chat_backend=%s chat_model=%s",
         effective_settings.app_env,
         __version__,
         effective_settings.embedding_backend,
         effective_settings.embedding_dimension,
         effective_settings.chat_backend,
+        effective_settings.chat_model,
     )
     return app
 

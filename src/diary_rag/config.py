@@ -62,7 +62,10 @@ class Settings(BaseSettings):
     embedding_backend: Literal["mock", "openai"] = Field(default="mock")
     embedding_model: str = Field(default="text-embedding-3-large")
     embedding_dimension: int = Field(default=3072)
-    chat_backend: Literal["mock"] = Field(default="mock")
+    chat_backend: Literal["mock", "openai"] = Field(default="mock")
+    # Load-bearing for the openai backend (D-037): boot aborts when
+    # ``chat_backend == "openai"`` and ``chat_model`` is not the canonical
+    # value. The mock backend ignores it.
     chat_model: str = Field(default="")
 
     # Slice 3.3 (D-025) baseline-hybrid retrieval knobs. Defaults are

@@ -46,6 +46,10 @@ Phase 3.1+3.2 contour (D-024):
 - The configured `EmbeddingClient`'s reported `dimension` must agree with `settings.embedding_dimension`.
 - `storage_backend == "postgres"` ⇒ the connected database must have the `vector` extension installed.
 
+Slice 4.5 contour (D-037):
+- The configured `ChatClient`'s reported `model_name` must be non-empty (D-034 clause, unchanged).
+- `settings.chat_backend == "openai"` ⇒ `settings.chat_model` must equal `gpt-4.1`; building `OpenAIChatClient` requires `OPENAI_API_KEY`.
+
 Full PostgreSQL connectivity, schema version, and provider reachability checks land with the migration packet.
 
 ## R-11. Routing is recorded
