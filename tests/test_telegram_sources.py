@@ -1,0 +1,188 @@
+"""Telegram-adapter tests for ``/sources`` outbound delivery (Slice 4.4, D-036).
+
+Asserts the webhook's outbound branch for ``DispatchResult.source_blocks``:
+
+- Default delivery is one combined ``send_message`` (header + all blocks).
+- Multi-message split activates when the combined payload exceeds the
+  4096-char cap; splits land on whole-block boundaries.
+- The fail-closed reply path returns inline ``sendMessage`` with no
+  outbound call.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, date, datetime
+from typing import Any
+
+from fastapi.testclient import TestClient
+
+from diary_rag.adapters.answers import MockChatClient
+from diary_rag.adapters.embeddings import MockEmbeddingClient
+from diary_rag.adapters.telegram.webhook import get_dispatcher, get_telegram_client
+from diary_rag.app import create_app
+from diary_rag.config import Settings
+from diary_rag.core.diary import AnswerResult, Evidence, FallbackMode
+from diary_rag.core.diary.models import AnswerContext, EventChunk
+from diary_rag.core.embeddings import EmbeddingStatus
+from diary_rag.core.routing import InboundMessage
+from diary_rag.services import DiaryService, Dispatcher, ExportService, QueryService
+from diary_rag.storage.mock import MockDiaryStore
+
+
+class _RecordingTelegramClient:
+    def __init__(self) -> None:
+        self.message_calls: list[dict[str, Any]] = []
+
+    def send_document(self, **kwargs: Any) -> None:  # pragma: no cover - unused
+        raise AssertionError("send_document should not be called for /sources")
+
+    def send_message(self, *, chat_id: str, text: str) -> None:
+        self.message_calls.append({"chat_id": chat_id, "text": text})
+
+
+def _settings() -> Settings:
+    return Settings(_env_file=None, telegram_webhook_secret="test-secret")  # type: ignore[call-arg]
+
+
+def _post(client: TestClient, payload: dict[str, Any]) -> Any:
+    return client.post(
+        "/telegram/webhook",
+        json=payload,
+        headers={"X-Telegram-Bot-Api-Secret-Token": "test-secret"},
+    )
+
+
+def _update(text: str, *, update_id: int = 1, message_id: int = 1) -> dict[str, Any]:
+    return {
+        "update_id": update_id,
+        "message": {
+            "message_id": message_id,
+            "date": 1715300000 + update_id,
+            "chat": {"id": 42},
+            "from": {"id": 7},
+            "text": text,
+        },
+    }
+
+
+def _chunk(chunk_id: str, text: str) -> EventChunk:
+    return EventChunk(
+        chunk_id=chunk_id,
+        diary_entry_id=f"e-{chunk_id}",
+        source_message_id=f"s-{chunk_id}",
+        family_id="42",
+        author_user_id="7",
+        entry_date=date(2026, 5, 9),
+        event_index=0,
+        chunk_text=text,
+        created_at=datetime.now(tz=UTC),
+        embedding_status=EmbeddingStatus.READY,
+    )
+
+
+class _FixedAnswerQueryService:
+    def __init__(self, chunks: tuple[EventChunk, ...]) -> None:
+        self._chunks = chunks
+
+    def answer(self, message: InboundMessage) -> AnswerResult:
+        context = AnswerContext(
+            query_id="q-1",
+            query_text=message.payload,
+            ordered_chunks=self._chunks,
+            model_name="mock",
+            created_at=datetime.now(tz=UTC),
+        )
+        evidence = [
+            Evidence(chunk_id=c.chunk_id, entry_date=c.entry_date, chunk_text=c.chunk_text)
+            for c in self._chunks
+        ]
+        return AnswerResult(
+            fallback=FallbackMode.NONE,
+            query_text=message.payload,
+            evidence=evidence,
+            context=context,
+            answer_text="Mock answer.",
+        )
+
+
+def _build_client(
+    chunks: tuple[EventChunk, ...] | None = None,
+) -> tuple[TestClient, _RecordingTelegramClient]:
+    settings = _settings()
+    store = MockDiaryStore()
+    embed = MockEmbeddingClient()
+    chat = MockChatClient()
+    if chunks is None:
+        query_service: Any = QueryService(store, store, embed, chat)
+    else:
+        query_service = _FixedAnswerQueryService(chunks)
+    dispatcher = Dispatcher(
+        DiaryService(store, embedding_client=embed),
+        query_service,
+        ExportService(store),
+        settings,
+    )
+    telegram_client = _RecordingTelegramClient()
+    app = create_app(settings)
+    app.dependency_overrides[get_dispatcher] = lambda: dispatcher
+    app.dependency_overrides[get_telegram_client] = lambda: telegram_client
+    return TestClient(app), telegram_client
+
+
+def test_sources_after_ask_delivers_one_combined_outbound_message() -> None:
+    chunks = (
+        _chunk("c-1", "Tried a new book"),
+        _chunk("c-2", "Had a calm morning"),
+    )
+    client, tg = _build_client(chunks=chunks)
+
+    _post(client, _update("/ask book", update_id=1, message_id=1))
+    response = _post(client, _update("/sources", update_id=2, message_id=2))
+
+    assert response.status_code == 200
+    assert response.json() == {}
+    assert len(tg.message_calls) == 1
+    body = tg.message_calls[0]["text"]
+    assert body.startswith("Selected chunks for your last /ask (2 chunk(s)):")
+    assert "[2026-05-09] c-1\n\nTried a new book" in body
+    assert "[2026-05-09] c-2\n\nHad a calm morning" in body
+    # As-is rendering: chunk text appears verbatim (no excerpt, no truncation).
+    assert body.index("Tried a new book") < body.index("Had a calm morning")
+
+
+def test_sources_without_prior_ask_returns_inline_fail_closed_reply() -> None:
+    client, tg = _build_client()
+
+    response = _post(client, _update("/sources", update_id=1, message_id=1))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["method"] == "sendMessage"
+    assert body["text"] == "No selected chunks available — ask a question with /ask first."
+    # Fail-closed reply uses the inline response body; no outbound call.
+    assert tg.message_calls == []
+
+
+def test_oversized_chunks_force_multi_message_split() -> None:
+    # Each chunk text ~1500 chars; combined header + 3 blocks exceeds the 4096 cap.
+    chunks = (
+        _chunk("c-1", "x" * 1500),
+        _chunk("c-2", "y" * 1500),
+        _chunk("c-3", "z" * 1500),
+    )
+    client, tg = _build_client(chunks=chunks)
+
+    _post(client, _update("/ask book", update_id=1, message_id=1))
+    response = _post(client, _update("/sources", update_id=2, message_id=2))
+
+    assert response.status_code == 200
+    assert response.json() == {}
+    # Combined payload exceeds the cap, so the packer splits at block boundaries.
+    assert len(tg.message_calls) >= 2
+    joined = "\n".join(call["text"] for call in tg.message_calls)
+    # All three chunk bodies are present across the split messages.
+    assert "x" * 1500 in joined
+    assert "y" * 1500 in joined
+    assert "z" * 1500 in joined
+    # Header lands on the first message only.
+    assert tg.message_calls[0]["text"].startswith("Selected chunks for your last /ask")

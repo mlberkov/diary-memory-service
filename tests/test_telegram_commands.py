@@ -16,6 +16,7 @@ from diary_rag.core.routing import RouteKind
         ("/note", RouteKind.ENTRY),
         ("/ask", RouteKind.ASK),
         ("/drafts", RouteKind.DRAFTS),
+        ("/sources", RouteKind.SOURCES),
     ],
 )
 def test_parse_command_recognizes_each_supported_command(

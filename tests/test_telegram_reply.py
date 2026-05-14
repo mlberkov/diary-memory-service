@@ -65,7 +65,7 @@ def test_dispatcher_start_reply_mentions_diary_mode() -> None:
 def test_dispatcher_help_reply_lists_supported_commands() -> None:
     result = _dispatcher().dispatch(_inbound(RouteKind.HELP, "/help"))
     text = result.reply_text
-    for token in ("/start", "/help", "/note", "/ask", "/drafts"):
+    for token in ("/start", "/help", "/note", "/ask", "/drafts", "/sources"):
         assert token in text
     assert "/draft " not in text  # the explicit /draft command is gone
     assert "/draft," not in text

@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from diary_rag.config import Settings
 from diary_rag.core.diary import AnswerResult, FallbackMode, IngestResult
+from diary_rag.core.diary.models import EventChunk
 from diary_rag.core.export import ExportFormat
 from diary_rag.core.routing import DispatchResult, InboundMessage, RouteKind
 from diary_rag.logging import get_logger
@@ -43,14 +44,17 @@ from diary_rag.services.query_service import QueryService
 log = get_logger(__name__)
 
 _REPLY_START = (
-    "Welcome — diary mode. Use /note to record, /ask to query, or /drafts to recall "
-    "recent drafts. Plain text without a command is stored as a draft so nothing is lost."
+    "Welcome — diary mode. Use /note to record, /ask to query, /sources to see the chunks "
+    "behind your last answer, or /drafts to recall recent drafts. Plain text without a "
+    "command is stored as a draft so nothing is lost."
 )
 _REPLY_HELP = (
-    "Commands: /start, /help, /note, /ask, /drafts, /export. Plain text without a "
-    "command is stored as a draft."
+    "Commands: /start, /help, /note, /ask, /sources, /drafts, /export. Plain text "
+    "without a command is stored as a draft."
 )
-_REPLY_UNKNOWN = "I haven't been taught how to handle that yet — use /note, /ask, or /drafts."
+_REPLY_UNKNOWN = (
+    "I haven't been taught how to handle that yet — use /note, /ask, /sources, or /drafts."
+)
 _REPLY_CLARIFY = (
     "I couldn't tell if that's a diary entry or a question. "
     "Send /note <YYYY-MM-DD> on the first line then your events to record it, "
@@ -90,39 +94,47 @@ _REPLY_PROVIDER_UNAVAILABLE = (
     "Couldn't generate an answer — chat provider is unavailable. Try again later."
 )
 _REPLY_PARSE_FAILURE = "Couldn't generate an answer — provider response was unparseable. Try again."
+_REPLY_SOURCES_NONE = "No selected chunks available — ask a question with /ask first."
 
 
-def _format_evidence_lines(result: AnswerResult) -> list[str]:
-    count = len(result.evidence)
-    plural = "memory" if count == 1 else "memories"
-    lines = [f"Found {count} {plural}:"]
-    lines.extend(f"- [{e.entry_date.isoformat()}] {e.chunk_text}" for e in result.evidence)
-    return lines
+def _render_source_block(chunk: EventChunk) -> str:
+    """Render one selected chunk for ``/sources`` (D-036).
+
+    "Selected" = post-RRF top-k chunk fed into the prompt. Rendered
+    "as-is": full ``chunk_text`` with the entry date and chunk id as a
+    header. Not a citation, not fine-grained attribution.
+    """
+    return f"[{chunk.entry_date.isoformat()}] {chunk.chunk_id}\n\n{chunk.chunk_text}"
 
 
 def _format_answer_reply(result: AnswerResult) -> str:
-    """Render the answer reply per :class:`FallbackMode` (D-035).
+    """Render the answer reply per :class:`FallbackMode` (D-035, D-036).
+
+    Slice 4.4 (D-036): the body for the three contours that surface an
+    LLM-produced answer (``NONE``, ``WEAK_EVIDENCE``, ``AMBIGUOUS``) is
+    ``result.answer_text`` followed by the contour-specific trailer.
+    The cited chunks are not in the default reply — ``/sources`` exposes
+    them on demand.
 
     ``NO_EVIDENCE`` has two distinct effective paths — empty retrieval
     and LLM-marker — that must produce different surface text per R-6.
-    The Dispatcher disambiguates on ``bool(result.evidence)``.
+    The Dispatcher disambiguates on ``bool(result.evidence)``. The
+    LLM-marker reply deliberately does not surface the LLM's prose:
+    "no_evidence" means there is no answer to render.
     """
     fallback = result.fallback
 
     if fallback is FallbackMode.NONE:
-        lines = _format_evidence_lines(result)
-        lines.append(_RETRIEVAL_TRAILER)
-        return "\n".join(lines)
+        body = result.answer_text or ""
+        return f"{body}\n\n{_RETRIEVAL_TRAILER}"
 
     if fallback is FallbackMode.WEAK_EVIDENCE:
-        lines = _format_evidence_lines(result)
-        lines.append(_TRAILER_WEAK_EVIDENCE)
-        return "\n".join(lines)
+        body = result.answer_text or ""
+        return f"{body}\n\n{_TRAILER_WEAK_EVIDENCE}"
 
     if fallback is FallbackMode.AMBIGUOUS:
-        lines = _format_evidence_lines(result)
-        lines.append(_TRAILER_AMBIGUOUS)
-        return "\n".join(lines)
+        body = result.answer_text or ""
+        return f"{body}\n\n{_TRAILER_AMBIGUOUS}"
 
     if fallback is FallbackMode.PROVIDER_UNAVAILABLE:
         return _REPLY_PROVIDER_UNAVAILABLE
@@ -167,7 +179,20 @@ def _format_drafts_header(*, returned: int, requested: int, explicit: bool, max_
 
 
 class Dispatcher:
-    """Maps an :class:`InboundMessage` to a :class:`DispatchResult`."""
+    """Maps an :class:`InboundMessage` to a :class:`DispatchResult`.
+
+    Holds a small per-family in-memory cache of the chunks retrieval
+    selected for the chat's most recent ``/ask`` turn (Slice 4.4 /
+    D-036). The cache backs ``/sources``: every ``/ask`` dispatch
+    overwrites it with ``answer.context.ordered_chunks`` when non-empty
+    and clears it otherwise. The cache is process-local and dies on
+    restart; this is acceptable because the FastAPI wiring at
+    ``adapters/telegram/webhook.py`` makes ``Dispatcher`` a module-level
+    singleton, so ``/ask`` and a follow-up ``/sources`` are served by
+    the same instance within one process. Multi-worker deploys would
+    break the latest-only contract — see D-036 for the follow-up
+    trigger.
+    """
 
     def __init__(
         self,
@@ -180,6 +205,7 @@ class Dispatcher:
         self._query = query
         self._export = export
         self._settings = settings
+        self._latest_sources: dict[str, tuple[EventChunk, ...]] = {}
 
     def dispatch(self, message: InboundMessage) -> DispatchResult:
         route = message.route
@@ -228,6 +254,7 @@ class Dispatcher:
                     fallback=FallbackMode.NO_EVIDENCE,
                     query_text=message.payload.strip(),
                 )
+            self._update_latest_sources(message.external_chat_id, answer)
             reply = _format_answer_reply(answer)
             if is_heuristic:
                 reply = _append_marker(reply, _HEURISTIC_MARKER_ASK)
@@ -239,6 +266,8 @@ class Dispatcher:
                     "route_source": message.route_source,
                 },
             )
+        if route is RouteKind.SOURCES:
+            return self._dispatch_sources(message)
         if route is RouteKind.DRAFTS:
             return self._dispatch_drafts(message)
         if route is RouteKind.EXPORT:
@@ -363,4 +392,52 @@ class Dispatcher:
                 "route_source": message.route_source,
                 "format": fmt.value,
             },
+        )
+
+    def _update_latest_sources(self, family_id: str, answer: AnswerResult) -> None:
+        """Cache the chunks retrieval selected for the family's last /ask (D-036).
+
+        Every ``/ask`` dispatch writes the cache (no skip path). Non-empty
+        ``answer.context.ordered_chunks`` overwrites any prior value; empty
+        (empty-query or empty-retrieval ``NO_EVIDENCE``, plus the
+        ``NotImplementedError`` retrieval-unavailable contour where
+        ``answer.context`` is ``None``) clears the entry. Only the next
+        ``/ask`` invalidates this cache.
+        """
+        if answer.context is not None and answer.context.ordered_chunks:
+            self._latest_sources[family_id] = answer.context.ordered_chunks
+        else:
+            self._latest_sources.pop(family_id, None)
+
+    def _dispatch_sources(self, message: InboundMessage) -> DispatchResult:
+        """Serve ``/sources`` by reading the latest-sources cache (D-036).
+
+        Returns the selected chunks as-is for the chat's most recent
+        ``/ask`` turn — the post-RRF top-k chunks the prompt builder fed
+        to the LLM, rendered with their full ``chunk_text``. Not
+        citations, not fine-grained attribution.
+        """
+        family_id = message.external_chat_id
+        chunks = self._latest_sources.get(family_id)
+        if not chunks:
+            return DispatchResult(
+                reply_text=_REPLY_SOURCES_NONE,
+                route=RouteKind.SOURCES,
+                metadata={
+                    "fallback": FallbackMode.NONE.value,
+                    "route_source": message.route_source,
+                    "returned": "0",
+                },
+            )
+        header = f"Selected chunks for your last /ask ({len(chunks)} chunk(s)):"
+        source_blocks = [_render_source_block(c) for c in chunks]
+        return DispatchResult(
+            reply_text=header,
+            route=RouteKind.SOURCES,
+            metadata={
+                "fallback": FallbackMode.NONE.value,
+                "route_source": message.route_source,
+                "returned": str(len(chunks)),
+            },
+            source_blocks=source_blocks,
         )
