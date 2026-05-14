@@ -20,6 +20,19 @@ Top of list = pick next. Each item maps to a row in `docs/execution-map.md`. Whe
 
 ---
 
+Closed in the Slice 4.5 OpenAI chat adapter packet (D-037):
+- `src/diary_rag/adapters/answers/openai_client.py` (new) — `OpenAIChatClient(api_key, *, model_name)`. Constructor refuses empty `api_key` / empty `model_name`; lazy-imports `openai`. `complete(prompt)` calls `client.chat.completions.create(model=…, messages=[{system,user}], response_format={"type":"json_object"}, temperature=0)`, single attempt; measures wallclock latency with `time.perf_counter()`; maps `response.usage.{prompt_tokens, completion_tokens}` → `{"prompt", "completion"}` (empty if `usage is None`). `openai.OpenAIError` / `TimeoutError` are caught at the SDK boundary and re-raised as `ChatProviderUnavailableError` so D-035 grading writes `FallbackMode.PROVIDER_UNAVAILABLE`.
+- `src/diary_rag/adapters/answers/factory.py` — new `openai` branch: `OpenAIChatClient(api_key=settings.openai_api_key, model_name=settings.chat_model)`. Mock branch unchanged. Module docstring updated.
+- `src/diary_rag/adapters/answers/__init__.py` — re-exports `OpenAIChatClient`.
+- `src/diary_rag/config.py` — `chat_backend: Literal["mock","openai"]` (default `"mock"`); `chat_model` docstring records it is load-bearing for the openai backend.
+- `src/diary_rag/app.py` — `_CANONICAL_OPENAI_CHAT_MODEL = "gpt-4.1"`; `_verify_chat_contour` aborts when `chat_backend == "openai"` and `chat_model != "gpt-4.1"`; the `OpenAIChatClient` constructor's missing-key `ValueError` continues to surface through `BootHealthError`; the existing non-empty `model_name` check is unchanged. The `app.created` log line gains `chat_model=…`.
+- `.env.example` — Chat contour stanza updated; canonical `CHAT_MODEL=gpt-4.1` is the default value; default `CHAT_BACKEND` stays `mock`.
+- New tests: `tests/test_boot_chat_gate.py` (default-clean / mock-ignores-chat-model / canonical-success / wrong-model-aborts / empty-model-aborts / missing-key-aborts — all offline, no real OpenAI calls); `tests/test_chat_client_openai.py` (optional live smoke gated by `DIARY_RAG_OPENAI_TEST_KEY`, **not** part of `make check`).
+- Docs: D-037 in `decision-log.md`; A-9 closed (`→ D-037`) in `assumptions.md`; R-10 in `RUNTIME-INVARIANTS.md` extended in place with a Slice 4.5 stanza; new "Chat backend (D-037)" subsection in `RUNBOOK.md`; row 4.5 added in `execution-map.md`.
+- New runtime dependencies: none. `openai` is already pulled in by D-024.
+- A-34 destructive-upgrade discipline does not apply (no DDL change).
+- **Explicitly not in this packet:** Telegram answer rendering / `/sources` / dispatcher (D-036, already landed); retries / backoff / circuit breakers (Phase 6); dead-letter / repair loops (Phase 6); rate-limit awareness, request hashing, cost tracking (Phase 6 / Phase 7); streaming, multi-turn, tool-use; Anthropic or any second provider; provider observability expansion beyond the existing `chat_backend` / `chat_model` log fields; `confidence_band` schema work (still deferred per D-035); live OpenAI calls inside `make check`; `RouteKind.ENTRY → NOTE` / `DiaryEntry` / `family_id` / `diary_rag` package renames (D-026); migration tooling / DDL changes (A-34); metadata filtering / Slice 3.4; search-quality fork (BM25 / reranker / Qdrant / halfvec / HNSW).
+
 Closed in the Slice 4.4 answer-text reply + on-demand `/sources` packet (D-036):
 - `src/diary_rag/core/routing/models.py` — `RouteKind.SOURCES` added (`lifecycle_for(SOURCES) → "other"` via fallthrough); `DispatchResult.source_blocks: list[str] | None = None` added next to `drafts` / `document` for the SOURCES outbound branch.
 - `src/diary_rag/adapters/telegram/commands.py` — `"/sources": RouteKind.SOURCES` added to `COMMAND_TOKENS`; module docstring updated.

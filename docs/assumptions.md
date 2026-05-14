@@ -5,8 +5,7 @@ Not yet locked. Each item must either be promoted to `docs/decision-log.md` (wit
 Add new items here the moment one is identified. Do not let assumptions live only in code or chat.
 
 ## Storage & search
-*A-5 → D-024. A-6 → D-025. A-7 → D-024. A-8 → D-024.*
-- **A-9. Chat model**: `CHAT_MODEL` env var is empty. Specific model undecided. Required before Phase 4.
+*A-5 → D-024. A-6 → D-025. A-7 → D-024. A-8 → D-024. A-9 → D-037.*
 
 ## Domain semantics
 - **A-10. Edit/delete strategy**: TechSpec §12 explicitly leaves this open — revisions vs in-place mutation, tombstones vs hard delete, re-indexing trigger. Required before Phase 2.5.
@@ -81,3 +80,4 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 - A-6 → D-025 (hybrid merge lives at the service layer via RRF).
 - A-29 → D-025 (substring placeholder retired; baseline hybrid retrieval lands).
 - A-36 → D-025 (replaced by A-36b; exact family-scoped scan for now, halfvec/HNSW deferred).
+- A-9 → D-037 (`CHAT_MODEL` locked to `gpt-4.1` under `chat_backend=openai`; boot abort on mismatch).

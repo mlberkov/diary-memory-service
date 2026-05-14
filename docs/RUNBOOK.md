@@ -89,6 +89,18 @@ CREATE INDEX IF NOT EXISTS idx_event_chunks_chunk_text_tsv
 
 Production schema evolution must be solved before any non-local deployment.
 
+### Chat backend (D-037)
+Slice 4.5 ships with a dual contour:
+
+- `CHAT_BACKEND=mock` (default) — deterministic in-process stand-in. `model_name` on persisted `AnswerTrace` rows is the literal string `mock`, so SQL inspection alone tells you which provider produced a row.
+- `CHAT_BACKEND=openai` — calls `chat.completions.create` with `response_format={"type": "json_object"}` and `temperature=0`. Requires `OPENAI_API_KEY`. Single attempt; no retries (Phase 6 owns hardening, R-9).
+
+The boot gate (R-10) refuses to start when `CHAT_BACKEND=openai` and `CHAT_MODEL` is not the canonical `gpt-4.1`, or when the OpenAI key is missing under the openai backend. The non-empty `model_name` check from D-034 is unchanged.
+
+`OpenAIError` and `TimeoutError` from the SDK boundary are translated to `ChatProviderUnavailableError` so the existing D-035 grading writes the call as `FallbackMode.PROVIDER_UNAVAILABLE` and the dispatcher emits the retry-hint reply. `answer_text=""`, `token_counts={}`, `latency_ms=0` per D-035's truthful-trace table.
+
+Live calls are not part of `make check`. The optional smoke `tests/test_chat_client_openai.py` is skipped unless `DIARY_RAG_OPENAI_TEST_KEY` is set (same gating pattern as the live embedding smoke and the live Postgres tests).
+
 ### Webhook idempotency (R-2 / D-023)
 Repeated delivery of the same Telegram message-state — same `(external_chat_id, external_message_id, edit_seq)` — does not create duplicate rows. The webhook returns the same functional 200 reply and logs `effective_path=replay` instead of `fresh`. Operationally, `effective_path=replay` is normal; investigate only if the *first* call for a given key never appears with `effective_path=fresh`.
 
