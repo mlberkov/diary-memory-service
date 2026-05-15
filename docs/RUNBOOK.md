@@ -168,6 +168,44 @@ Fail-closed: when nothing is cached, `/sources` returns `"No selected chunks ava
 
 Multi-worker caveat: each uvicorn worker / pod holds its own dispatcher singleton, so `/ask` on worker A followed by `/sources` on worker B will fail closed (or return stale chunks). The current contour is single-process local dev; promoting the cache to a durable seam (e.g. `DiaryRepository.get_latest_answer_trace_for_family(family_id)` + per-chunk lookups via `get_event_chunk`) is the named follow-up trigger if the deployment shape flips.
 
+### Retrieval-quality inspection harness (D-038)
+`src/diary_rag/eval/retrieval/` ships a hand-curated harness that measures the D-025 baseline contour against a small fixture corpus + gold-query set. It is **inspection, not a gate** — the CLI exit code is always `0` regardless of the observed metrics.
+
+Two modes share one metric shape (aggregate `recall@{5,10,20}`, `mrr@20`, `per_leg_recall@20.{dense,sparse,fused}`; per-query top-`candidate_k` chunk-id lists, diagnostic per-leg first-relevant-rank fields, and an explicit `reciprocal_rank_in_fused` numerator):
+
+- **Mock mode.** Runs under `make check` via `tests/test_retrieval_harness_shape.py`. Shape-only assertions, no quality thresholds. Also smokeable directly:
+
+  ```bash
+  uv run python -m diary_rag.eval.retrieval --mode mock
+  ```
+
+- **Postgres mode (operator baseline).** Truncates `embedding_records`, `event_chunks`, `diary_entries`, `source_messages` on the connected DSN, then re-ingests `eval/retrieval/corpus.jsonl` through the canonical `DiaryService.ingest` path. Point the DSN at a **dedicated eval database** so production data is never touched:
+
+  ```bash
+  DIARY_RAG_PG_TEST_DSN=postgresql://... \
+  EMBEDDING_BACKEND=openai \
+  OPENAI_API_KEY=... \
+  uv run python -m diary_rag.eval.retrieval --mode postgres --json | tee snapshot.json
+  ```
+
+  Live OpenAI is used on the **corpus side** at ingest time because D-025's dense leg filters by `model_name` and the cached query embeddings are pinned to `text-embedding-3-large` — mixing models is silently broken (the harness aborts on `model_name` mismatch rather than returning zero hits). Live OpenAI on the corpus side is acceptable here because the operator chose this run deliberately; `make check` never enters this path.
+
+  After the run, paste the aggregate metrics plus 2–3 illustrative per-query rows into the D-038 "Baseline snapshot (observed)" subsection in `docs/decision-log.md` — framed as observed values for the D-025 contour, not as a must-beat threshold for any future packet.
+
+#### Query-embeddings cache (`eval/retrieval/embeddings_cache.json`)
+The cache pins query embeddings to a specific `text-embedding-3-large` @ 3072-dim point-in-time output so the Postgres run is reproducible without contacting OpenAI on the query side. Regenerate is an operator-only ritual:
+
+```bash
+OPENAI_API_KEY=... uv run python -m diary_rag.eval.retrieval.regenerate_embeddings [--force]
+```
+
+`--force` is required to overwrite an existing cache because regenerating **invalidates prior baseline snapshots** — the model output drifts. The script writes `model_name` and `dimension` into the file; the Postgres-mode CLI checks these against the configured corpus-side embedding client and aborts on mismatch.
+
+The cache is **not** committed by the D-038 implementation packet — it is produced by this ritual. Postgres-mode refuses to start if the cache is missing.
+
+#### Gold-set handle contract
+`expected_handles` entries in `eval/retrieval/gold.json` use the form `"{external_message_id}#{event_index}"` where `event_index` is the 0-based ordinal of the produced `EventChunk` within the source message after `DiaryService.ingest` chunks it. This is internal to the harness only — it is **not** a business event id, **not** a Telegram message id, **not** any external domain identifier. It exists because `chunk_id` is uuid4 at ingest time.
+
 ### Hybrid retrieval (D-025)
 `/ask` runs the baseline hybrid path: a single query-embedding call followed by dense + sparse legs against `SearchRepository`, fused with service-layer RRF. Every retrieval call logs `retrieval.hybrid family_id=… model=… dense_n=… sparse_n=… merged_n=…` so an operator can confirm both legs ran. The dispatcher reply trailer for a successful answer is `(hybrid retrieval — dense+sparse RRF)`; an empty merged set returns `FallbackMode.NO_EVIDENCE` with the plain "No memories matched 'X'." reply.
 
