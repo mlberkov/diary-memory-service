@@ -10,10 +10,12 @@ Top of list = pick next. Each item maps to a row in `docs/execution-map.md`. Whe
 - Concrete: change the generated-column expression in `storage/postgres/schema.sql`; change the `tsquery` construction in `storage/postgres/store.py` `sparse_candidates`; preserve mock + sqlite parity (sqlite still `NotImplementedError`); A-34 destructive local upgrade (`docker compose down -v`); update TechSpec §9 + RUNBOOK; re-run the D-038 harness Postgres mode.
 - Deferred follow-up levers (one per future packet, **do not bundle more than one**): **BM25-grade sparse** (`pg_search`, `bm25_catalog`, or app-side BM25 over tokenized chunks); **reranker / cross-encoder**; **Qdrant or another dedicated vector / search system**; **3072-dim ANN strategy** (A-36b: halfvec + HNSW vs alternatives). Each measures against the D-038 baseline when picked.
 
-## Slice 3.4 — Metadata filtering (after 3.3)
+## Slice 3.4 (cont.) — Metadata filtering: child + visibility dimensions (after D-040)
 - Owner: agent
 - Map: execution-map 3.4
-- Concrete: layer family / child / visibility / date filters onto the existing `SearchRepository` legs without changing the retrieval shape. Coordinate with A-15 (visibility scopes).
+- Context: D-040 shipped the date dimension and established the keyword-only optional-filter seam on both `SearchRepository` legs (`date_range: DateRange | None = None`). The remaining two metadata-filter dimensions are additive packets on that same seam.
+- Concrete: add `child_id` filtering and `visibility_scope` filtering onto the seam, **one per packet — do not bundle**. Child filtering needs a `Query.child_scope` expression story first. Visibility filtering is blocked on **A-15** (visibility-scope enumerated values are undefined) and cannot land until A-15 is resolved.
+- Follow-up: inbound `/ask` date syntax / natural-language date parsing (a Telegram-side packet that parses a message into a `DateRange` and passes it to `QueryService.answer(..., date_range=)`).
 
 ## Schema evolution before non-local deployment
 - No migration tool is wired yet (A-34). Local Postgres schema upgrades are destructive: pull a packet that changes columns and you must `docker compose down -v` to reset `diary_pg_data` before the bootstrap DDL applies. This is acceptable for the single-dev contour but must be replaced (Alembic or equivalent) before the first non-local deployment. D-024 added the pgvector image, `embedding_records`, and the `embedding_status` column; D-025 added the generated `chunk_text_tsv` column + GIN index — both required a destructive upgrade or an explicit `ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...` step. Consider a dedicated packet once the next production-shaped slice is on the horizon.
@@ -22,6 +24,18 @@ Top of list = pick next. Each item maps to a row in `docs/execution-map.md`. Whe
 - A-35 leaves failed embeddings sticky: a chunk with `embedding_status='failed'` stays that way until manual intervention. Once Phase 6 (provider hardening) is on the horizon, ship a reconciliation job that retries `failed` chunks with bounded backoff and a dead-letter strategy, plus the corresponding observability (logs / metrics on retry success/failure).
 
 ---
+
+Closed in the Slice 3.4 date-range retrieval-filter packet (D-040):
+- `src/diary_rag/core/diary/models.py` adds the channel-neutral frozen/slotted `DateRange(start, end)` value object — inclusive `entry_date` lower/upper bound, both sides `date | None`, both-`None` is a valid no-constraint range, `start > end` rejected in `__post_init__`. `src/diary_rag/core/diary/__init__.py` re-exports it.
+- `src/diary_rag/storage/search_repository.py` — both `SearchRepository` Protocol legs gain keyword-only `date_range: DateRange | None = None`.
+- `src/diary_rag/storage/postgres/store.py` — module-level `_date_range_sql` helper composes a conditional `entry_date >= / <=` fragment with positional params; both legs splice it after the existing `WHERE` predicates.
+- `src/diary_rag/storage/mock/store.py` — module-level `_chunk_in_date_range` helper; both legs apply the identical inclusive comparison (mock/Postgres parity).
+- `src/diary_rag/storage/sqlite/store.py` — both legs accept the new keyword-only param for `HybridDiaryStore` Protocol parity; bodies unchanged (still `NotImplementedError` per D-025).
+- `src/diary_rag/services/query_service.py` — `answer` gains a per-call keyword-only `date_range` threaded to both legs; RRF, trace persistence, and the `Query` row are untouched.
+- `tests/test_diary_models.py` (new) — `DateRange` validation. `tests/test_search_repository_{mock,postgres}.py` and `tests/test_query_service.py` extended with date-filter cases (partial / full range, inclusive bounds, `None`-unchanged, mock/Postgres parity matrix).
+- Docs: D-040 in `decision-log.md`; TechSpec §9 (leg signatures + new "Metadata filtering" subsection); `execution-map.md` row 3.4.
+- No schema / DDL / migration change; A-34 does not apply. `services/retrieval.py` and the eval harness unchanged. New runtime dependencies: none.
+- **Explicitly not in this packet:** `child_id` and `visibility_scope` filtering (dimensions 2–3; visibility waits on A-15); inbound Telegram date syntax / NL date parsing; SQLite real retrieval; schema / DDL / migration; retrieval-quality tuning / date-diversity reranking; `Query` row schema changes; the D-026 renames.
 
 Closed in the Slice 3.6 retrieval-quality inspection harness packet (D-038):
 - `src/diary_rag/eval/__init__.py` and `src/diary_rag/eval/retrieval/__init__.py` (new namespace packages).

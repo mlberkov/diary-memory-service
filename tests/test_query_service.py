@@ -9,14 +9,14 @@ fuses the two ranked lists in the service layer.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 
 from diary_rag.adapters.answers import MockChatClient
 from diary_rag.adapters.embeddings import MockEmbeddingClient
 from diary_rag.core.answers import ChatProviderUnavailableError, ChatResponse
-from diary_rag.core.diary import FallbackMode, RetrievalLeg
+from diary_rag.core.diary import DateRange, FallbackMode, RetrievalLeg
 from diary_rag.core.diary.answer_prompt import AnswerPrompt
 from diary_rag.core.routing import InboundMessage, RouteKind
 from diary_rag.services import DiaryService, QueryService
@@ -36,9 +36,11 @@ def _ask(query: str, *, chat: str = "42", user: str = "7") -> InboundMessage:
     )
 
 
-def _entry(payload: str, *, chat: str = "42", user: str = "7") -> InboundMessage:
+def _entry(
+    payload: str, *, chat: str = "42", user: str = "7", msg_id: str = "100"
+) -> InboundMessage:
     return InboundMessage(
-        external_message_id="100",
+        external_message_id=msg_id,
         external_chat_id=chat,
         external_user_id=user,
         text=f"/note {payload}",
@@ -53,8 +55,10 @@ def _wire(store: MockDiaryStore, *, top_k: int = 5) -> QueryService:
     return QueryService(store, store, MockEmbeddingClient(), MockChatClient(), top_k=top_k)
 
 
-def _ingest(store: MockDiaryStore, payload: str, *, chat: str = "42") -> None:
-    DiaryService(store, embedding_client=MockEmbeddingClient()).ingest(_entry(payload, chat=chat))
+def _ingest(store: MockDiaryStore, payload: str, *, chat: str = "42", msg_id: str = "100") -> None:
+    DiaryService(store, embedding_client=MockEmbeddingClient()).ingest(
+        _entry(payload, chat=chat, msg_id=msg_id)
+    )
 
 
 def test_empty_store_returns_no_evidence() -> None:
@@ -352,6 +356,38 @@ def test_empty_query_persists_answer_trace_with_empty_context() -> None:
     assert trace.answer_text == ""
     assert trace.token_counts == {}
     assert trace.latency_ms == 0
+
+
+# --- Slice 3.4: date-range retrieval filter (D-040) --------------------------
+
+
+def test_answer_honors_date_range() -> None:
+    """A per-call ``date_range`` narrows both legs to in-range chunks."""
+    store = MockDiaryStore()
+    _ingest(store, "2026-05-09\nRead a book in May", msg_id="100")
+    _ingest(store, "2026-06-15\nRead a book in June", msg_id="101")
+    query = _wire(store)
+
+    result = query.answer(_ask("book"), date_range=DateRange(start=date(2026, 6, 1)))
+
+    assert result.fallback is FallbackMode.NONE
+    assert [e.chunk_text for e in result.evidence] == ["Read a book in June"]
+
+
+def test_answer_without_date_range_is_unchanged() -> None:
+    """Omitting ``date_range`` retrieves across all dates (pre-3.4 shape)."""
+    store = MockDiaryStore()
+    _ingest(store, "2026-05-09\nRead a book in May", msg_id="100")
+    _ingest(store, "2026-06-15\nRead a book in June", msg_id="101")
+    query = _wire(store)
+
+    result = query.answer(_ask("book"))
+
+    assert result.fallback is FallbackMode.NONE
+    assert {e.chunk_text for e in result.evidence} == {
+        "Read a book in May",
+        "Read a book in June",
+    }
 
 
 # --- Slice 4.3b: stub chat clients for the four new contours -----------------

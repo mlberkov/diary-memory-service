@@ -35,6 +35,7 @@ calibrate scores across legs.
 from __future__ import annotations
 
 import json
+from datetime import date
 from importlib import resources
 from typing import Any
 
@@ -46,6 +47,7 @@ from psycopg_pool import ConnectionPool
 
 from diary_rag.core.diary.models import (
     AnswerTrace,
+    DateRange,
     DiaryEntry,
     EventChunk,
     FallbackMode,
@@ -56,6 +58,27 @@ from diary_rag.core.diary.models import (
 )
 from diary_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
 from diary_rag.core.routing import RouteKind
+
+
+def _date_range_sql(date_range: DateRange | None) -> tuple[str, list[date]]:
+    """Build the optional ``entry_date`` predicate for a hybrid leg query.
+
+    Returns a SQL fragment (leading space, splices onto an existing
+    ``WHERE`` clause before ``ORDER BY``) and the positional params it
+    introduces. Both are empty when there is no constraint, so the
+    placeholder count always matches the params list (Slice 3.4, D-040).
+    """
+    if date_range is None:
+        return "", []
+    fragment = ""
+    params: list[date] = []
+    if date_range.start is not None:
+        fragment += " AND ec.entry_date >= %s"
+        params.append(date_range.start)
+    if date_range.end is not None:
+        fragment += " AND ec.entry_date <= %s"
+        params.append(date_range.end)
+    return fragment, params
 
 
 def _load_schema_sql() -> str:
@@ -336,11 +359,14 @@ class PostgresDiaryStore:
         query_embedding: list[float],
         model_name: str,
         limit: int,
+        *,
+        date_range: DateRange | None = None,
     ) -> list[EventChunk]:
         if not family_id:
             raise ValueError("family_id is required (Runtime invariant R-3)")
         if limit <= 0:
             return []
+        date_sql, date_params = _date_range_sql(date_range)
         # Bare list[float] is encoded by psycopg as ``double precision[]``;
         # pgvector's ``<=>`` operator only accepts ``vector``. The
         # ``::vector`` cast bridges that without forcing callers to wrap
@@ -355,10 +381,10 @@ class PostgresDiaryStore:
                 "  JOIN embedding_records er "
                 "    ON er.chunk_id = ec.chunk_id AND er.model_name = %s "
                 " WHERE ec.family_id = %s "
-                "   AND ec.embedding_status = 'ready' "
+                "   AND ec.embedding_status = 'ready'" + date_sql + " "
                 " ORDER BY er.embedding <=> %s::vector "
                 " LIMIT %s",
-                (model_name, family_id, query_embedding, limit),
+                (model_name, family_id, *date_params, query_embedding, limit),
             )
             rows = cur.fetchall()
         return [_row_to_chunk(r) for r in rows]
@@ -368,6 +394,8 @@ class PostgresDiaryStore:
         family_id: str,
         query_text: str,
         limit: int,
+        *,
+        date_range: DateRange | None = None,
     ) -> list[EventChunk]:
         if not family_id:
             raise ValueError("family_id is required (Runtime invariant R-3)")
@@ -375,6 +403,7 @@ class PostgresDiaryStore:
             return []
         if not query_text.strip():
             return []
+        date_sql, date_params = _date_range_sql(date_range)
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "WITH q AS (SELECT websearch_to_tsquery('simple', %s) AS tsq) "
@@ -384,11 +413,11 @@ class PostgresDiaryStore:
                 "       ec.embedding_status "
                 "  FROM event_chunks ec, q "
                 " WHERE ec.family_id = %s "
-                "   AND ec.chunk_text_tsv @@ q.tsq "
+                "   AND ec.chunk_text_tsv @@ q.tsq" + date_sql + " "
                 " ORDER BY ts_rank_cd(ec.chunk_text_tsv, q.tsq) DESC, "
                 "          ec.created_at, ec.event_index "
                 " LIMIT %s",
-                (query_text, family_id, limit),
+                (query_text, family_id, *date_params, limit),
             )
             rows = cur.fetchall()
         return [_row_to_chunk(r) for r in rows]

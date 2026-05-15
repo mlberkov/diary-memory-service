@@ -21,7 +21,7 @@ from uuid import uuid4
 import pytest
 
 from diary_rag.adapters.embeddings import MockEmbeddingClient
-from diary_rag.core.diary.models import DiaryEntry, EventChunk, SourceMessage
+from diary_rag.core.diary.models import DateRange, DiaryEntry, EventChunk, SourceMessage
 from diary_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
 from diary_rag.core.routing import RouteKind
 
@@ -69,6 +69,7 @@ def _seed(
     status: EmbeddingStatus = EmbeddingStatus.READY,
     embed_with: MockEmbeddingClient | None = None,
     event_index: int = 0,
+    entry_date: date = _DATE,
 ) -> None:
     sid = f"src-{cid}"
     eid = f"ent-{cid}"
@@ -92,7 +93,7 @@ def _seed(
             source_message_id=sid,
             family_id=family_id,
             author_user_id="u1",
-            entry_date=_DATE,
+            entry_date=entry_date,
             entry_text=text,
             created_at=_NOW,
         )
@@ -105,7 +106,7 @@ def _seed(
                 source_message_id=sid,
                 family_id=family_id,
                 author_user_id="u1",
-                entry_date=_DATE,
+                entry_date=entry_date,
                 event_index=event_index,
                 chunk_text=text,
                 created_at=_NOW,
@@ -231,3 +232,95 @@ def test_tsvector_simple_dictionary_does_not_stem(
 
     hits = store.sparse_candidates("fam-A", "walking", limit=10)
     assert [h.chunk_id for h in hits] == ["c1"]
+
+
+# --- Slice 3.4: date-range retrieval filter (D-040) ---
+
+_EARLY = date(2026, 5, 10)
+_MID = date(2026, 5, 11)
+_LATE = date(2026, 5, 12)
+
+
+def _seed_three_dates(store: PostgresDiaryStore, client: MockEmbeddingClient, *, text: str) -> None:
+    """Seed identical-text chunks on three distinct entry dates."""
+    _seed(store, cid="c-early", text=text, embed_with=client, entry_date=_EARLY)
+    _seed(store, cid="c-mid", text=text, embed_with=client, entry_date=_MID)
+    _seed(store, cid="c-late", text=text, embed_with=client, entry_date=_LATE)
+
+
+def test_sparse_date_range_full(store: PostgresDiaryStore) -> None:
+    _seed_three_dates(store, MockEmbeddingClient(), text="book chapter")
+
+    hits = store.sparse_candidates(
+        "fam-A", "book chapter", 10, date_range=DateRange(start=_MID, end=_MID)
+    )
+    assert {h.chunk_id for h in hits} == {"c-mid"}
+
+
+def test_sparse_date_range_only_lower(store: PostgresDiaryStore) -> None:
+    _seed_three_dates(store, MockEmbeddingClient(), text="book chapter")
+
+    hits = store.sparse_candidates("fam-A", "book chapter", 10, date_range=DateRange(start=_MID))
+    assert {h.chunk_id for h in hits} == {"c-mid", "c-late"}
+
+
+def test_sparse_date_range_only_upper(store: PostgresDiaryStore) -> None:
+    _seed_three_dates(store, MockEmbeddingClient(), text="book chapter")
+
+    hits = store.sparse_candidates("fam-A", "book chapter", 10, date_range=DateRange(end=_MID))
+    assert {h.chunk_id for h in hits} == {"c-early", "c-mid"}
+
+
+def test_sparse_date_range_inclusive_bounds(store: PostgresDiaryStore) -> None:
+    _seed_three_dates(store, MockEmbeddingClient(), text="book chapter")
+
+    hits = store.sparse_candidates(
+        "fam-A", "book chapter", 10, date_range=DateRange(start=_EARLY, end=_LATE)
+    )
+    assert {h.chunk_id for h in hits} == {"c-early", "c-mid", "c-late"}
+
+
+def test_dense_date_range_full(store: PostgresDiaryStore) -> None:
+    client = MockEmbeddingClient()
+    _seed_three_dates(store, client, text="Walked the dog")
+
+    query = client.embed(["Walked the dog"])[0]
+    hits = store.dense_candidates(
+        "fam-A", query, client.model_name, 10, date_range=DateRange(start=_MID, end=_MID)
+    )
+    assert {h.chunk_id for h in hits} == {"c-mid"}
+
+
+def test_dense_date_range_only_lower(store: PostgresDiaryStore) -> None:
+    client = MockEmbeddingClient()
+    _seed_three_dates(store, client, text="Walked the dog")
+
+    query = client.embed(["Walked the dog"])[0]
+    hits = store.dense_candidates(
+        "fam-A", query, client.model_name, 10, date_range=DateRange(start=_MID)
+    )
+    assert {h.chunk_id for h in hits} == {"c-mid", "c-late"}
+
+
+def test_dense_date_range_only_upper(store: PostgresDiaryStore) -> None:
+    client = MockEmbeddingClient()
+    _seed_three_dates(store, client, text="Walked the dog")
+
+    query = client.embed(["Walked the dog"])[0]
+    hits = store.dense_candidates(
+        "fam-A", query, client.model_name, 10, date_range=DateRange(end=_MID)
+    )
+    assert {h.chunk_id for h in hits} == {"c-early", "c-mid"}
+
+
+def test_date_range_none_unchanged(store: PostgresDiaryStore) -> None:
+    """``date_range=None`` returns the pre-3.4 result set on both legs."""
+    client = MockEmbeddingClient()
+    _seed_three_dates(store, client, text="book chapter")
+
+    sparse = store.sparse_candidates("fam-A", "book chapter", 10, date_range=None)
+    assert {h.chunk_id for h in sparse} == {"c-early", "c-mid", "c-late"}
+
+    query = client.embed(["book chapter"])[0]
+    dense = store.dense_candidates("fam-A", query, client.model_name, 10, date_range=None)
+    assert {h.chunk_id for h in dense} == {"c-early", "c-mid", "c-late"}

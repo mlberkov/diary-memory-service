@@ -31,6 +31,7 @@ from dataclasses import replace
 
 from diary_rag.core.diary.models import (
     AnswerTrace,
+    DateRange,
     DiaryEntry,
     EventChunk,
     Query,
@@ -46,6 +47,19 @@ _MOCK_DENSE_THRESHOLD = 0.5
 
 def _tokenize(text: str) -> list[str]:
     return [m.group(0) for m in _TOKEN_RE.finditer(text.lower())]
+
+
+def _chunk_in_date_range(chunk: EventChunk, date_range: DateRange | None) -> bool:
+    """Inclusive ``entry_date`` filter mirroring the Postgres predicate.
+
+    ``None`` (and a both-bounds-``None`` range) imposes no constraint, so
+    the leg output is identical to the pre-3.4 shape (Slice 3.4, D-040).
+    """
+    if date_range is None:
+        return True
+    if date_range.start is not None and chunk.entry_date < date_range.start:
+        return False
+    return not (date_range.end is not None and chunk.entry_date > date_range.end)
 
 
 class MockDiaryStore:
@@ -137,6 +151,8 @@ class MockDiaryStore:
         query_embedding: list[float],
         model_name: str,
         limit: int,
+        *,
+        date_range: DateRange | None = None,
     ) -> list[EventChunk]:
         if not family_id:
             raise ValueError("family_id is required (Runtime invariant R-3)")
@@ -153,6 +169,8 @@ class MockDiaryStore:
         ranked: list[tuple[float, int, EventChunk]] = []
         for index, chunk in enumerate(self._chunks.values()):
             if chunk.family_id != family_id:
+                continue
+            if not _chunk_in_date_range(chunk, date_range):
                 continue
             if chunk.embedding_status is not EmbeddingStatus.READY:
                 continue
@@ -171,6 +189,8 @@ class MockDiaryStore:
         family_id: str,
         query_text: str,
         limit: int,
+        *,
+        date_range: DateRange | None = None,
     ) -> list[EventChunk]:
         if not family_id:
             raise ValueError("family_id is required (Runtime invariant R-3)")
@@ -183,6 +203,8 @@ class MockDiaryStore:
         ranked: list[tuple[int, int, EventChunk]] = []
         for index, chunk in enumerate(self._chunks.values()):
             if chunk.family_id != family_id:
+                continue
+            if not _chunk_in_date_range(chunk, date_range):
                 continue
             chunk_tokens = set(_tokenize(chunk.chunk_text))
             overlap = len(query_tokens & chunk_tokens)
