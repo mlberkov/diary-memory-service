@@ -276,7 +276,7 @@ def test_domain_service_drives_corpus_ingestion() -> None:
             external_user_id=cm.author_user_id,
             text=cm.raw_text,
             payload=cm.raw_text,
-            route=RouteKind.ENTRY,
+            route=RouteKind.NOTE,
             received_at=received_at,
             route_source="command",
         )

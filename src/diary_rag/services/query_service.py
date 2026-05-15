@@ -140,7 +140,7 @@ class QueryService:
         """Answer an ``/ask`` payload via baseline hybrid retrieval.
 
         When ``date_range`` is given, both retrieval legs are restricted
-        to chunks whose ``entry_date`` falls within its inclusive bounds
+        to chunks whose ``note_date`` falls within its inclusive bounds
         (Slice 3.4, D-040); ``None`` (the default) applies no date
         constraint. There is no inbound date syntax yet — the Telegram
         webhook passes no ``date_range``.
@@ -209,7 +209,7 @@ class QueryService:
         evidence = [
             Evidence(
                 chunk_id=h.chunk.chunk_id,
-                entry_date=h.chunk.entry_date,
+                note_date=h.chunk.note_date,
                 chunk_text=h.chunk.chunk_text,
             )
             for h in merged

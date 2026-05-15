@@ -34,11 +34,11 @@ pytestmark = pytest.mark.skipif(
 def _make_chunk(chunk_id: str, text: str) -> EventChunk:
     return EventChunk(
         chunk_id=chunk_id,
-        diary_entry_id="entry-1",
+        note_id="note-1",
         source_message_id="src-1",
         family_id="fam-1",
         author_user_id="user-1",
-        entry_date=date(2026, 5, 13),
+        note_date=date(2026, 5, 13),
         event_index=0,
         chunk_text=text,
         created_at=datetime(2026, 5, 13, tzinfo=UTC),

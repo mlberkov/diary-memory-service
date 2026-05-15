@@ -68,11 +68,11 @@ def _update(text: str, *, update_id: int = 1, message_id: int = 1) -> dict[str, 
 def _chunk(chunk_id: str, text: str) -> EventChunk:
     return EventChunk(
         chunk_id=chunk_id,
-        diary_entry_id=f"e-{chunk_id}",
+        note_id=f"e-{chunk_id}",
         source_message_id=f"s-{chunk_id}",
         family_id="42",
         author_user_id="7",
-        entry_date=date(2026, 5, 9),
+        note_date=date(2026, 5, 9),
         event_index=0,
         chunk_text=text,
         created_at=datetime.now(tz=UTC),
@@ -93,7 +93,7 @@ class _FixedAnswerQueryService:
             created_at=datetime.now(tz=UTC),
         )
         evidence = [
-            Evidence(chunk_id=c.chunk_id, entry_date=c.entry_date, chunk_text=c.chunk_text)
+            Evidence(chunk_id=c.chunk_id, note_date=c.note_date, chunk_text=c.chunk_text)
             for c in self._chunks
         ]
         return AnswerResult(

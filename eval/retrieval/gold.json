@@ -1,5 +1,5 @@
 {
-  "_handle_contract": "expected_handles entries are \"{external_message_id}#{event_index}\". event_index is the 0-based ordinal of the produced EventChunk within the source message after canonical parse_diary_entry + chunking by DiaryService.ingest. It is NOT a business event id, NOT a Telegram message id, NOT any external domain identifier; it exists only because chunk_id is uuid4 at ingest time and so cannot be pinned in this file directly.",
+  "_handle_contract": "expected_handles entries are \"{external_message_id}#{event_index}\". event_index is the 0-based ordinal of the produced EventChunk within the source message after canonical parse_note + chunking by DiaryService.ingest. It is NOT a business event id, NOT a Telegram message id, NOT any external domain identifier; it exists only because chunk_id is uuid4 at ingest time and so cannot be pinned in this file directly.",
   "family_id_default": "eval-fam",
   "queries": [
     {

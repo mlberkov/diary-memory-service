@@ -29,15 +29,15 @@ def _chunk(
     family_id: str = "fam-A",
     text: str = "event text",
     event_index: int = 0,
-    entry_date: date = date(2026, 5, 9),
+    note_date: date = date(2026, 5, 9),
 ) -> EventChunk:
     return EventChunk(
         chunk_id=chunk_id,
-        diary_entry_id=f"entry-{chunk_id}",
+        note_id=f"note-{chunk_id}",
         source_message_id=f"src-{chunk_id}",
         family_id=family_id,
         author_user_id="user-1",
-        entry_date=entry_date,
+        note_date=note_date,
         event_index=event_index,
         chunk_text=text,
         created_at=datetime(2026, 5, 9, 8, 0, tzinfo=UTC),
@@ -88,7 +88,7 @@ def test_every_chunk_appears_in_user_text_and_cited_ids_in_order() -> None:
     for chunk in chunks:
         assert f"chunk_id={chunk.chunk_id}" in prompt.user_text
         assert chunk.chunk_text in prompt.user_text
-        assert chunk.entry_date.isoformat() in prompt.user_text
+        assert chunk.note_date.isoformat() in prompt.user_text
 
 
 def test_prompt_includes_query_text_in_user_section() -> None:

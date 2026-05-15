@@ -13,7 +13,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from diary_rag.core.domain.models import DiaryEntry, EventChunk, SourceMessage
+from diary_rag.core.domain.models import EventChunk, Note, SourceMessage
 from diary_rag.core.routing import RouteKind
 
 PG_DSN = os.environ.get("DIARY_RAG_PG_TEST_DSN")
@@ -32,9 +32,7 @@ if PG_DSN is not None:
 def _truncate(dsn: str) -> None:
     """Reset the three diary tables. Schema is bootstrapped on store init."""
     with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
-        cur.execute(
-            "TRUNCATE event_chunks, diary_entries, source_messages " "RESTART IDENTITY CASCADE"
-        )
+        cur.execute("TRUNCATE event_chunks, notes, source_messages " "RESTART IDENTITY CASCADE")
 
 
 @pytest.fixture
@@ -68,19 +66,19 @@ def _source(
         external_message_id=external_message_id if external_message_id is not None else sid,
         edit_seq=edit_seq,
         raw_text="2026-05-09\nWalked the dog",
-        detected_route=RouteKind.ENTRY,
+        detected_route=RouteKind.NOTE,
         created_at=_now(),
     )
 
 
-def _entry(*, eid: str = "e1", sid: str = "s1", family_id: str = "fam-A") -> DiaryEntry:
-    return DiaryEntry(
-        diary_entry_id=eid,
+def _note(*, eid: str = "e1", sid: str = "s1", family_id: str = "fam-A") -> Note:
+    return Note(
+        note_id=eid,
         source_message_id=sid,
         family_id=family_id,
         author_user_id="u1",
-        entry_date=date(2026, 5, 9),
-        entry_text="Walked the dog",
+        note_date=date(2026, 5, 9),
+        note_text="Walked the dog",
         created_at=_now(),
     )
 
@@ -96,11 +94,11 @@ def _chunk(
 ) -> EventChunk:
     return EventChunk(
         chunk_id=cid,
-        diary_entry_id=eid,
+        note_id=eid,
         source_message_id=sid,
         family_id=family_id,
         author_user_id="u1",
-        entry_date=date(2026, 5, 9),
+        note_date=date(2026, 5, 9),
         event_index=idx,
         chunk_text=text,
         created_at=_now(),
@@ -125,7 +123,7 @@ def test_restart_survival() -> None:
     first = PostgresDomainStore(PG_DSN)
     try:
         first.save_source_message(_source(sid="s1", family_id="fam-A"))
-        first.save_diary_entry(_entry(eid="e1", sid="s1", family_id="fam-A"))
+        first.save_note(_note(eid="e1", sid="s1", family_id="fam-A"))
         first.save_event_chunks(
             [_chunk(cid="c1", eid="e1", sid="s1", family_id="fam-A", text="Walked the dog")]
         )
@@ -195,24 +193,24 @@ def test_save_source_message_raises_on_duplicate_triple(store: PostgresDomainSto
         store.save_source_message(_source(sid="s2", external_message_id="42", edit_seq=0))
 
 
-def test_get_diary_entry_by_source_message_id(store: PostgresDomainStore) -> None:
+def test_get_note_by_source_message_id(store: PostgresDomainStore) -> None:
     store.save_source_message(_source(sid="s1"))
-    store.save_diary_entry(_entry(eid="e1", sid="s1"))
+    store.save_note(_note(eid="e1", sid="s1"))
 
-    fetched = store.get_diary_entry_by_source_message_id("s1")
+    fetched = store.get_note_by_source_message_id("s1")
     assert fetched is not None
-    assert fetched.diary_entry_id == "e1"
+    assert fetched.note_id == "e1"
 
 
-def test_get_diary_entry_by_source_message_id_missing_returns_none(
+def test_get_note_by_source_message_id_missing_returns_none(
     store: PostgresDomainStore,
 ) -> None:
-    assert store.get_diary_entry_by_source_message_id("nope") is None
+    assert store.get_note_by_source_message_id("nope") is None
 
 
 def test_count_event_chunks_for_source(store: PostgresDomainStore) -> None:
     store.save_source_message(_source(sid="s1"))
-    store.save_diary_entry(_entry(eid="e1", sid="s1"))
+    store.save_note(_note(eid="e1", sid="s1"))
     store.save_event_chunks(
         [
             _chunk(cid="c1", eid="e1", sid="s1", idx=0),
@@ -297,7 +295,7 @@ def test_list_source_messages_is_family_scoped_and_ordered(
             external_message_id="1",
             edit_seq=0,
             raw_text="first",
-            detected_route=RouteKind.ENTRY,
+            detected_route=RouteKind.NOTE,
             created_at=base,
         )
     )
@@ -325,14 +323,14 @@ def test_list_source_messages_is_family_scoped_and_ordered(
             external_message_id="3",
             edit_seq=0,
             raw_text="other family",
-            detected_route=RouteKind.ENTRY,
+            detected_route=RouteKind.NOTE,
             created_at=base,
         )
     )
 
     rows = store.list_source_messages("fam-A")
     assert [r.source_message_id for r in rows] == ["a", "b"]
-    assert [r.detected_route for r in rows] == [RouteKind.ENTRY, RouteKind.DRAFT]
+    assert [r.detected_route for r in rows] == [RouteKind.NOTE, RouteKind.DRAFT]
 
     rows_limited = store.list_source_messages("fam-A", limit=1)
     assert [r.source_message_id for r in rows_limited] == ["a"]

@@ -32,8 +32,8 @@ from dataclasses import replace
 from diary_rag.core.domain.models import (
     AnswerTrace,
     DateRange,
-    DiaryEntry,
     EventChunk,
+    Note,
     Query,
     RetrievalHit,
     SourceMessage,
@@ -50,25 +50,25 @@ def _tokenize(text: str) -> list[str]:
 
 
 def _chunk_in_date_range(chunk: EventChunk, date_range: DateRange | None) -> bool:
-    """Inclusive ``entry_date`` filter mirroring the Postgres predicate.
+    """Inclusive ``note_date`` filter mirroring the Postgres predicate.
 
     ``None`` (and a both-bounds-``None`` range) imposes no constraint, so
     the leg output is identical to the pre-3.4 shape (Slice 3.4, D-040).
     """
     if date_range is None:
         return True
-    if date_range.start is not None and chunk.entry_date < date_range.start:
+    if date_range.start is not None and chunk.note_date < date_range.start:
         return False
-    return not (date_range.end is not None and chunk.entry_date > date_range.end)
+    return not (date_range.end is not None and chunk.note_date > date_range.end)
 
 
 class MockDomainStore:
-    """Process-local store for ``SourceMessage``, ``DiaryEntry``, ``EventChunk``."""
+    """Process-local store for ``SourceMessage``, ``Note``, ``EventChunk``."""
 
     def __init__(self) -> None:
         self._sources: dict[str, SourceMessage] = {}
         self._idempotency: dict[tuple[str, str, int], str] = {}
-        self._entries: dict[str, DiaryEntry] = {}
+        self._notes: dict[str, Note] = {}
         self._chunks: dict[str, EventChunk] = {}
         self._embeddings: dict[tuple[str, str], EmbeddingRecord] = {}
         self._queries: dict[str, Query] = {}
@@ -95,8 +95,8 @@ class MockDomainStore:
         self._idempotency[key] = source.source_message_id
         return source, False
 
-    def save_diary_entry(self, entry: DiaryEntry) -> None:
-        self._entries[entry.diary_entry_id] = entry
+    def save_note(self, note: Note) -> None:
+        self._notes[note.note_id] = note
 
     def save_event_chunks(self, chunks: list[EventChunk]) -> None:
         for chunk in chunks:
@@ -131,10 +131,10 @@ class MockDomainStore:
         rows.sort(key=lambda s: (s.created_at, s.source_message_id), reverse=True)
         return rows[:limit]
 
-    def get_diary_entry_by_source_message_id(self, source_message_id: str) -> DiaryEntry | None:
-        for entry in self._entries.values():
-            if entry.source_message_id == source_message_id:
-                return entry
+    def get_note_by_source_message_id(self, source_message_id: str) -> Note | None:
+        for note in self._notes.values():
+            if note.source_message_id == source_message_id:
+                return note
         return None
 
     def count_event_chunks_for_source(self, source_message_id: str) -> int:
@@ -267,8 +267,8 @@ class MockDomainStore:
     def len_sources(self) -> int:
         return len(self._sources)
 
-    def len_entries(self) -> int:
-        return len(self._entries)
+    def len_notes(self) -> int:
+        return len(self._notes)
 
     def len_chunks(self) -> int:
         return len(self._chunks)
@@ -288,7 +288,7 @@ class MockDomainStore:
     def clear(self) -> None:
         self._sources.clear()
         self._idempotency.clear()
-        self._entries.clear()
+        self._notes.clear()
         self._chunks.clear()
         self._embeddings.clear()
         self._queries.clear()

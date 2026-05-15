@@ -36,7 +36,7 @@ def _ask(query: str, *, chat: str = "42", user: str = "7") -> InboundMessage:
     )
 
 
-def _entry(
+def _note(
     payload: str, *, chat: str = "42", user: str = "7", msg_id: str = "100"
 ) -> InboundMessage:
     return InboundMessage(
@@ -44,7 +44,7 @@ def _entry(
         external_chat_id=chat,
         external_user_id=user,
         text=f"/note {payload}",
-        route=RouteKind.ENTRY,
+        route=RouteKind.NOTE,
         received_at=datetime.now(tz=UTC),
         route_source="command",
         payload=payload,
@@ -57,7 +57,7 @@ def _wire(store: MockDomainStore, *, top_k: int = 5) -> QueryService:
 
 def _ingest(store: MockDomainStore, payload: str, *, chat: str = "42", msg_id: str = "100") -> None:
     DomainService(store, embedding_client=MockEmbeddingClient()).ingest(
-        _entry(payload, chat=chat, msg_id=msg_id)
+        _note(payload, chat=chat, msg_id=msg_id)
     )
 
 

@@ -63,7 +63,7 @@ DEFAULT_CACHE = Path("eval/retrieval/embeddings_cache.json")
 _TRUNCATE_TABLES = (
     "embedding_records",
     "event_chunks",
-    "diary_entries",
+    "notes",
     "source_messages",
 )
 
@@ -138,7 +138,7 @@ def _run_postgres(
         raise RuntimeError(
             "DIARY_RAG_PG_TEST_DSN is required for --mode postgres; "
             "point it at a dedicated eval database (the harness truncates "
-            "embedding_records, event_chunks, diary_entries, source_messages)."
+            "embedding_records, event_chunks, notes, source_messages)."
         )
 
     import psycopg
@@ -169,8 +169,8 @@ def _run_postgres(
         def chunks_for_source(source_message_id: str) -> list[EventChunk]:
             with psycopg.connect(dsn) as conn, conn.cursor() as cur:
                 cur.execute(
-                    "SELECT chunk_id, diary_entry_id, source_message_id, family_id, "
-                    "       author_user_id, entry_date, event_index, chunk_text, "
+                    "SELECT chunk_id, note_id, source_message_id, family_id, "
+                    "       author_user_id, note_date, event_index, chunk_text, "
                     "       created_at, embedding_status "
                     "  FROM event_chunks "
                     " WHERE source_message_id = %s "
@@ -181,11 +181,11 @@ def _run_postgres(
             return [
                 EventChunk(
                     chunk_id=row[0],
-                    diary_entry_id=row[1],
+                    note_id=row[1],
                     source_message_id=row[2],
                     family_id=row[3],
                     author_user_id=row[4],
-                    entry_date=row[5],
+                    note_date=row[5],
                     event_index=row[6],
                     chunk_text=row[7],
                     created_at=row[8],

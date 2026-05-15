@@ -22,7 +22,7 @@ def _source(
     author: str = "user-1",
     msg_id: str,
     raw_text: str = "hello",
-    route: RouteKind = RouteKind.ENTRY,
+    route: RouteKind = RouteKind.NOTE,
     created_at: datetime,
 ) -> SourceMessage:
     return SourceMessage(
@@ -84,7 +84,7 @@ def test_export_json_envelope_includes_notes_and_drafts_in_order() -> None:
     ids = [r["source_message_id"] for r in document["records"]]
     routes = [r["detected_route"] for r in document["records"]]
     assert ids == ["A-1", "A-2"]
-    assert routes == ["entry", "draft"]
+    assert routes == ["note", "draft"]
 
 
 def test_export_txt_format_uses_text_media_type_and_block_layout() -> None:

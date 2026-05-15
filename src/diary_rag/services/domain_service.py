@@ -1,8 +1,8 @@
 """Channel-neutral ingestion service.
 
 Persists the raw inbound message first (Invariant I-3, runtime R-1),
-then — for note-lifecycle messages (``RouteKind.ENTRY``) — parses the
-date-led payload and creates one ``DiaryEntry`` plus one ``EventChunk``
+then — for note-lifecycle messages (``RouteKind.NOTE``) — parses the
+date-led payload and creates one ``Note`` plus one ``EventChunk``
 per event line (I-5). Authorship and family scope are carried through
 (I-6, I-7).
 
@@ -38,12 +38,12 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from diary_rag.core.domain import (
-    DiaryEntry,
     EventChunk,
     FallbackMode,
     IngestResult,
+    Note,
     SourceMessage,
-    parse_diary_entry,
+    parse_note,
 )
 from diary_rag.core.embeddings import EmbeddingClient, EmbeddingRecord, EmbeddingStatus
 from diary_rag.core.routing import InboundMessage, RouteKind
@@ -108,7 +108,7 @@ class DomainService:
                 source_message_id=source_message_id,
             )
 
-        parsed = parse_diary_entry(message.payload)
+        parsed = parse_note(message.payload)
         if parsed is None:
             return IngestResult(
                 fallback=FallbackMode.INVALID_INPUT,
@@ -116,26 +116,26 @@ class DomainService:
                 invalid_first_line=_first_line(message.payload),
             )
 
-        diary_entry_id = str(uuid4())
-        entry = DiaryEntry(
-            diary_entry_id=diary_entry_id,
+        note_id = str(uuid4())
+        note = Note(
+            note_id=note_id,
             source_message_id=source_message_id,
             family_id=family_id,
             author_user_id=author_user_id,
-            entry_date=parsed.entry_date,
-            entry_text="\n".join(parsed.events),
+            note_date=parsed.note_date,
+            note_text="\n".join(parsed.events),
             created_at=now,
         )
-        self._store.save_diary_entry(entry)
+        self._store.save_note(note)
 
         chunks = [
             EventChunk(
                 chunk_id=str(uuid4()),
-                diary_entry_id=diary_entry_id,
+                note_id=note_id,
                 source_message_id=source_message_id,
                 family_id=family_id,
                 author_user_id=author_user_id,
-                entry_date=parsed.entry_date,
+                note_date=parsed.note_date,
                 event_index=i,
                 chunk_text=line,
                 created_at=now,
@@ -150,7 +150,7 @@ class DomainService:
         return IngestResult(
             fallback=FallbackMode.NONE,
             source_message_id=source_message_id,
-            entry_date=parsed.entry_date,
+            note_date=parsed.note_date,
             events_count=len(chunks),
         )
 
@@ -232,8 +232,8 @@ class DomainService:
                 source_message_id=source.source_message_id,
                 replayed=True,
             )
-        entry = self._store.get_diary_entry_by_source_message_id(source.source_message_id)
-        if entry is None:
+        note = self._store.get_note_by_source_message_id(source.source_message_id)
+        if note is None:
             return IngestResult(
                 fallback=FallbackMode.INVALID_INPUT,
                 source_message_id=source.source_message_id,
@@ -244,7 +244,7 @@ class DomainService:
         return IngestResult(
             fallback=FallbackMode.NONE,
             source_message_id=source.source_message_id,
-            entry_date=entry.entry_date,
+            note_date=note.note_date,
             events_count=events_count,
             replayed=True,
         )

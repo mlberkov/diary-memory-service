@@ -21,7 +21,7 @@ from uuid import uuid4
 import pytest
 
 from diary_rag.adapters.embeddings import MockEmbeddingClient
-from diary_rag.core.domain.models import DateRange, DiaryEntry, EventChunk, SourceMessage
+from diary_rag.core.domain.models import DateRange, EventChunk, Note, SourceMessage
 from diary_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
 from diary_rag.core.routing import RouteKind
 
@@ -44,7 +44,7 @@ _DATE = date(2026, 5, 11)
 def _truncate(dsn: str) -> None:
     with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
-            "TRUNCATE embedding_records, event_chunks, diary_entries, source_messages "
+            "TRUNCATE embedding_records, event_chunks, notes, source_messages "
             "RESTART IDENTITY CASCADE"
         )
 
@@ -69,7 +69,7 @@ def _seed(
     status: EmbeddingStatus = EmbeddingStatus.READY,
     embed_with: MockEmbeddingClient | None = None,
     event_index: int = 0,
-    entry_date: date = _DATE,
+    note_date: date = _DATE,
 ) -> None:
     sid = f"src-{cid}"
     eid = f"ent-{cid}"
@@ -83,18 +83,18 @@ def _seed(
             external_message_id=sid,
             edit_seq=0,
             raw_text=text,
-            detected_route=RouteKind.ENTRY,
+            detected_route=RouteKind.NOTE,
             created_at=_NOW,
         )
     )
-    store.save_diary_entry(
-        DiaryEntry(
-            diary_entry_id=eid,
+    store.save_note(
+        Note(
+            note_id=eid,
             source_message_id=sid,
             family_id=family_id,
             author_user_id="u1",
-            entry_date=entry_date,
-            entry_text=text,
+            note_date=note_date,
+            note_text=text,
             created_at=_NOW,
         )
     )
@@ -102,11 +102,11 @@ def _seed(
         [
             EventChunk(
                 chunk_id=cid,
-                diary_entry_id=eid,
+                note_id=eid,
                 source_message_id=sid,
                 family_id=family_id,
                 author_user_id="u1",
-                entry_date=entry_date,
+                note_date=note_date,
                 event_index=event_index,
                 chunk_text=text,
                 created_at=_NOW,
@@ -244,10 +244,10 @@ _LATE = date(2026, 5, 12)
 def _seed_three_dates(
     store: PostgresDomainStore, client: MockEmbeddingClient, *, text: str
 ) -> None:
-    """Seed identical-text chunks on three distinct entry dates."""
-    _seed(store, cid="c-early", text=text, embed_with=client, entry_date=_EARLY)
-    _seed(store, cid="c-mid", text=text, embed_with=client, entry_date=_MID)
-    _seed(store, cid="c-late", text=text, embed_with=client, entry_date=_LATE)
+    """Seed identical-text chunks on three distinct note dates."""
+    _seed(store, cid="c-early", text=text, embed_with=client, note_date=_EARLY)
+    _seed(store, cid="c-mid", text=text, embed_with=client, note_date=_MID)
+    _seed(store, cid="c-late", text=text, embed_with=client, note_date=_LATE)
 
 
 def test_sparse_date_range_full(store: PostgresDomainStore) -> None:

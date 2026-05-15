@@ -4,9 +4,9 @@ When the user sends a message without an explicit command, the webhook
 calls :func:`classify_plain_text` to pick a destination. The result is
 one of:
 
-- ``RouteKind.ENTRY``  — first non-empty line is an ISO ``YYYY-MM-DD``
+- ``RouteKind.NOTE``  — first non-empty line is an ISO ``YYYY-MM-DD``
   date and the body has at least one event line. Detected by reusing
-  :func:`diary_rag.core.domain.parser.parse_diary_entry` so the ISO-only
+  :func:`diary_rag.core.domain.parser.parse_note` so the ISO-only
   rule (assumption A-28) lives in one place.
 - ``RouteKind.ASK``    — the text ends with ``?`` or its first token is
   in a fixed interrogative/imperative set.
@@ -24,7 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from diary_rag.core.domain.parser import parse_diary_entry
+from diary_rag.core.domain.parser import parse_note
 from diary_rag.core.routing.models import RouteKind
 
 Confidence = Literal["high", "low"]
@@ -73,9 +73,9 @@ def classify_plain_text(text: str) -> ClassifiedRoute:
     if not stripped:
         return ClassifiedRoute(RouteKind.CLARIFY, text or "", "low", "empty_after_strip")
 
-    parsed = parse_diary_entry(stripped)
+    parsed = parse_note(stripped)
     if parsed is not None and parsed.events:
-        return ClassifiedRoute(RouteKind.ENTRY, text, "high", "first_line_iso_date_with_events")
+        return ClassifiedRoute(RouteKind.NOTE, text, "high", "first_line_iso_date_with_events")
 
     if stripped.endswith("?"):
         return ClassifiedRoute(RouteKind.ASK, text, "high", "question_mark_terminator")

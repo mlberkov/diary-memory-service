@@ -122,7 +122,7 @@ def _post_or_seed(store: MockDomainStore) -> None:
             external_message_id="100",
             edit_seq=0,
             raw_text="seeded content",
-            detected_route=RouteKind.ENTRY,
+            detected_route=RouteKind.NOTE,
             created_at=datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC),
         )
     )

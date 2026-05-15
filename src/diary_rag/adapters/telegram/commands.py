@@ -16,7 +16,7 @@ from diary_rag.core.routing import RouteKind
 COMMAND_TOKENS: dict[str, RouteKind] = {
     "/start": RouteKind.START,
     "/help": RouteKind.HELP,
-    "/note": RouteKind.ENTRY,
+    "/note": RouteKind.NOTE,
     "/ask": RouteKind.ASK,
     "/drafts": RouteKind.DRAFTS,
     "/export": RouteKind.EXPORT,

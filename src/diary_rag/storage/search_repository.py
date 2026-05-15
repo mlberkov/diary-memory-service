@@ -47,7 +47,7 @@ class SearchRepository(Protocol):
         a chunk indexed under a different model is not a candidate for
         this query.
 
-        When ``date_range`` is given, only chunks whose ``entry_date``
+        When ``date_range`` is given, only chunks whose ``note_date``
         falls within its inclusive bounds participate; ``None`` (the
         default) applies no date constraint and preserves the D-025
         retrieval shape (Slice 3.4, D-040).
@@ -67,7 +67,7 @@ class SearchRepository(Protocol):
         configures — for Postgres, ``to_tsvector('simple', ...)``;
         ``websearch_to_tsquery('simple', ...)`` parses the query.
 
-        When ``date_range`` is given, only chunks whose ``entry_date``
+        When ``date_range`` is given, only chunks whose ``note_date``
         falls within its inclusive bounds participate; ``None`` (the
         default) applies no date constraint and preserves the D-025
         retrieval shape (Slice 3.4, D-040).

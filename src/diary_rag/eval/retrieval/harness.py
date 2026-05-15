@@ -13,7 +13,7 @@ Handle contract — restated everywhere it matters: every entry in
 ``handles_to_chunk_ids`` map has the form
 ``f"{external_message_id}#{event_index}"``, where ``event_index`` is the
 **0-based ordinal of the produced ``EventChunk`` within the source
-message after canonical ``parse_diary_entry`` + chunking by
+message after canonical ``parse_note`` + chunking by
 ``DomainService.ingest``**. It is NOT a business event id, NOT a Telegram
 message id, NOT any external domain identifier. The handle only exists
 because ``chunk_id`` is uuid4 at ingest time and so cannot be pinned in
@@ -233,7 +233,7 @@ def ingest_fixture_corpus(
             external_user_id=cm.author_user_id,
             text=cm.raw_text,
             payload=cm.raw_text,
-            route=RouteKind.ENTRY,
+            route=RouteKind.NOTE,
             received_at=received_at,
             route_source="command",
         )

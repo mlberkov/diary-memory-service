@@ -118,7 +118,7 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
 Plain text without a slash command is classified by `core.routing.classifier`: a dated body becomes an entry, a question becomes an ask, anything else gets a clarification reply. Heuristic-routed replies carry an explicit marker so the user can see what happened (D-006, R-6, R-11).
 
 ```bash
-# 5. Dated plain text — heuristic ENTRY
+# 5. Dated plain text — heuristic NOTE
 curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
@@ -171,7 +171,7 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
 docker compose exec -T postgres psql -U postgres -d theygrow_diary_rag -c \
   "SELECT
      (SELECT count(*) FROM source_messages)   AS sources,
-     (SELECT count(*) FROM diary_entries)     AS entries,
+     (SELECT count(*) FROM notes)     AS notes,
      (SELECT count(*) FROM event_chunks)      AS chunks,
      (SELECT count(*) FROM embedding_records) AS embeddings;"
 # → sources=1 entries=1 chunks=2 embeddings=2
@@ -226,7 +226,7 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
 # 2. Verify rows landed in the SQLite file
 python -c "import sqlite3; c=sqlite3.connect('./data/diary.db'); \
   print('sources:', c.execute('select count(*) from source_messages').fetchone()[0]); \
-  print('entries:', c.execute('select count(*) from diary_entries').fetchone()[0]); \
+  print('notes:', c.execute('select count(*) from notes').fetchone()[0]); \
   print('chunks:',  c.execute('select count(*) from event_chunks').fetchone()[0])"
 # → sources: 1 / entries: 1 / chunks: 2
 

@@ -13,7 +13,7 @@ from diary_rag.core.routing import RouteKind
     [
         ("/start", RouteKind.START),
         ("/help", RouteKind.HELP),
-        ("/note", RouteKind.ENTRY),
+        ("/note", RouteKind.NOTE),
         ("/ask", RouteKind.ASK),
         ("/drafts", RouteKind.DRAFTS),
         ("/sources", RouteKind.SOURCES),
@@ -53,7 +53,7 @@ def test_parse_command_old_entry_token_no_longer_maps_to_entry_route() -> None:
 
 def test_parse_command_returns_payload_after_command() -> None:
     route, payload = parse_command("/note 2026-05-09\nFoo")
-    assert route is RouteKind.ENTRY
+    assert route is RouteKind.NOTE
     assert payload == "2026-05-09\nFoo"
 
 
@@ -65,7 +65,7 @@ def test_parse_command_strips_bot_username_suffix() -> None:
 
 def test_parse_command_handles_newline_after_command() -> None:
     route, payload = parse_command("/note\n2026-05-09\nFoo")
-    assert route is RouteKind.ENTRY
+    assert route is RouteKind.NOTE
     assert payload == "2026-05-09\nFoo"
 
 

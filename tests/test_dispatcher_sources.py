@@ -30,11 +30,11 @@ from diary_rag.services.dispatcher import Dispatcher
 def _chunk(chunk_id: str, text: str, *, family_id: str = "fam-A") -> EventChunk:
     return EventChunk(
         chunk_id=chunk_id,
-        diary_entry_id=f"entry-{chunk_id}",
+        note_id=f"note-{chunk_id}",
         source_message_id=f"src-{chunk_id}",
         family_id=family_id,
         author_user_id="user-1",
-        entry_date=date(2026, 5, 9),
+        note_date=date(2026, 5, 9),
         event_index=0,
         chunk_text=text,
         created_at=datetime.now(tz=UTC),
@@ -60,7 +60,7 @@ def _answer(
     answer_text: str | None = None,
 ) -> AnswerResult:
     evidence = [
-        Evidence(chunk_id=c.chunk_id, entry_date=c.entry_date, chunk_text=c.chunk_text)
+        Evidence(chunk_id=c.chunk_id, note_date=c.note_date, chunk_text=c.chunk_text)
         for c in chunks
     ]
     context: AnswerContext | None

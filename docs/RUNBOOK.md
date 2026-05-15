@@ -71,7 +71,7 @@ docker compose exec -T postgres psql -U postgres -d theygrow_diary_rag -c \
 There is no auto-retry (A-35). Replay (R-2) does not re-embed. A future Phase-6 reconciliation packet will add bounded retries and a dead-letter strategy.
 
 #### Destructive local schema upgrades
-There is no migration tool yet (A-34). `schema.sql` is bootstrapped via `CREATE TABLE / CREATE INDEX IF NOT EXISTS`, which does **not** apply changes to columns or constraints on tables that already exist in a stale volume. When pulling a packet that adds or alters columns (e.g. D-023's `external_message_id`, `edit_seq`, and the `UNIQUE` idempotency constraint; D-024's pgvector image swap + `embedding_records` table + `event_chunks.embedding_status` column; D-025's generated `event_chunks.chunk_text_tsv` column + GIN index), reset the local Postgres volume:
+There is no migration tool yet (A-34). `schema.sql` is bootstrapped via `CREATE TABLE / CREATE INDEX IF NOT EXISTS`, which does **not** apply changes to columns or constraints on tables that already exist in a stale volume. When pulling a packet that adds or alters columns or constraints (e.g. D-023's `external_message_id`, `edit_seq`, and the `UNIQUE` idempotency constraint; D-024's pgvector image swap + `embedding_records` table + `event_chunks.embedding_status` column; D-025's generated `event_chunks.chunk_text_tsv` column + GIN index; R-2's `entry`→`note` rename — the `notes` table + its columns, `event_chunks.note_id`, and the `detected_route` CHECK now listing `'note'`), reset the local Postgres volume:
 
 ```
 docker compose down -v
@@ -160,7 +160,7 @@ SELECT q.created_at, q.query_text, a.fallback_mode, a.model_name,
 A-34 destructive-upgrade discipline applies: existing local Postgres volumes that pre-date the Slice 4.3b CHECK widening on `queries.fallback` and `answer_traces.fallback_mode` must be reset via `docker compose down -v` before the bootstrap DDL applies cleanly. Real provider adapters remain deferred to Phase 6.
 
 ### Selected-chunks recall (`/sources`, D-036)
-`/sources` exposes the **selected chunks as-is** for the chat's most recent `/ask` turn: the post-RRF top-k chunks `services/context_assembler.assemble_answer_context` produced and `build_answer_prompt` fed to the LLM — i.e. the same `chunk_id` list `AnswerTrace.context_chunk_ids` records, rendered with `entry_date`, `chunk_id`, and the full `chunk_text` verbatim. It is not citations, not fine-grained attribution, and not the full pre-RRF candidate pool. Outbound delivery is one Telegram message by default and splits across multiple messages only when the 4096-char cap forces it (whole-block boundaries; `(part k/N)` footers on an oversized single chunk; identical packing semantics to `/drafts`).
+`/sources` exposes the **selected chunks as-is** for the chat's most recent `/ask` turn: the post-RRF top-k chunks `services/context_assembler.assemble_answer_context` produced and `build_answer_prompt` fed to the LLM — i.e. the same `chunk_id` list `AnswerTrace.context_chunk_ids` records, rendered with `note_date`, `chunk_id`, and the full `chunk_text` verbatim. It is not citations, not fine-grained attribution, and not the full pre-RRF candidate pool. Outbound delivery is one Telegram message by default and splits across multiple messages only when the 4096-char cap forces it (whole-block boundaries; `(part k/N)` footers on an oversized single chunk; identical packing semantics to `/drafts`).
 
 The state behind `/sources` is a process-local `Dispatcher._latest_sources: dict[str, tuple[EventChunk, ...]]` keyed by `family_id`. The current FastAPI wiring at `adapters/telegram/webhook.py` makes `Dispatcher` a module-level singleton via `get_dispatcher()`, so `/ask` and a follow-up `/sources` are served by the same instance within one process. **Every `/ask` dispatch updates the cache**: non-empty `answer.context.ordered_chunks` overwrites; empty (empty-query, empty-retrieval `NO_EVIDENCE`, retrieval-unavailable on SQLite) clears. Non-`/ask` routes never touch the cache. `/sources` itself is read-only.
 
@@ -179,7 +179,7 @@ Two modes share one metric shape (aggregate `recall@{5,10,20}`, `mrr@20`, `per_l
   uv run python -m diary_rag.eval.retrieval --mode mock
   ```
 
-- **Postgres mode (operator baseline).** Truncates `embedding_records`, `event_chunks`, `diary_entries`, `source_messages` on the connected DSN, then re-ingests `eval/retrieval/corpus.jsonl` through the canonical `DomainService.ingest` path. Point the DSN at a **dedicated eval database** so production data is never touched:
+- **Postgres mode (operator baseline).** Truncates `embedding_records`, `event_chunks`, `notes`, `source_messages` on the connected DSN, then re-ingests `eval/retrieval/corpus.jsonl` through the canonical `DomainService.ingest` path. Point the DSN at a **dedicated eval database** so production data is never touched:
 
   ```bash
   DIARY_RAG_PG_TEST_DSN=postgresql://... \
@@ -217,16 +217,16 @@ BM25, reranker, Qdrant, halfvec/HNSW (A-36b), and multilingual sparse tuning (A-
 Webhook only (D-019). Expose the local process via a tunnel (e.g. `ngrok`, `cloudflared`) and register the tunnel URL with the bot. There is no polling fallback.
 
 ### Command surface (D-028, D-030, D-031, D-036)
-The Telegram code path exposes `/note`, `/ask`, `/sources`, `/drafts`, and `/export`, with absence of an explicit command defaulting to **draft** (D-028). The explicit `/draft` command was removed in D-030 — drafts are created only by the no-command default and recalled via `/drafts`. `/sources` (D-036) returns the chunks retrieval selected for the chat's most recent `/ask`. Internal symbol renames (`RouteKind.ENTRY` → `NOTE`, persisted `detected_route='entry'`) remain deferred under D-026.
+The Telegram code path exposes `/note`, `/ask`, `/sources`, `/drafts`, and `/export`, with absence of an explicit command defaulting to **draft** (D-028). The explicit `/draft` command was removed in D-030 — drafts are created only by the no-command default and recalled via `/drafts`. `/sources` (D-036) returns the chunks retrieval selected for the chat's most recent `/ask`.
 
 Operationally: the draft floor (R-13) means no inbound message is silently discarded, even when routing confidence is low. The webhook log line records `lifecycle=draft|note|query|other` so an operator can see which lifecycle state each delivery resolved to. `DomainService` emits `draft.persisted source_message_id=… family_id=… effective_path=fresh|replay` when the draft path commits. CLARIFY (D-020) remains a valid reply shape for the rare case where a heuristic would actively conflict with intent, but the classifier no longer emits CLARIFY for plain text; raw persistence is unconditional.
 
-Schema upgrade note: the `source_messages.detected_route` CHECK constraint extended from `{start, help, entry, ask, clarify, unknown}` to `{start, help, entry, ask, draft, clarify, unknown}` (D-028). Per A-34, existing local Postgres volumes must be reset with `docker compose down -v` before the new CHECK applies; SQLite has no enum constraint on the column. Until the reset is performed, inserts with `detected_route='draft'` raise a CHECK violation against the live Postgres backend.
+Schema upgrade note: the `source_messages.detected_route` CHECK constraint extended from `{start, help, note, ask, clarify, unknown}` to `{start, help, note, ask, draft, clarify, unknown}` (D-028). Per A-34, existing local Postgres volumes must be reset with `docker compose down -v` before the new CHECK applies; SQLite has no enum constraint on the column. Until the reset is performed, inserts with `detected_route='draft'` raise a CHECK violation against the live Postgres backend.
 
 ### Raw-data durability and recovery (D-027)
 Raw `SourceMessage` is the highest-tier durability surface (I-15). The target operational contour:
 
-- daily backup window (target: `03:00–05:00` local time) covering at minimum `source_messages` plus enough relational scaffolding to restore `SourceMessage → DiaryEntry → EventChunk` lineage,
+- daily backup window (target: `03:00–05:00` local time) covering at minimum `source_messages` plus enough relational scaffolding to restore `SourceMessage → Note → EventChunk` lineage,
 - a stronger-than-nightly recovery primitive (continuous WAL archiving, point-in-time recovery, streaming replicas, or a managed-cloud equivalent — selected per deployment shape).
 
 Specific backup tooling and RPO/RTO targets remain bracketed as A-40. Derived state (embeddings, indexes, retrieval traces, answer traces) is reproducible from raw under the active parser/embedding versions; raw loss is unrecoverable, so operational policies treat raw retention as the highest tier.

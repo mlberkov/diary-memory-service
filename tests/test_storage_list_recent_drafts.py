@@ -49,7 +49,7 @@ def test_mock_list_recent_drafts_returns_drafts_only() -> None:
     store = MockDomainStore()
     base = datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC)
     store.save_source_message(_source(sid="d", msg_id="1", route=RouteKind.DRAFT, created_at=base))
-    store.save_source_message(_source(sid="n", msg_id="2", route=RouteKind.ENTRY, created_at=base))
+    store.save_source_message(_source(sid="n", msg_id="2", route=RouteKind.NOTE, created_at=base))
 
     rows = store.list_recent_drafts("fam-A", limit=10)
     assert [r.source_message_id for r in rows] == ["d"]
@@ -135,9 +135,7 @@ def _truncate(dsn: str) -> None:
     import psycopg
 
     with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
-        cur.execute(
-            "TRUNCATE event_chunks, diary_entries, source_messages " "RESTART IDENTITY CASCADE"
-        )
+        cur.execute("TRUNCATE event_chunks, notes, source_messages " "RESTART IDENTITY CASCADE")
 
 
 @pytest.fixture
@@ -157,7 +155,7 @@ def test_pg_list_recent_drafts_returns_drafts_only_most_recent_first(
 ) -> None:
     base = datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC)
     pg_store.save_source_message(
-        _source(sid="note", msg_id="1", route=RouteKind.ENTRY, created_at=base)
+        _source(sid="note", msg_id="1", route=RouteKind.NOTE, created_at=base)
     )
     pg_store.save_source_message(
         _source(sid="d-old", msg_id="2", route=RouteKind.DRAFT, created_at=base)

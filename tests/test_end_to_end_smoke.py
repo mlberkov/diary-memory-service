@@ -82,15 +82,15 @@ def _update(
     }
 
 
-def test_entry_then_ask_returns_grounded_reply_with_date() -> None:
+def test_note_then_ask_returns_grounded_reply_with_date() -> None:
     client, store = _client_with_fresh_store()
 
-    entry_resp = _post(
+    note_resp = _post(
         client,
         _update("/note 2026-05-09\nHad a calm morning\nTried a new book", update_id=1),
     )
-    assert entry_resp.status_code == 200
-    assert entry_resp.json()["text"] == "Saved 2 events for 2026-05-09."
+    assert note_resp.status_code == 200
+    assert note_resp.json()["text"] == "Saved 2 events for 2026-05-09."
     assert store.len_chunks() == 2
 
     ask_resp = _post(client, _update("/ask book", update_id=2, message_id=2))
@@ -139,7 +139,7 @@ def test_ask_with_no_match_returns_no_evidence_fallback() -> None:
     assert trace.answer_text == ""
 
 
-def test_entry_with_invalid_first_line_returns_invalid_input_and_persists_source() -> None:
+def test_note_with_invalid_first_line_returns_invalid_input_and_persists_source() -> None:
     client, store = _client_with_fresh_store()
 
     resp = _post(client, _update("/note not-a-date\nfoo", update_id=1))
@@ -149,11 +149,11 @@ def test_entry_with_invalid_first_line_returns_invalid_input_and_persists_source
         "Mock /note needs an ISO date (YYYY-MM-DD) on the first line. Got: 'not-a-date'."
     )
     assert store.len_sources() == 1
-    assert store.len_entries() == 0
+    assert store.len_notes() == 0
     assert store.len_chunks() == 0
 
 
-def test_ask_before_any_entry_returns_no_evidence() -> None:
+def test_ask_before_any_note_returns_no_evidence() -> None:
     client, _ = _client_with_fresh_store()
 
     resp = _post(client, _update("/ask anything", update_id=1))
@@ -162,7 +162,7 @@ def test_ask_before_any_entry_returns_no_evidence() -> None:
     assert resp.json()["text"] == "No memories matched 'anything'."
 
 
-def test_dated_plain_text_is_ingested_as_entry_via_heuristic() -> None:
+def test_dated_plain_text_is_ingested_as_note_via_heuristic() -> None:
     client, store = _client_with_fresh_store()
 
     resp = _post(client, _update("2026-05-10\nLearned a new recipe\nWalked 5km", update_id=1))
@@ -200,7 +200,7 @@ def test_ambiguous_plain_text_persists_as_draft_under_no_command_default() -> No
     assert body["text"].startswith("Stored as draft")
     assert "/note" in body["text"]
     assert store.len_sources() == 1
-    assert store.len_entries() == 0
+    assert store.len_notes() == 0
     assert store.len_chunks() == 0
 
 
@@ -215,7 +215,7 @@ def test_no_command_plain_text_persists_as_draft_and_skips_enrichment() -> None:
     body = resp.json()
     assert body["text"].startswith("Stored as draft")
     assert store.len_sources() == 1
-    assert store.len_entries() == 0
+    assert store.len_notes() == 0
     assert store.len_chunks() == 0
     assert store.len_embeddings() == 0
 
@@ -241,7 +241,7 @@ def test_replayed_draft_returns_same_reply_and_does_not_duplicate(
     assert any("lifecycle=draft" in line and "effective_path=replay" in line for line in paths)
 
 
-def test_replayed_entry_returns_same_reply_and_does_not_duplicate(
+def test_replayed_note_returns_same_reply_and_does_not_duplicate(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     client, store = _client_with_fresh_store()
@@ -260,7 +260,7 @@ def test_replayed_entry_returns_same_reply_and_does_not_duplicate(
     assert first.json() == second.json()
     assert second.json()["text"] == "Saved 2 events for 2026-05-09."
     assert store.len_sources() == 1
-    assert store.len_entries() == 1
+    assert store.len_notes() == 1
     assert store.len_chunks() == 2
 
     paths = [line for line in caplog.text.splitlines() if "telegram.webhook" in line]
@@ -288,7 +288,7 @@ def test_edited_message_is_distinct_state_from_original() -> None:
     assert first.status_code == 200
     assert edited.status_code == 200
     assert store.len_sources() == 2
-    assert store.len_entries() == 2
+    assert store.len_notes() == 2
     assert store.len_chunks() == 5
 
 

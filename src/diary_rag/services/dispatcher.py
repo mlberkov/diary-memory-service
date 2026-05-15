@@ -1,7 +1,7 @@
 """Inbound-message dispatcher.
 
 Maps a channel-neutral :class:`InboundMessage` to a
-:class:`DispatchResult` carrying a reply string. ``ENTRY``, ``DRAFT``,
+:class:`DispatchResult` carrying a reply string. ``NOTE``, ``DRAFT``,
 and ``ASK`` delegate to :class:`DomainService` / :class:`QueryService`;
 ``CLARIFY`` returns a fixed clarification message; other routes return
 fixed strings appropriate for the current phase.
@@ -63,7 +63,7 @@ _REPLY_CLARIFY = (
 _REPLY_EXPORT_USAGE = "Usage: /export json | /export txt — pick a format."
 _REPLY_DRAFTS_USAGE = "Usage: /drafts [N]. N must be a positive integer."
 _REPLY_DRAFTS_EMPTY = "No drafts to show."
-_HEURISTIC_MARKER_ENTRY = "(routed as note — send /note next time to be explicit)"
+_HEURISTIC_MARKER_NOTE = "(routed as note — send /note next time to be explicit)"
 _HEURISTIC_MARKER_ASK = "(routed as question — send /ask next time to be explicit)"
 _DRAFT_REPLY_PREFIX = "Stored as draft"
 _DRAFT_REPLY_HINT = (
@@ -75,11 +75,11 @@ def _format_ingest_reply(result: IngestResult) -> str:
     if result.fallback is FallbackMode.INVALID_INPUT:
         got = result.invalid_first_line or ""
         return f"Mock /note needs an ISO date (YYYY-MM-DD) on the first line. Got: '{got}'."
-    assert result.entry_date is not None
+    assert result.note_date is not None
     if result.events_count == 0:
-        return f"Saved {result.entry_date.isoformat()} with no event lines."
+        return f"Saved {result.note_date.isoformat()} with no event lines."
     plural = "event" if result.events_count == 1 else "events"
-    return f"Saved {result.events_count} {plural} for {result.entry_date.isoformat()}."
+    return f"Saved {result.events_count} {plural} for {result.note_date.isoformat()}."
 
 
 def _format_draft_reply(result: IngestResult) -> str:
@@ -101,10 +101,10 @@ def _render_source_block(chunk: EventChunk) -> str:
     """Render one selected chunk for ``/sources`` (D-036).
 
     "Selected" = post-RRF top-k chunk fed into the prompt. Rendered
-    "as-is": full ``chunk_text`` with the entry date and chunk id as a
+    "as-is": full ``chunk_text`` with the note date and chunk id as a
     header. Not a citation, not fine-grained attribution.
     """
-    return f"[{chunk.entry_date.isoformat()}] {chunk.chunk_id}\n\n{chunk.chunk_text}"
+    return f"[{chunk.note_date.isoformat()}] {chunk.chunk_id}\n\n{chunk.chunk_text}"
 
 
 def _format_answer_reply(result: AnswerResult) -> str:
@@ -215,11 +215,11 @@ class Dispatcher:
             return DispatchResult(reply_text=_REPLY_START, route=route)
         if route is RouteKind.HELP:
             return DispatchResult(reply_text=_REPLY_HELP, route=route)
-        if route is RouteKind.ENTRY:
+        if route is RouteKind.NOTE:
             ingest = self._diary.ingest(message)
             reply = _format_ingest_reply(ingest)
             if is_heuristic:
-                reply = _append_marker(reply, _HEURISTIC_MARKER_ENTRY)
+                reply = _append_marker(reply, _HEURISTIC_MARKER_NOTE)
             return DispatchResult(
                 reply_text=reply,
                 route=route,

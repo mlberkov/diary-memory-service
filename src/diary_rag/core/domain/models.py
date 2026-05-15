@@ -76,21 +76,21 @@ class SourceMessage:
 
 
 @dataclass(frozen=True, slots=True)
-class DiaryEntry:
-    """Logical diary entry parsed from a single source message."""
+class Note:
+    """Logical note parsed from a single source message."""
 
-    diary_entry_id: str
+    note_id: str
     source_message_id: str
     family_id: str
     author_user_id: str
-    entry_date: date
-    entry_text: str
+    note_date: date
+    note_text: str
     created_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
 class EventChunk:
-    """One event line; chunk → entry → source lineage preserved (I-4, I-5).
+    """One event line; chunk → note → source lineage preserved (I-4, I-5).
 
     ``embedding_status`` records the per-chunk progress of the Phase-3
     embedding step (D-024). A freshly-saved chunk is ``pending`` until
@@ -100,11 +100,11 @@ class EventChunk:
     """
 
     chunk_id: str
-    diary_entry_id: str
+    note_id: str
     source_message_id: str
     family_id: str
     author_user_id: str
-    entry_date: date
+    note_date: date
     event_index: int
     chunk_text: str
     created_at: datetime
@@ -113,10 +113,10 @@ class EventChunk:
 
 @dataclass(frozen=True, slots=True)
 class DateRange:
-    """Inclusive ``entry_date`` bound for retrieval filtering (Slice 3.4, D-040).
+    """Inclusive ``note_date`` bound for retrieval filtering (Slice 3.4, D-040).
 
     Both bounds are optional and inclusive: a chunk matches when its
-    ``entry_date`` is ``>= start`` (when ``start`` is set) and ``<= end``
+    ``note_date`` is ``>= start`` (when ``start`` is set) and ``<= end``
     (when ``end`` is set). Both bounds ``None`` is a valid no-constraint
     range, treated by every backend identically to passing no filter at
     all. A range with ``start > end`` is contradictory and rejected at
@@ -138,7 +138,7 @@ class Evidence:
     """A retrieved chunk plus the metadata the reply layer needs to cite it."""
 
     chunk_id: str
-    entry_date: date
+    note_date: date
     chunk_text: str
 
 
@@ -149,12 +149,12 @@ class IngestResult:
     ``replayed`` is ``True`` when the inbound message hit a previously
     persisted ``(external_chat_id, external_message_id, edit_seq)`` row
     (R-2 / D-023): no new state was created and the result was rebuilt
-    from the existing source / entry / chunks.
+    from the existing source / note / chunks.
     """
 
     fallback: FallbackMode
     source_message_id: str
-    entry_date: date | None = None
+    note_date: date | None = None
     events_count: int = 0
     invalid_first_line: str | None = None
     replayed: bool = False

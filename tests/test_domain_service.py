@@ -14,7 +14,7 @@ from diary_rag.services import DomainService
 from diary_rag.storage.mock import MockDomainStore
 
 
-def _entry_message(
+def _note_message(
     payload: str,
     *,
     chat: str = "42",
@@ -27,7 +27,7 @@ def _entry_message(
         external_chat_id=chat,
         external_user_id=user,
         text=f"/note {payload}",
-        route=RouteKind.ENTRY,
+        route=RouteKind.NOTE,
         received_at=datetime.now(tz=UTC),
         route_source="command",
         payload=payload,
@@ -35,18 +35,18 @@ def _entry_message(
     )
 
 
-def test_ingest_persists_source_entry_and_chunks() -> None:
+def test_ingest_persists_source_note_and_chunks() -> None:
     store = MockDomainStore()
     service = DomainService(store)
 
-    result = service.ingest(_entry_message("2026-05-09\nMorning routine\nTried a new book"))
+    result = service.ingest(_note_message("2026-05-09\nMorning routine\nTried a new book"))
 
     assert result.fallback is FallbackMode.NONE
-    assert result.entry_date == date(2026, 5, 9)
+    assert result.note_date == date(2026, 5, 9)
     assert result.events_count == 2
     assert result.replayed is False
     assert store.len_sources() == 1
-    assert store.len_entries() == 1
+    assert store.len_notes() == 1
     assert store.len_chunks() == 2
 
 
@@ -54,12 +54,12 @@ def test_ingest_records_source_even_when_parser_rejects() -> None:
     store = MockDomainStore()
     service = DomainService(store)
 
-    result = service.ingest(_entry_message("not-a-date\nstray line"))
+    result = service.ingest(_note_message("not-a-date\nstray line"))
 
     assert result.fallback is FallbackMode.INVALID_INPUT
     assert result.invalid_first_line == "not-a-date"
     assert store.len_sources() == 1
-    assert store.len_entries() == 0
+    assert store.len_notes() == 0
     assert store.len_chunks() == 0
 
 
@@ -67,7 +67,7 @@ def test_ingest_preserves_authorship_on_every_chunk() -> None:
     store = MockDomainStore()
     service = DomainService(store)
 
-    service.ingest(_entry_message("2026-05-09\nA\nB\nC", chat="42", user="alice"))
+    service.ingest(_note_message("2026-05-09\nA\nB\nC", chat="42", user="alice"))
 
     assert {c.author_user_id for c in _all_chunks(store)} == {"alice"}
     assert {c.family_id for c in _all_chunks(store)} == {"42"}
@@ -77,31 +77,31 @@ def test_ingest_records_route_on_source_message() -> None:
     store = MockDomainStore()
     service = DomainService(store)
 
-    service.ingest(_entry_message("2026-05-09\nA"))
+    service.ingest(_note_message("2026-05-09\nA"))
 
     sources = list(store._sources.values())
     assert len(sources) == 1
-    assert sources[0].detected_route is RouteKind.ENTRY
+    assert sources[0].detected_route is RouteKind.NOTE
 
 
-def test_chunks_carry_lineage_back_to_source_and_entry() -> None:
+def test_chunks_carry_lineage_back_to_source_and_note() -> None:
     store = MockDomainStore()
     service = DomainService(store)
 
-    result = service.ingest(_entry_message("2026-05-09\nA\nB"))
+    result = service.ingest(_note_message("2026-05-09\nA\nB"))
 
     chunks = _all_chunks(store)
     assert all(c.source_message_id == result.source_message_id for c in chunks)
-    diary_entry_ids = {c.diary_entry_id for c in chunks}
-    assert len(diary_entry_ids) == 1
-    assert next(iter(diary_entry_ids)) in store._entries
+    note_ids = {c.note_id for c in chunks}
+    assert len(note_ids) == 1
+    assert next(iter(note_ids)) in store._notes
 
 
 def test_ingest_assigns_event_index_in_order() -> None:
     store = MockDomainStore()
     service = DomainService(store)
 
-    service.ingest(_entry_message("2026-05-09\nFirst\nSecond\nThird"))
+    service.ingest(_note_message("2026-05-09\nFirst\nSecond\nThird"))
 
     chunks_sorted = sorted(_all_chunks(store), key=lambda c: c.event_index)
     assert [c.event_index for c in chunks_sorted] == [0, 1, 2]
@@ -113,16 +113,16 @@ def test_empty_payload_is_invalid_input(payload: str) -> None:
     store = MockDomainStore()
     service = DomainService(store)
 
-    result = service.ingest(_entry_message(payload))
+    result = service.ingest(_note_message(payload))
 
     assert result.fallback is FallbackMode.INVALID_INPUT
-    assert store.len_entries() == 0
+    assert store.len_notes() == 0
 
 
 def test_ingest_replay_short_circuits_and_does_not_duplicate() -> None:
     store = MockDomainStore()
     service = DomainService(store)
-    msg = _entry_message("2026-05-09\nMorning routine\nTried a new book", message_id="m1")
+    msg = _note_message("2026-05-09\nMorning routine\nTried a new book", message_id="m1")
 
     first = service.ingest(msg)
     second = service.ingest(msg)
@@ -130,18 +130,18 @@ def test_ingest_replay_short_circuits_and_does_not_duplicate() -> None:
     assert first.replayed is False
     assert second.replayed is True
     assert second.source_message_id == first.source_message_id
-    assert second.entry_date == first.entry_date
+    assert second.note_date == first.note_date
     assert second.events_count == first.events_count
     assert second.fallback is FallbackMode.NONE
     assert store.len_sources() == 1
-    assert store.len_entries() == 1
+    assert store.len_notes() == 1
     assert store.len_chunks() == 2
 
 
 def test_ingest_replay_preserves_invalid_input_outcome() -> None:
     store = MockDomainStore()
     service = DomainService(store)
-    msg = _entry_message("not-a-date\nstray line", message_id="m1")
+    msg = _note_message("not-a-date\nstray line", message_id="m1")
 
     first = service.ingest(msg)
     second = service.ingest(msg)
@@ -151,15 +151,15 @@ def test_ingest_replay_preserves_invalid_input_outcome() -> None:
     assert second.replayed is True
     assert second.invalid_first_line == first.invalid_first_line
     assert store.len_sources() == 1
-    assert store.len_entries() == 0
+    assert store.len_notes() == 0
     assert store.len_chunks() == 0
 
 
 def test_ingest_distinct_edit_seq_creates_separate_state() -> None:
     store = MockDomainStore()
     service = DomainService(store)
-    original = _entry_message("2026-05-09\nA\nB", message_id="m1", edit_seq=0)
-    edited = _entry_message("2026-05-09\nA\nB\nC", message_id="m1", edit_seq=1715300100)
+    original = _note_message("2026-05-09\nA\nB", message_id="m1", edit_seq=0)
+    edited = _note_message("2026-05-09\nA\nB\nC", message_id="m1", edit_seq=1715300100)
 
     res_original = service.ingest(original)
     res_edited = service.ingest(edited)
@@ -168,7 +168,7 @@ def test_ingest_distinct_edit_seq_creates_separate_state() -> None:
     assert res_edited.replayed is False
     assert res_original.source_message_id != res_edited.source_message_id
     assert store.len_sources() == 2
-    assert store.len_entries() == 2
+    assert store.len_notes() == 2
     assert store.len_chunks() == 5
 
 
@@ -190,7 +190,7 @@ def test_ingest_without_embedding_client_leaves_chunks_pending() -> None:
     store = MockDomainStore()
     service = DomainService(store)
 
-    service.ingest(_entry_message("2026-05-09\nA\nB"))
+    service.ingest(_note_message("2026-05-09\nA\nB"))
 
     assert {c.embedding_status for c in _all_chunks(store)} == {EmbeddingStatus.PENDING}
     assert store.len_embeddings() == 0
@@ -201,7 +201,7 @@ def test_ingest_with_embedding_client_persists_embeddings_and_flips_status() -> 
     client = MockEmbeddingClient(dimension=64)
     service = DomainService(store, embedding_client=client)
 
-    result = service.ingest(_entry_message("2026-05-09\nA\nB"))
+    result = service.ingest(_note_message("2026-05-09\nA\nB"))
 
     assert result.fallback is FallbackMode.NONE
     assert store.len_embeddings() == 2
@@ -213,7 +213,7 @@ def test_ingest_embedding_failure_marks_chunks_failed_and_keeps_lineage() -> Non
     store = MockDomainStore()
     service = DomainService(store, embedding_client=_RaisingEmbeddingClient())
 
-    result = service.ingest(_entry_message("2026-05-09\nA\nB"))
+    result = service.ingest(_note_message("2026-05-09\nA\nB"))
 
     assert result.fallback is FallbackMode.NONE  # raw + chunks survived (I-2, I-3)
     assert result.events_count == 2
@@ -236,7 +236,7 @@ def test_ingest_replay_does_not_call_embedding_client() -> None:
 
     client = _CountingClient()
     service = DomainService(store, embedding_client=client)
-    msg = _entry_message("2026-05-09\nA\nB", message_id="m1")
+    msg = _note_message("2026-05-09\nA\nB", message_id="m1")
 
     service.ingest(msg)
     service.ingest(msg)
@@ -260,7 +260,7 @@ def test_ingest_with_invalid_payload_does_not_call_embedding_client() -> None:
     client = _CountingClient()
     service = DomainService(store, embedding_client=client)
 
-    service.ingest(_entry_message("not-a-date\nstray line"))
+    service.ingest(_note_message("not-a-date\nstray line"))
 
     assert _CountingClient.calls == 0
     assert store.len_embeddings() == 0
@@ -295,11 +295,11 @@ def test_ingest_draft_persists_raw_only() -> None:
     result = service.ingest(_draft_message("just thinking out loud"))
 
     assert result.fallback is FallbackMode.NONE
-    assert result.entry_date is None
+    assert result.note_date is None
     assert result.events_count == 0
     assert result.replayed is False
     assert store.len_sources() == 1
-    assert store.len_entries() == 0
+    assert store.len_notes() == 0
     assert store.len_chunks() == 0
 
 
@@ -350,20 +350,20 @@ def test_ingest_draft_replay_short_circuits_without_duplicating() -> None:
     assert second.source_message_id == first.source_message_id
     assert second.events_count == 0
     assert store.len_sources() == 1
-    assert store.len_entries() == 0
+    assert store.len_notes() == 0
     assert store.len_chunks() == 0
 
 
-def test_ingest_draft_then_distinct_entry_message_keeps_both_states() -> None:
+def test_ingest_draft_then_distinct_note_message_keeps_both_states() -> None:
     store = MockDomainStore()
     service = DomainService(store)
 
     draft = service.ingest(_draft_message("idea, not yet committed", message_id="d1"))
-    note = service.ingest(_entry_message("2026-05-09\nMorning routine", message_id="n1"))
+    note = service.ingest(_note_message("2026-05-09\nMorning routine", message_id="n1"))
 
     assert draft.source_message_id != note.source_message_id
     assert store.len_sources() == 2
-    assert store.len_entries() == 1
+    assert store.len_notes() == 1
     assert store.len_chunks() == 1
 
 
@@ -372,7 +372,7 @@ def test_list_recent_drafts_returns_drafts_only_most_recent_first() -> None:
     service = DomainService(store)
 
     service.ingest(_draft_message("first draft", message_id="d1"))
-    service.ingest(_entry_message("2026-05-09\nA note", message_id="n1"))
+    service.ingest(_note_message("2026-05-09\nA note", message_id="n1"))
     service.ingest(_draft_message("second draft", message_id="d2"))
 
     drafts = service.list_recent_drafts("42", limit=5)
@@ -405,7 +405,7 @@ def test_list_recent_drafts_empty_when_no_drafts() -> None:
     store = MockDomainStore()
     service = DomainService(store)
 
-    service.ingest(_entry_message("2026-05-09\nA note", message_id="n1"))
+    service.ingest(_note_message("2026-05-09\nA note", message_id="n1"))
 
     drafts = service.list_recent_drafts("42", limit=5)
     assert drafts == []

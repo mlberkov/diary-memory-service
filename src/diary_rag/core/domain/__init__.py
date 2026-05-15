@@ -25,17 +25,17 @@ from diary_rag.core.domain.models import (
     AnswerResult,
     AnswerTrace,
     DateRange,
-    DiaryEntry,
     EventChunk,
     Evidence,
     FallbackMode,
     IngestResult,
+    Note,
     Query,
     RetrievalHit,
     RetrievalLeg,
     SourceMessage,
 )
-from diary_rag.core.domain.parser import ParsedEntry, parse_diary_entry
+from diary_rag.core.domain.parser import ParsedNote, parse_note
 
 __all__ = [
     "PROMPT_VERSION",
@@ -46,14 +46,14 @@ __all__ = [
     "AnswerTrace",
     "CrossFamilyContextError",
     "DateRange",
-    "DiaryEntry",
+    "Note",
     "Evidence",
     "EventChunk",
     "FabricatedCitationError",
     "FallbackMode",
     "IngestResult",
     "MalformedAnswerJSONError",
-    "ParsedEntry",
+    "ParsedNote",
     "Query",
     "RetrievalHit",
     "RetrievalLeg",
@@ -62,6 +62,6 @@ __all__ = [
     "StructuredAnswerError",
     "UncertaintyMarker",
     "build_answer_prompt",
-    "parse_diary_entry",
+    "parse_note",
     "parse_structured_answer",
 ]

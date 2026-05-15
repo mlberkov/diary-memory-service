@@ -19,7 +19,7 @@ def _source(
     msg_id: str = "100",
     edit_seq: int = 0,
     raw_text: str = "hello",
-    route: RouteKind = RouteKind.ENTRY,
+    route: RouteKind = RouteKind.NOTE,
     created_at: datetime | None = None,
 ) -> SourceMessage:
     return SourceMessage(

@@ -80,7 +80,7 @@ def _build_dispatcher(answer: AnswerResult) -> Dispatcher:
 
 
 def _evidence(text: str = "Walked the dog") -> list[Evidence]:
-    return [Evidence(chunk_id="c1", entry_date=date(2026, 5, 9), chunk_text=text)]
+    return [Evidence(chunk_id="c1", note_date=date(2026, 5, 9), chunk_text=text)]
 
 
 def test_not_implemented_error_translates_to_no_evidence(

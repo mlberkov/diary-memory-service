@@ -1,4 +1,4 @@
-"""Diary entry parser.
+"""Note parser.
 
 Strict ISO ``YYYY-MM-DD`` on the first non-empty line of the payload;
 remaining non-empty lines become events. Returns ``None`` when the
@@ -13,10 +13,10 @@ from datetime import date
 
 
 @dataclass(frozen=True, slots=True)
-class ParsedEntry:
+class ParsedNote:
     """Result of a successful parse: a date and the event lines that follow."""
 
-    entry_date: date
+    note_date: date
     events: list[str]
     first_line: str
 
@@ -32,8 +32,8 @@ def _parse_iso_date(token: str) -> date | None:
         return None
 
 
-def parse_diary_entry(payload: str) -> ParsedEntry | None:
-    """Parse ``payload`` into ``(entry_date, events)``.
+def parse_note(payload: str) -> ParsedNote | None:
+    """Parse ``payload`` into ``(note_date, events)``.
 
     The first non-empty line must be an ISO ``YYYY-MM-DD`` date. The
     remaining non-empty lines become events, in order, one event per
@@ -48,4 +48,4 @@ def parse_diary_entry(payload: str) -> ParsedEntry | None:
     if parsed_date is None:
         return None
 
-    return ParsedEntry(entry_date=parsed_date, events=lines[1:], first_line=first_line)
+    return ParsedNote(note_date=parsed_date, events=lines[1:], first_line=first_line)

@@ -14,11 +14,11 @@ from diary_rag.services.retrieval import DEFAULT_RRF_K, reciprocal_rank_fusion
 def _chunk(cid: str) -> EventChunk:
     return EventChunk(
         chunk_id=cid,
-        diary_entry_id="e1",
+        note_id="e1",
         source_message_id="s1",
         family_id="fam-A",
         author_user_id="u1",
-        entry_date=date(2026, 5, 11),
+        note_date=date(2026, 5, 11),
         event_index=0,
         chunk_text=f"chunk {cid}",
         created_at=datetime(2026, 5, 11, 12, 0, 0, tzinfo=UTC),

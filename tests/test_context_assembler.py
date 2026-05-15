@@ -26,11 +26,11 @@ from diary_rag.services.retrieval import FusedHit
 def _chunk(chunk_id: str, *, text: str = "event", event_index: int = 0) -> EventChunk:
     return EventChunk(
         chunk_id=chunk_id,
-        diary_entry_id=f"entry-{chunk_id}",
+        note_id=f"note-{chunk_id}",
         source_message_id=f"src-{chunk_id}",
         family_id="fam-A",
         author_user_id="user-1",
-        entry_date=date(2026, 5, 9),
+        note_date=date(2026, 5, 9),
         event_index=event_index,
         chunk_text=text,
         created_at=datetime(2026, 5, 9, 8, 0, tzinfo=UTC),

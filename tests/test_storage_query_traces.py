@@ -18,9 +18,9 @@ from pathlib import Path
 import pytest
 
 from diary_rag.core.domain.models import (
-    DiaryEntry,
     EventChunk,
     FallbackMode,
+    Note,
     Query,
     RetrievalHit,
     RetrievalLeg,
@@ -87,19 +87,19 @@ def _source(sid: str = "s1", family_id: str = "fam-A") -> SourceMessage:
         external_message_id=sid,
         edit_seq=0,
         raw_text="2026-05-09\nWalked the dog",
-        detected_route=RouteKind.ENTRY,
+        detected_route=RouteKind.NOTE,
         created_at=_now(),
     )
 
 
-def _entry(eid: str = "e1", sid: str = "s1") -> DiaryEntry:
-    return DiaryEntry(
-        diary_entry_id=eid,
+def _note(eid: str = "e1", sid: str = "s1") -> Note:
+    return Note(
+        note_id=eid,
         source_message_id=sid,
         family_id="fam-A",
         author_user_id="u1",
-        entry_date=date(2026, 5, 9),
-        entry_text="Walked the dog",
+        note_date=date(2026, 5, 9),
+        note_text="Walked the dog",
         created_at=_now(),
     )
 
@@ -107,11 +107,11 @@ def _entry(eid: str = "e1", sid: str = "s1") -> DiaryEntry:
 def _chunk(cid: str = "c1", eid: str = "e1", sid: str = "s1", idx: int = 0) -> EventChunk:
     return EventChunk(
         chunk_id=cid,
-        diary_entry_id=eid,
+        note_id=eid,
         source_message_id=sid,
         family_id="fam-A",
         author_user_id="u1",
-        entry_date=date(2026, 5, 9),
+        note_date=date(2026, 5, 9),
         event_index=idx,
         chunk_text="Walked the dog",
         created_at=_now(),
@@ -189,7 +189,7 @@ def _sqlite_store(tmp_path: Path) -> SqliteDomainStore:
     store = SqliteDomainStore(str(tmp_path / "diary.db"))
     # Hits reference event_chunks via FK; satisfy the FK before writing hits.
     store.save_source_message(_source())
-    store.save_diary_entry(_entry())
+    store.save_note(_note())
     store.save_event_chunks([_chunk("c1", idx=0), _chunk("c2", idx=1)])
     return store
 
@@ -262,7 +262,7 @@ def _truncate(dsn: str) -> None:
     with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
             "TRUNCATE retrieval_hits, queries, embedding_records, "
-            "event_chunks, diary_entries, source_messages "
+            "event_chunks, notes, source_messages "
             "RESTART IDENTITY CASCADE"
         )
 
@@ -275,7 +275,7 @@ def pg_store() -> Iterator[PostgresDomainStore]:
         _truncate(PG_DSN)
         # Seed FK targets so retrieval_hits.chunk_id references a real row.
         s.save_source_message(_source())
-        s.save_diary_entry(_entry())
+        s.save_note(_note())
         s.save_event_chunks([_chunk("c1", idx=0), _chunk("c2", idx=1)])
         yield s
     finally:

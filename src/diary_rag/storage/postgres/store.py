@@ -48,9 +48,9 @@ from psycopg_pool import ConnectionPool
 from diary_rag.core.domain.models import (
     AnswerTrace,
     DateRange,
-    DiaryEntry,
     EventChunk,
     FallbackMode,
+    Note,
     Query,
     RetrievalHit,
     RetrievalLeg,
@@ -61,7 +61,7 @@ from diary_rag.core.routing import RouteKind
 
 
 def _date_range_sql(date_range: DateRange | None) -> tuple[str, list[date]]:
-    """Build the optional ``entry_date`` predicate for a hybrid leg query.
+    """Build the optional ``note_date`` predicate for a hybrid leg query.
 
     Returns a SQL fragment (leading space, splices onto an existing
     ``WHERE`` clause before ``ORDER BY``) and the positional params it
@@ -73,10 +73,10 @@ def _date_range_sql(date_range: DateRange | None) -> tuple[str, list[date]]:
     fragment = ""
     params: list[date] = []
     if date_range.start is not None:
-        fragment += " AND ec.entry_date >= %s"
+        fragment += " AND ec.note_date >= %s"
         params.append(date_range.start)
     if date_range.end is not None:
-        fragment += " AND ec.entry_date <= %s"
+        fragment += " AND ec.note_date <= %s"
         params.append(date_range.end)
     return fragment, params
 
@@ -198,21 +198,21 @@ class PostgresDomainStore:
         assert row is not None
         return _row_to_source(row), True
 
-    def save_diary_entry(self, entry: DiaryEntry) -> None:
+    def save_note(self, note: Note) -> None:
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO diary_entries "
-                "(diary_entry_id, source_message_id, family_id, author_user_id, "
-                " entry_date, entry_text, created_at) "
+                "INSERT INTO notes "
+                "(note_id, source_message_id, family_id, author_user_id, "
+                " note_date, note_text, created_at) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s)",
                 (
-                    entry.diary_entry_id,
-                    entry.source_message_id,
-                    entry.family_id,
-                    entry.author_user_id,
-                    entry.entry_date,
-                    entry.entry_text,
-                    entry.created_at,
+                    note.note_id,
+                    note.source_message_id,
+                    note.family_id,
+                    note.author_user_id,
+                    note.note_date,
+                    note.note_text,
+                    note.created_at,
                 ),
             )
             conn.commit()
@@ -223,11 +223,11 @@ class PostgresDomainStore:
         params = [
             (
                 c.chunk_id,
-                c.diary_entry_id,
+                c.note_id,
                 c.source_message_id,
                 c.family_id,
                 c.author_user_id,
-                c.entry_date,
+                c.note_date,
                 c.event_index,
                 c.chunk_text,
                 c.created_at,
@@ -238,8 +238,8 @@ class PostgresDomainStore:
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.executemany(
                 "INSERT INTO event_chunks "
-                "(chunk_id, diary_entry_id, source_message_id, family_id, "
-                " author_user_id, entry_date, event_index, chunk_text, created_at, "
+                "(chunk_id, note_id, source_message_id, family_id, "
+                " author_user_id, note_date, event_index, chunk_text, created_at, "
                 " embedding_status) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 params,
@@ -304,12 +304,12 @@ class PostgresDomainStore:
             rows = cur.fetchall()
         return [_row_to_source(row) for row in rows]
 
-    def get_diary_entry_by_source_message_id(self, source_message_id: str) -> DiaryEntry | None:
+    def get_note_by_source_message_id(self, source_message_id: str) -> Note | None:
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                "SELECT diary_entry_id, source_message_id, family_id, author_user_id, "
-                "       entry_date, entry_text, created_at "
-                "  FROM diary_entries "
+                "SELECT note_id, source_message_id, family_id, author_user_id, "
+                "       note_date, note_text, created_at "
+                "  FROM notes "
                 " WHERE source_message_id = %s "
                 " LIMIT 1",
                 (source_message_id,),
@@ -317,13 +317,13 @@ class PostgresDomainStore:
             row = cur.fetchone()
         if row is None:
             return None
-        return DiaryEntry(
-            diary_entry_id=row["diary_entry_id"],
+        return Note(
+            note_id=row["note_id"],
             source_message_id=row["source_message_id"],
             family_id=row["family_id"],
             author_user_id=row["author_user_id"],
-            entry_date=row["entry_date"],
-            entry_text=row["entry_text"],
+            note_date=row["note_date"],
+            note_text=row["note_text"],
             created_at=row["created_at"],
         )
 
@@ -341,8 +341,8 @@ class PostgresDomainStore:
     def get_event_chunk(self, chunk_id: str) -> EventChunk | None:
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                "SELECT chunk_id, diary_entry_id, source_message_id, family_id, "
-                "       author_user_id, entry_date, event_index, chunk_text, "
+                "SELECT chunk_id, note_id, source_message_id, family_id, "
+                "       author_user_id, note_date, event_index, chunk_text, "
                 "       created_at, embedding_status "
                 "  FROM event_chunks "
                 " WHERE chunk_id = %s",
@@ -373,8 +373,8 @@ class PostgresDomainStore:
         # the embedding in a pgvector-specific type.
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                "SELECT ec.chunk_id, ec.diary_entry_id, ec.source_message_id, "
-                "       ec.family_id, ec.author_user_id, ec.entry_date, "
+                "SELECT ec.chunk_id, ec.note_id, ec.source_message_id, "
+                "       ec.family_id, ec.author_user_id, ec.note_date, "
                 "       ec.event_index, ec.chunk_text, ec.created_at, "
                 "       ec.embedding_status "
                 "  FROM event_chunks ec "
@@ -407,8 +407,8 @@ class PostgresDomainStore:
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "WITH q AS (SELECT websearch_to_tsquery('simple', %s) AS tsq) "
-                "SELECT ec.chunk_id, ec.diary_entry_id, ec.source_message_id, "
-                "       ec.family_id, ec.author_user_id, ec.entry_date, "
+                "SELECT ec.chunk_id, ec.note_id, ec.source_message_id, "
+                "       ec.family_id, ec.author_user_id, ec.note_date, "
                 "       ec.event_index, ec.chunk_text, ec.created_at, "
                 "       ec.embedding_status "
                 "  FROM event_chunks ec, q "
@@ -631,11 +631,11 @@ def _row_to_source(row: dict[str, Any]) -> SourceMessage:
 def _row_to_chunk(row: dict[str, Any]) -> EventChunk:
     return EventChunk(
         chunk_id=row["chunk_id"],
-        diary_entry_id=row["diary_entry_id"],
+        note_id=row["note_id"],
         source_message_id=row["source_message_id"],
         family_id=row["family_id"],
         author_user_id=row["author_user_id"],
-        entry_date=row["entry_date"],
+        note_date=row["note_date"],
         event_index=row["event_index"],
         chunk_text=row["chunk_text"],
         created_at=row["created_at"],

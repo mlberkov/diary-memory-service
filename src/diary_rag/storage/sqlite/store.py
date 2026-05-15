@@ -36,9 +36,9 @@ from pathlib import Path
 from diary_rag.core.domain.models import (
     AnswerTrace,
     DateRange,
-    DiaryEntry,
     EventChunk,
     FallbackMode,
+    Note,
     Query,
     RetrievalHit,
     RetrievalLeg,
@@ -62,26 +62,26 @@ CREATE TABLE IF NOT EXISTS source_messages (
     UNIQUE (external_chat_id, external_message_id, edit_seq)
 );
 
-CREATE TABLE IF NOT EXISTS diary_entries (
-    diary_entry_id    TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS notes (
+    note_id    TEXT PRIMARY KEY,
     source_message_id TEXT NOT NULL REFERENCES source_messages(source_message_id),
     family_id         TEXT NOT NULL,
     author_user_id    TEXT NOT NULL,
-    entry_date        TEXT NOT NULL,
-    entry_text        TEXT NOT NULL,
+    note_date        TEXT NOT NULL,
+    note_text        TEXT NOT NULL,
     created_at        TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_diary_entries_source_message_id
-    ON diary_entries(source_message_id);
+CREATE INDEX IF NOT EXISTS idx_notes_source_message_id
+    ON notes(source_message_id);
 
 CREATE TABLE IF NOT EXISTS event_chunks (
     chunk_id          TEXT PRIMARY KEY,
-    diary_entry_id    TEXT NOT NULL REFERENCES diary_entries(diary_entry_id),
+    note_id    TEXT NOT NULL REFERENCES notes(note_id),
     source_message_id TEXT NOT NULL REFERENCES source_messages(source_message_id),
     family_id         TEXT NOT NULL,
     author_user_id    TEXT NOT NULL,
-    entry_date        TEXT NOT NULL,
+    note_date        TEXT NOT NULL,
     event_index       INTEGER NOT NULL CHECK (event_index >= 0),
     chunk_text        TEXT NOT NULL,
     created_at        TEXT NOT NULL,
@@ -254,21 +254,21 @@ class SqliteDomainStore:
         assert row is not None
         return _row_to_source(row), True
 
-    def save_diary_entry(self, entry: DiaryEntry) -> None:
+    def save_note(self, note: Note) -> None:
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO diary_entries "
-                "(diary_entry_id, source_message_id, family_id, author_user_id, "
-                " entry_date, entry_text, created_at) "
+                "INSERT INTO notes "
+                "(note_id, source_message_id, family_id, author_user_id, "
+                " note_date, note_text, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
-                    entry.diary_entry_id,
-                    entry.source_message_id,
-                    entry.family_id,
-                    entry.author_user_id,
-                    entry.entry_date.isoformat(),
-                    entry.entry_text,
-                    entry.created_at.isoformat(),
+                    note.note_id,
+                    note.source_message_id,
+                    note.family_id,
+                    note.author_user_id,
+                    note.note_date.isoformat(),
+                    note.note_text,
+                    note.created_at.isoformat(),
                 ),
             )
             conn.commit()
@@ -279,18 +279,18 @@ class SqliteDomainStore:
         with self._connect() as conn:
             conn.executemany(
                 "INSERT INTO event_chunks "
-                "(chunk_id, diary_entry_id, source_message_id, family_id, "
-                " author_user_id, entry_date, event_index, chunk_text, created_at, "
+                "(chunk_id, note_id, source_message_id, family_id, "
+                " author_user_id, note_date, event_index, chunk_text, created_at, "
                 " embedding_status) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
                         c.chunk_id,
-                        c.diary_entry_id,
+                        c.note_id,
                         c.source_message_id,
                         c.family_id,
                         c.author_user_id,
-                        c.entry_date.isoformat(),
+                        c.note_date.isoformat(),
                         c.event_index,
                         c.chunk_text,
                         c.created_at.isoformat(),
@@ -329,25 +329,25 @@ class SqliteDomainStore:
             "postgres is the canonical durable backend (D-022, D-030)"
         )
 
-    def get_diary_entry_by_source_message_id(self, source_message_id: str) -> DiaryEntry | None:
+    def get_note_by_source_message_id(self, source_message_id: str) -> Note | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT diary_entry_id, source_message_id, family_id, author_user_id, "
-                "       entry_date, entry_text, created_at "
-                "  FROM diary_entries "
+                "SELECT note_id, source_message_id, family_id, author_user_id, "
+                "       note_date, note_text, created_at "
+                "  FROM notes "
                 " WHERE source_message_id = ? "
                 " LIMIT 1",
                 (source_message_id,),
             ).fetchone()
         if row is None:
             return None
-        return DiaryEntry(
-            diary_entry_id=row["diary_entry_id"],
+        return Note(
+            note_id=row["note_id"],
             source_message_id=row["source_message_id"],
             family_id=row["family_id"],
             author_user_id=row["author_user_id"],
-            entry_date=date.fromisoformat(row["entry_date"]),
-            entry_text=row["entry_text"],
+            note_date=date.fromisoformat(row["note_date"]),
+            note_text=row["note_text"],
             created_at=datetime.fromisoformat(row["created_at"]),
         )
 
@@ -364,8 +364,8 @@ class SqliteDomainStore:
     def get_event_chunk(self, chunk_id: str) -> EventChunk | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT chunk_id, diary_entry_id, source_message_id, family_id, "
-                "       author_user_id, entry_date, event_index, chunk_text, "
+                "SELECT chunk_id, note_id, source_message_id, family_id, "
+                "       author_user_id, note_date, event_index, chunk_text, "
                 "       created_at, embedding_status "
                 "  FROM event_chunks "
                 " WHERE chunk_id = ?",
@@ -602,11 +602,11 @@ def _row_to_source(row: sqlite3.Row) -> SourceMessage:
 def _row_to_chunk(row: sqlite3.Row) -> EventChunk:
     return EventChunk(
         chunk_id=row["chunk_id"],
-        diary_entry_id=row["diary_entry_id"],
+        note_id=row["note_id"],
         source_message_id=row["source_message_id"],
         family_id=row["family_id"],
         author_user_id=row["author_user_id"],
-        entry_date=date.fromisoformat(row["entry_date"]),
+        note_date=date.fromisoformat(row["note_date"]),
         event_index=row["event_index"],
         chunk_text=row["chunk_text"],
         created_at=datetime.fromisoformat(row["created_at"]),

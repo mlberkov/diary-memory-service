@@ -6,7 +6,7 @@ parses the leading command, hands a channel-neutral
 ``sendMessage`` payload as the webhook response body.
 
 When the leading token is not a recognised command and the message body
-is non-empty, the heuristic classifier picks ``ENTRY`` / ``ASK`` /
+is non-empty, the heuristic classifier picks ``NOTE`` / ``ASK`` /
 ``CLARIFY`` and the inbound message is tagged ``route_source="heuristic"``
 (R-11).
 """

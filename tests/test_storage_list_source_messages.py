@@ -17,7 +17,7 @@ def _source(
     family_id: str = "fam-A",
     msg_id: str,
     raw_text: str = "hello",
-    route: RouteKind = RouteKind.ENTRY,
+    route: RouteKind = RouteKind.NOTE,
     created_at: datetime,
 ) -> SourceMessage:
     return SourceMessage(
@@ -54,7 +54,7 @@ def test_mock_list_source_messages_includes_notes_and_drafts() -> None:
 
     rows = store.list_source_messages("fam-A")
     routes = {r.detected_route for r in rows}
-    assert routes == {RouteKind.ENTRY, RouteKind.DRAFT}
+    assert routes == {RouteKind.NOTE, RouteKind.DRAFT}
 
 
 def test_mock_list_source_messages_orders_by_created_at_then_source_message_id() -> None:

@@ -22,7 +22,7 @@ RouteSource = Literal["command", "heuristic"]
 class RouteKind(StrEnum):
     START = "start"
     HELP = "help"
-    ENTRY = "entry"
+    NOTE = "note"
     ASK = "ask"
     DRAFT = "draft"
     DRAFTS = "drafts"
@@ -38,13 +38,12 @@ Lifecycle = Literal["draft", "note", "query", "other"]
 def lifecycle_for(route: RouteKind) -> Lifecycle:
     """Map a route to its D-027 lifecycle state.
 
-    ``ENTRY`` maps to ``"note"`` because naming alignment of ``/entry`` →
-    ``/note`` is its own packet (D-026); the route value persists under
-    its historical name but the lifecycle vocabulary is canonical.
+    ``NOTE`` maps to the ``"note"`` lifecycle, ``DRAFT`` to ``"draft"``,
+    and ``ASK`` to ``"query"``; every other route maps to ``"other"``.
     """
     if route is RouteKind.DRAFT:
         return "draft"
-    if route is RouteKind.ENTRY:
+    if route is RouteKind.NOTE:
         return "note"
     if route is RouteKind.ASK:
         return "query"

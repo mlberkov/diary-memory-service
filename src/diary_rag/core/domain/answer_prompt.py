@@ -75,7 +75,7 @@ def build_answer_prompt(context: AnswerContext) -> AnswerPrompt:
     else:
         chunks_block = "\n".join(
             f"- chunk_id={chunk.chunk_id} "
-            f"date={chunk.entry_date.isoformat()} "
+            f"date={chunk.note_date.isoformat()} "
             f"event_index={chunk.event_index} "
             f"text={chunk.chunk_text}"
             for chunk in context.ordered_chunks

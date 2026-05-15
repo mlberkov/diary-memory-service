@@ -17,9 +17,9 @@ import pytest
 
 from diary_rag.core.domain.models import (
     AnswerTrace,
-    DiaryEntry,
     EventChunk,
     FallbackMode,
+    Note,
     Query,
     SourceMessage,
 )
@@ -79,19 +79,19 @@ def _source(sid: str = "s1") -> SourceMessage:
         external_message_id=sid,
         edit_seq=0,
         raw_text="2026-05-09\nWalked the dog",
-        detected_route=RouteKind.ENTRY,
+        detected_route=RouteKind.NOTE,
         created_at=_now(),
     )
 
 
-def _entry(eid: str = "e1", sid: str = "s1") -> DiaryEntry:
-    return DiaryEntry(
-        diary_entry_id=eid,
+def _note(eid: str = "e1", sid: str = "s1") -> Note:
+    return Note(
+        note_id=eid,
         source_message_id=sid,
         family_id="fam-A",
         author_user_id="u1",
-        entry_date=date(2026, 5, 9),
-        entry_text="Walked the dog",
+        note_date=date(2026, 5, 9),
+        note_text="Walked the dog",
         created_at=_now(),
     )
 
@@ -99,11 +99,11 @@ def _entry(eid: str = "e1", sid: str = "s1") -> DiaryEntry:
 def _chunk(cid: str = "c1", eid: str = "e1", sid: str = "s1", idx: int = 0) -> EventChunk:
     return EventChunk(
         chunk_id=cid,
-        diary_entry_id=eid,
+        note_id=eid,
         source_message_id=sid,
         family_id="fam-A",
         author_user_id="u1",
-        entry_date=date(2026, 5, 9),
+        note_date=date(2026, 5, 9),
         event_index=idx,
         chunk_text="Walked the dog",
         created_at=_now(),
@@ -186,7 +186,7 @@ def test_mock_round_trips_new_fallback_modes(mode: FallbackMode) -> None:
 def _sqlite_store(tmp_path: Path) -> SqliteDomainStore:
     store = SqliteDomainStore(str(tmp_path / "diary.db"))
     store.save_source_message(_source())
-    store.save_diary_entry(_entry())
+    store.save_note(_note())
     store.save_event_chunks([_chunk("c1", idx=0)])
     return store
 
@@ -264,7 +264,7 @@ def _truncate(dsn: str) -> None:
     with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
             "TRUNCATE answer_traces, retrieval_hits, queries, embedding_records, "
-            "event_chunks, diary_entries, source_messages "
+            "event_chunks, notes, source_messages "
             "RESTART IDENTITY CASCADE"
         )
 
@@ -276,7 +276,7 @@ def pg_store() -> Iterator[PostgresDomainStore]:
     try:
         _truncate(PG_DSN)
         s.save_source_message(_source())
-        s.save_diary_entry(_entry())
+        s.save_note(_note())
         s.save_event_chunks([_chunk("c1", idx=0)])
         yield s
     finally:

@@ -34,8 +34,8 @@ from typing import Protocol
 
 from diary_rag.core.domain.models import (
     AnswerTrace,
-    DiaryEntry,
     EventChunk,
+    Note,
     Query,
     RetrievalHit,
     SourceMessage,
@@ -48,7 +48,7 @@ class DomainRepository(Protocol):
 
     def save_source_message(self, source: SourceMessage) -> None: ...
 
-    def save_diary_entry(self, entry: DiaryEntry) -> None: ...
+    def save_note(self, note: Note) -> None: ...
 
     def save_event_chunks(self, chunks: list[EventChunk]) -> None: ...
 
@@ -86,8 +86,8 @@ class DomainRepository(Protocol):
         re-embed (D-024).
         """
 
-    def get_diary_entry_by_source_message_id(self, source_message_id: str) -> DiaryEntry | None:
-        """Fetch the diary entry persisted for a given source, if any.
+    def get_note_by_source_message_id(self, source_message_id: str) -> Note | None:
+        """Fetch the note persisted for a given source, if any.
 
         Used by the ingest path to reconstruct the original ``IngestResult``
         on replay without re-parsing or re-chunking.
