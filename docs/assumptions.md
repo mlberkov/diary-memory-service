@@ -55,7 +55,7 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 
 ## Phase 3.3 baseline-hybrid contour (current)
 - **A-36b. 3072-dim ANN-index strategy remains open**: D-025 ships the dense leg as an exact family-scoped sequential scan over `vector(3072)`, which is correct at current diary scale and requires no schema churn. pgvector's HNSW / IVFFlat still cap at 2000 dim, so when corpus size demands ANN the choice is between `halfvec(3072)` + HNSW (small precision loss) or another approach. External vector DBs remain rejected on I-2 grounds. Revisit in the next quality-decision packet alongside BM25 / reranker / Qdrant evaluation.
-- **A-37. Sparse text-search dictionary is `simple`**: the generated `event_chunks.chunk_text_tsv` column uses `to_tsvector('simple', chunk_text)` (D-025). 'simple' avoids stemming and stopword removal — diary content may mix Russian and English, and 'simple' treats both symmetrically without committing to a stemmer that would tokenize one language worse than the other. Multilingual sparse tuning belongs to the next quality-decision packet, not this one.
+*A-37 → D-039 (sparse dictionary `simple` retired for a dual-config `russian` + `english` tsvector union; no language detection).*
 
 ## Target-state architecture forks (opened by D-027)
 - **A-38. Draft lifecycle semantics**: the lifecycle-representation slice is answered by D-028 — `SourceMessage.detected_route` is the lifecycle carrier (extended with `RouteKind.DRAFT`), and `core.routing.lifecycle_for` is the canonical mapping helper. D-030 cancels the **promotion slice** product-wide (drafts are not note-candidates; there is no `/promote` and no draft-to-note transition) and removes the explicit `/draft` command — drafts are created only by the no-command default and recalled via `/drafts`. Remaining open: how long a captured draft is retained and whether it expires by inactivity or by explicit cleanup. Required before the draft retention implementation packet. `/drafts` recall (D-030) uses a family-scoped sequential scan filtered by `detected_route='draft'`; a composite index on `(family_id, detected_route, created_at)` is a scale-driven follow-up, not committed here.
@@ -81,3 +81,4 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 - A-29 → D-025 (substring placeholder retired; baseline hybrid retrieval lands).
 - A-36 → D-025 (replaced by A-36b; exact family-scoped scan for now, halfvec/HNSW deferred).
 - A-9 → D-037 (`CHAT_MODEL` locked to `gpt-4.1` under `chat_backend=openai`; boot abort on mismatch).
+- A-37 → D-039 (sparse FTS dictionary `simple` retired; dual-config `russian` + `english` tsvector union, no language detection).
