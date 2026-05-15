@@ -906,3 +906,35 @@ Slice 3.4's three remaining filter dimensions do not share a blocker. Visibility
 - New: `tests/test_diary_models.py` (`DateRange` validation). Changed: `docs/product/TechSpec.md` §9, `docs/execution-map.md` row 3.4, `docs/todo.md`.
 - New runtime dependencies: none.
 - Out of scope (unchanged or deferred): `child_id` filtering and `visibility_scope` filtering (metadata dimensions 2 and 3; visibility waits on A-15); Telegram-side date syntax / natural-language date parsing for `/ask`; SQLite real retrieval (still `NotImplementedError` per D-025; signature-only here); any schema / DDL / migration change; retrieval-quality tuning and date-diversity reranking (TechSpec §9 "Context policy"); `Query` row schema changes (including `child_scope` and deferred `RetrievalHit` columns); the `RouteKind.ENTRY → NOTE` / `DiaryEntry` / `family_id` / `diary_rag` package renames (D-026).
+
+---
+
+## D-041 — Generic shared-memory core: canonical `community` / `subject` vocabulary
+
+### Decision
+The canonical product is a **generic shared-memory / note-grounded answer service**: it captures notes into a durable corpus and answers natural-language questions grounded only in retrieved evidence from that corpus. It serves both an **individual-memory (solo)** use case and a **shared/group** use case under one core model. The family/child diary in Telegram is the **first implemented** use case — the shared/group shape of that model — and TheyGrow is a later **integration host**, not the product's definition.
+
+This packet is **docs-only**: it reframes the top-line product framing and records the canonical core vocabulary. No code, schema, test, or `src/` token change.
+
+- **Canonical core vocabulary.**
+  - **community** — the outer scope that owns a note corpus and bounds retrieval and authorship. A community has **one or more** participants, so a single-participant solo memory and a multi-participant shared corpus are the same concept at different sizes; a one-person community is the normal solo case, not a degenerate one.
+  - **subject** — a sub-entity within a community that a note can be *about*.
+  - These are the destination terms for the "explicit renaming packet" that D-026 promised but left without a named target.
+- **First-use-case scope mapping.** In the first implemented use case a `family` is one community and a `child` is one subject. Use-case nouns (`family`, `child`, `parent`) stay in use-case-facing prose; `community` / `subject` are the core terms.
+- **D-026 boundary rule extended.** D-026 said new core code must avoid use-case vocabulary "where a generic name fits"; this decision fixes the generic names. New **core** code adopts `community` / `subject` for the outer-scope and sub-entity concepts rather than ad-hoc generic names.
+- **Relation to prior decisions.** D-001 (Telegram-first, TheyGrow-later) and D-002 (Standalone Diary Memory Service) remain valid; this decision contextualizes them as, respectively, the first event-source/host pairing and the first surfaced shape of the generic core. They are not retired — the same way D-026 generalized D-001/D-015 without retiring them.
+
+### Why
+D-026 separated the use case from the core and named the parents/family-diary framing as the first use case, but it gave no canonical noun for the outer scope or the sub-entity, so its promised "explicit renaming packet may revisit them" had no destination — every later rename would have to re-litigate the target words. Naming `community` / `subject` now fixes that destination once, so subsequent packets rename against a settled target. Defining `community` as one-or-more participants keeps the solo and shared use cases on a single model instead of forking the core. The top-line "Diary RAG Service for TheyGrow" framing in the PRD/BuildPlan titles still presents the first use case and a future host *as* the product; reframing the titles aligns the canonical docs with D-026's own stated intent.
+
+This is the milestone's "Decision + top-tier product reframe" packet (1/3). It defines *what* the product is and *which words* are canonical; it deliberately does not schedule the identifier-level rename roadmap — that is a later packet of the same milestone.
+
+### Consequence
+- `docs/product/PRD.md` and `docs/product/BuildPlan.md` reframed: H1 titles and top-line product name describe the generic shared-memory / note-grounded answer service; the family/child diary is named as the first implemented use case and TheyGrow as a later integration host. PRD §1 / §3 state both the solo and shared/group use cases; a short Terminology note defines `community` / `subject`. No product scope change.
+- Canonical vocabulary `community` / `subject` recorded. New core code adopts them; this extends, and does not relax, the D-026 boundary rule.
+- D-001, D-002, and D-026 are not edited in place — this decision references and contextualizes them.
+- `docs/assumptions.md` is not touched: choosing `community` / `subject` is a settled contract decision recorded here, not an open assumption.
+- **Deferred to a later packet of this milestone:** the itemized, ordered, non-destructive migration path for internal identifiers — `family_id`, `child_id`, `DiaryEntry`, `entry_date` / `entry_text`, `parse_diary_entry`, `DiaryRepository`, the `diary_rag` package, `RouteKind.ENTRY` / `detected_route='entry'`. This decision names the destination only; it does not rename anything.
+- **Deferred:** vocabulary alignment of `docs/ARCHITECTURE.md`, `docs/INVARIANTS.md`, `docs/RUNTIME-INVARIANTS.md`, `docs/product/TechSpec.md`, `AGENTS.md`, `CLAUDE.md`, and `docs/execution-map.md`.
+- No code, schema, migration, test, dependency, or `src/` token change. No roadmap or scope commitment. D-026's adapter axes and boundary rules are unchanged, only extended with the named vocabulary.
+- Out of scope (unchanged or deferred): all identifier / schema / package renames (own packet); A-14 (community/subject bootstrap) and A-21 (TheyGrow integration surface) stay open; the supporting-doc reframes named above; any code or test change.

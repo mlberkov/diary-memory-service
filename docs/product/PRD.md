@@ -1,4 +1,6 @@
-# PRD — Diary RAG Service for TheyGrow
+# PRD — Shared-Memory Core / Note-Grounded Answer Service
+
+*First implemented use case: a Telegram family/child diary. Later integration host: TheyGrow (D-041).*
 
 ## Status
 Draft v1  
@@ -7,21 +9,28 @@ Purpose: canonical product context for the first implementation slice
 
 ## 1. Product Intent
 
-The system is a **portable memory/journal core** surfaced through host-specific adapters. It exists to capture and recall valuable personal information — observations, events, reflections — without forcing the user to commit to a single host or topic. The topic model is generic; child- and family-related capture is **one possible use case**, not the system's definition.
+The system is a **generic shared-memory / note-grounded answer service** — a portable memory/journal core surfaced through host-specific adapters. It captures notes into a durable corpus and answers natural-language questions grounded only in retrieved evidence from that corpus, without forcing the user to commit to a single host or topic. It serves both an **individual-memory (solo)** use case — one person keeping a private corpus — and a **shared/group** use case — several people maintaining a common corpus with authorship preserved — under one core model. The topic model is generic; child- and family-related capture is **one possible use case**, not the system's definition.
 
-The **first use case** — and the scope of this PRD — is parents who write family and child-related observations in Telegram and later ask natural-language questions over these records. The same core is intended to support additional hosts (TheyGrow, self-hosted OSS, managed cloud, other embedded products) without rewrite.
+The **first implemented use case** — and the scope of this PRD — is parents who write family and child-related observations in Telegram and later ask natural-language questions over these records; it is the shared/group shape of the core model. The same core is intended to support additional hosts (TheyGrow, self-hosted OSS, managed cloud, other embedded products) without rewrite.
 
 The short-term interface is Telegram. The long-term product destination spans:
 - **managed cloud** as the default reference deployment (D-027),
 - **self-hosted OSS** as a peer deployment shape,
 - **embedded** in TheyGrow and other host products as a reusable internal memory subsystem.
 
-Core principles (D-026, D-027):
+Core principles (D-026, D-027, D-041):
 - Telegram is one event-source adapter, not the product core.
-- The core is a standalone, portable memory/journal core — currently surfaced as a Diary Memory Service.
-- The parents / family-diary framing below is the first use case, not the definition of the system.
+- The core is a standalone, portable shared-memory / note-grounded answer service — currently surfaced through its first use case, a Diary Memory Service.
+- The parents / family-diary framing below is the first implemented use case, not the definition of the system.
 - Absence of an explicit command must never cause silent data loss: any message the user sends is, at minimum, preserved as a draft.
 - Raw data is durable by design (daily backup window, stronger-than-nightly recovery) and exportable on demand (JSON or TXT).
+
+### Canonical vocabulary (D-041)
+
+- **community** — the outer scope that owns a note corpus and bounds retrieval and authorship. A community has one or more participants: a one-person community is the individual-memory (solo) use case, a multi-person community is the shared/group use case.
+- **subject** — a sub-entity within a community that a note can be about.
+
+In the first implemented use case a `family` is one community and a `child` is one subject. Use-case nouns (`family`, `child`, `parent`) remain in use-case-facing prose; internal identifiers keep their historical names until their own renaming packet (D-026, D-041).
 
 ## 2. Problem
 
@@ -40,9 +49,9 @@ Telegram history is not a memory system:
 
 ## 3. Users
 
-Primary users:
-- one parent maintaining a private diary,
-- two parents maintaining a shared family diary.
+Primary users (first implemented use case — a family/child diary in Telegram):
+- one parent maintaining a private diary — the individual-memory (solo) shape, a single-participant community,
+- two parents maintaining a shared family diary — the shared/group shape, a multi-participant community with authorship preserved.
 
 Future users:
 - TheyGrow families using the same memory layer inside `theygrow.app`.
@@ -138,7 +147,7 @@ The Telegram command surface is `/note`, `/ask`, `/drafts`, `/export` (D-031). T
 7. Optional AI enrichments must be feature-flagged, not entangled with the base flow.
 8. No silent failure may pretend confidence.
 9. Raw data is durable by design: daily backup window, stronger-than-nightly recovery, on-demand raw export.
-10. The topic model is generic; child- and family-oriented capture is one use case, not the system's definition.
+10. The topic model is generic and serves both solo and shared/group corpora under one core model; child- and family-oriented capture is one use case, not the system's definition.
 
 ## 8. Success Criteria
 
