@@ -2,6 +2,8 @@
 
 These must hold while the service is running. Violations are alerts, not warnings.
 
+For the canonical `community` / `subject` vocabulary see `docs/GLOSSARY.md` and D-041. This file deliberately still names the current code identifiers (`family_id`, `detected_route`, …) — its wording matches what code enforces today, not the target vocabulary.
+
 ## R-1. Raw-before-enrichment ordering
 Within a single inbound-message handler, the `SourceMessage` row is committed before any parse, chunk, embed, or index call is initiated.
 

@@ -2,7 +2,7 @@
 
 ## Role
 
-You are working inside a spec-first repository for a portable memory/journal core. The first use case is a Diary RAG Service that starts in Telegram and is designed for later integration into TheyGrow; the same core is intended to support additional hosts (self-hosted OSS, managed cloud, other embedded products) without rewrite (D-026).
+You are working inside a spec-first repository for a generic shared-memory / note-grounded answer service — a portable memory/journal core (D-026, D-041). The first implemented use case is a Diary RAG Service that starts in Telegram and is designed for later integration into TheyGrow; the same core is intended to support additional hosts (self-hosted OSS, managed cloud, other embedded products) without rewrite. The canonical core vocabulary is `community` and `subject`; see `docs/GLOSSARY.md`.
 
 Your job is not to improvise the product.
 Your job is to implement and refine the repository in a way that stays consistent with canonical docs.
@@ -28,6 +28,7 @@ Then, if relevant to the task, read:
 12. `docs/assumption-audit.md`
 13. `README.md`
 14. `QUICKSTART.md`
+15. `docs/GLOSSARY.md`
 
 Do not skip this read order for non-trivial work.
 
@@ -57,7 +58,7 @@ You must preserve these architectural rules:
 7. Every answer must be grounded in retrieved evidence.
 8. Shared diary mode must preserve authorship.
 9. Optional AI enrichments are feature-flagged.
-10. Host-specific types, provider SDKs, raw SQL, and use-case vocabulary (`family`, `child`, `parent`, "diary" as a type name) must not appear in newly added core code. Existing names persist until an explicit renaming packet (D-026).
+10. Host-specific types, provider SDKs, raw SQL, and use-case vocabulary (`family`, `child`, `parent`, "diary" as a type name) must not appear in newly added core code; new core code adopts the canonical `community` / `subject` vocabulary (D-041; see `docs/GLOSSARY.md`). Existing names persist until an explicit renaming packet (D-026).
 
 ## Implementation Style
 
@@ -120,7 +121,7 @@ Do not add to core code:
 - use-case vocabulary (`family`, `child`, `parent`, "diary" as a type name) in newly added types or function names,
 - assumptions that the runtime is HTTP-shaped, Telegram-shaped, single-tenant, internet-connected, or English-only.
 
-Each of these belongs behind its adapter seam (event source, control surface, storage, provider, tenant mapping). Use-case-specific scope is carried as opaque identifiers, not encoded in core types. Existing names (`family_id`, `DiaryRepository`, `DiaryEntry`, the `diary_rag` package) persist until an explicit renaming packet.
+Each of these belongs behind its adapter seam (event source, control surface, storage, provider, tenant mapping). Use-case-specific scope is carried as opaque identifiers, not encoded in core types; the canonical core terms are `community` and `subject` (D-041; see `docs/GLOSSARY.md`). Existing names (`family_id`, `DiaryRepository`, `DiaryEntry`, the `diary_rag` package) persist until an explicit renaming packet.
 
 ## Documentation Rule
 

@@ -1,11 +1,13 @@
-# Tech Spec — Diary RAG Service for TheyGrow
+# Tech Spec — Shared-Memory Core / Note-Grounded Answer Service
+
+*First implemented use case: a Telegram family/child diary. Later integration host: TheyGrow (D-041).*
 
 ## Status
 Draft v1
 
 ## 1. Architecture Position
 
-The system must be implemented as a standalone Diary Memory Service — a **portable memory/journal core** surfaced through host-specific adapters (D-026). The first use case is a family/child diary; the core itself is topic-neutral.
+The system must be implemented as a standalone **generic shared-memory / note-grounded answer service** — a portable memory/journal core surfaced through host-specific adapters (D-026, D-041), currently surfaced through its first use case as a Diary Memory Service. The first implemented use case is a family/child diary; the core itself is topic-neutral. The canonical core vocabulary is `community` (the outer scope owning a note corpus) and `subject` (a sub-entity a note is about) — see `docs/GLOSSARY.md`.
 
 ### Current channel
 - Telegram bot
@@ -101,6 +103,8 @@ The safety floor for ambiguous input is **preserve as draft**, not **clarify and
 - `RetrievalHit`
 - `AnswerTrace`
 - `FeedbackEvent`
+
+> `Family` and `Child` are the first-use-case entity names for the canonical core concepts `community` and `subject` (D-041; see `docs/GLOSSARY.md`). The entity names themselves are revisited in the renaming packet (D-026); this spec keeps the current names.
 
 ### SourceMessage
 Fields:

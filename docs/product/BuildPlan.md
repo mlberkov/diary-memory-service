@@ -1,11 +1,13 @@
-# Build Plan — Diary RAG Service for TheyGrow
+# Build Plan — Shared-Memory Core / Note-Grounded Answer Service
+
+*First implemented use case: a Telegram family/child diary. Later integration host: TheyGrow (D-041).*
 
 ## Status
 Draft v1
 
 ## Goal
 
-Build a portable memory/journal core, surfaced first as a Diary Memory Service that starts with Telegram and is later integrated into TheyGrow. The same core is intended to support additional hosts (self-hosted OSS, managed cloud, other embedded products) without rewrite (D-026). The family-diary framing is the first use case, not the definition of the system.
+Build a **generic shared-memory / note-grounded answer service** — a portable memory/journal core that captures notes into a durable corpus and answers natural-language questions grounded in retrieved evidence, serving both individual-memory (solo) and shared/group corpora under one core model. It is surfaced first as a Diary Memory Service that starts with Telegram and is later integrated into TheyGrow. The same core is intended to support additional hosts (self-hosted OSS, managed cloud, other embedded products) without rewrite (D-026, D-041). The family/child diary is the first **implemented** use case, not the definition of the system; `community` (the outer scope owning a corpus, one or more participants) and `subject` (a sub-entity within a community) are the canonical core vocabulary (D-041).
 
 Target-state shape (D-027) — bound here so future slices stay consistent, not scheduled as their own phases yet:
 - Draft-by-default safety: explicit `/note`, `/ask`, `/drafts` commands; absence of command defaults to draft so no inbound message is silently discarded. The explicit `/draft` command was removed in D-030 — drafts are created only by the no-command default and recalled via `/drafts`.

@@ -4,7 +4,7 @@ Derived from `docs/product/TechSpec.md`. Do not extend with new entities or flow
 
 ## Portability principle
 
-This repository implements a **portable memory/journal core**. The functional core — raw capture, parsing, line-level chunking, embedding, hybrid retrieval, grounded answering, provenance — is the same subsystem regardless of which system embeds it. What varies between hosts is the surface around the core. Telegram is one event-source adapter; TheyGrow is one future host; self-hosted OSS, managed cloud, and embedded-in-TheyGrow are equally first-class deployment shapes. The current parents/family/child framing is the first use case of the core, not its definition. Journal/topic semantics in the core stay generic. See D-026.
+This repository implements a **portable memory/journal core** — a generic shared-memory / note-grounded answer service. The functional core — raw capture, parsing, line-level chunking, embedding, hybrid retrieval, grounded answering, provenance — is the same subsystem regardless of which system embeds it. What varies between hosts is the surface around the core. Telegram is one event-source adapter; TheyGrow is one future host; self-hosted OSS, managed cloud, and embedded-in-TheyGrow are equally first-class deployment shapes. The current parents/family/child framing is the first use case of the core, not its definition. Journal/topic semantics in the core stay generic. The canonical core vocabulary is `community` (the outer scope owning a note corpus) and `subject` (a sub-entity a note is about); the first use case maps `family` → community and `child` → subject. See D-026, D-041, and `docs/GLOSSARY.md`.
 
 ### Adapter axes
 
@@ -41,7 +41,7 @@ Hosts and integrations vary along five axes. Each axis has a single explicit sea
 - Transport types outside the channel adapter (already I-1).
 - Provider SDK imports outside provider adapters (already I-11).
 - Raw SQL or vendor-specific operators outside the storage layer.
-- Use-case vocabulary in newly added code (`family`, `child`, `parent`, "diary" as a type name) where a generic name fits. Existing names persist; new code adopts the neutral form.
+- Use-case vocabulary in newly added code (`family`, `child`, `parent`, "diary" as a type name) where a generic name fits. Existing names persist; new code adopts the canonical `community` / `subject` vocabulary (D-041; see `docs/GLOSSARY.md`).
 - Assumptions that the runtime is HTTP-shaped, Telegram-shaped, single-tenant, internet-connected, or English-only.
 - Authentication model assumptions; the core receives an already-resolved scope.
 
@@ -86,7 +86,7 @@ Telegram bot   ──┐                                              ┌── 
 
 - **Channel adapters** — Telegram today, TheyGrow tomorrow, plus future HTTP/SDK/CLI surfaces. Translate transport-specific input into core service calls. No domain logic.
 - **Diary Memory Service** — the product core. Owns ingestion, retrieval, answering, traces. Has no transport or host knowledge.
-- **Core domain** — the entities listed in TechSpec §5. Pure data + pure logic, no IO. Topic-neutral in shape; use-case-specific scope (family, child) is carried as opaque identifiers, not encoded in the model.
+- **Core domain** — the entities listed in TechSpec §5. Pure data + pure logic, no IO. Topic-neutral in shape; use-case-specific scope (family, child) is carried as opaque identifiers, not encoded in the model. The canonical core terms for that scope are `community` and `subject` (D-041; see `docs/GLOSSARY.md`).
 - **Infrastructure** — PostgreSQL repositories, embedding client, chat client, hybrid search backend. Each behind an explicit interface (e.g. `SearchRepository`, `EmbeddingClient`, `ChatClient`).
 
 ## Boundary rules
@@ -95,7 +95,7 @@ Telegram bot   ──┐                                              ┌── 
 - Core domain does not import provider SDKs directly (I-11).
 - Provider access goes through one wrapper per provider; every call is logged with model, input hash, latency, outcome class (R-7).
 - Repository interfaces hide PostgreSQL specifics; no SQL outside the repository layer.
-- Use-case vocabulary (`family`, `child`, `parent`, "diary" as a type name) does not appear in newly added core code where a generic name fits (D-026). Existing names persist until an explicit renaming packet.
+- Use-case vocabulary (`family`, `child`, `parent`, "diary" as a type name) does not appear in newly added core code where a generic name fits (D-026); new core code adopts the canonical `community` / `subject` vocabulary (D-041). Existing names persist until an explicit renaming packet.
 
 ## Message lifecycle: draft vs note
 
