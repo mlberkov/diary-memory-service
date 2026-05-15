@@ -7,10 +7,10 @@ from datetime import UTC, datetime
 from diary_rag.adapters.answers import MockChatClient
 from diary_rag.adapters.embeddings import MockEmbeddingClient
 from diary_rag.config import Settings
-from diary_rag.core.diary.models import SourceMessage
+from diary_rag.core.domain.models import SourceMessage
 from diary_rag.core.routing import InboundMessage, RouteKind
-from diary_rag.services import DiaryService, Dispatcher, ExportService, QueryService
-from diary_rag.storage.mock import MockDiaryStore
+from diary_rag.services import Dispatcher, DomainService, ExportService, QueryService
+from diary_rag.storage.mock import MockDomainStore
 
 
 def _settings(*, default: int = 5, maximum: int = 20) -> Settings:
@@ -21,13 +21,13 @@ def _settings(*, default: int = 5, maximum: int = 20) -> Settings:
     )
 
 
-def _dispatcher(settings: Settings) -> tuple[Dispatcher, MockDiaryStore]:
-    store = MockDiaryStore()
+def _dispatcher(settings: Settings) -> tuple[Dispatcher, MockDomainStore]:
+    store = MockDomainStore()
     embed = MockEmbeddingClient()
     chat = MockChatClient()
     return (
         Dispatcher(
-            DiaryService(store, embedding_client=embed),
+            DomainService(store, embedding_client=embed),
             QueryService(store, store, embed, chat),
             ExportService(store),
             settings,
@@ -36,7 +36,7 @@ def _dispatcher(settings: Settings) -> tuple[Dispatcher, MockDiaryStore]:
     )
 
 
-def _seed_drafts(store: MockDiaryStore, *, count: int, family: str = "42") -> None:
+def _seed_drafts(store: MockDomainStore, *, count: int, family: str = "42") -> None:
     base = datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC)
     for i in range(count):
         store.save_source_message(

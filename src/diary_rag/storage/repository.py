@@ -1,8 +1,8 @@
 """Storage seam for the diary domain.
 
-`DiaryRepository` is the channel-neutral persistence Protocol that
-the ingest path depends on. The in-memory ``MockDiaryStore``, the local
-``SqliteDiaryStore``, and the canonical ``PostgresDiaryStore`` all
+`DomainRepository` is the channel-neutral persistence Protocol that
+the ingest path depends on. The in-memory ``MockDomainStore``, the local
+``SqliteDomainStore``, and the canonical ``PostgresDomainStore`` all
 satisfy it structurally. Retrieval is a separate seam
 (``SearchRepository`` in ``storage.search_repository``); a single
 backend class can satisfy both Protocols.
@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from diary_rag.core.diary.models import (
+from diary_rag.core.domain.models import (
     AnswerTrace,
     DiaryEntry,
     EventChunk,
@@ -43,8 +43,8 @@ from diary_rag.core.diary.models import (
 from diary_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
 
 
-class DiaryRepository(Protocol):
-    """Persistence surface used by ``DiaryService`` and ``QueryService``."""
+class DomainRepository(Protocol):
+    """Persistence surface used by ``DomainService`` and ``QueryService``."""
 
     def save_source_message(self, source: SourceMessage) -> None: ...
 

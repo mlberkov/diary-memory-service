@@ -1,4 +1,4 @@
-"""Local SQLite implementation of ``DiaryRepository`` (ingest only).
+"""Local SQLite implementation of ``DomainRepository`` (ingest only).
 
 Opt-in dev/offline backend (D-022). Postgres is the canonical durable
 backend and the only retrieval backend (D-025); the SQLite
@@ -6,6 +6,6 @@ backend and the only retrieval backend (D-025); the SQLite
 dispatcher converts that to ``FallbackMode.NO_EVIDENCE``.
 """
 
-from diary_rag.storage.sqlite.store import SqliteDiaryStore
+from diary_rag.storage.sqlite.store import SqliteDomainStore
 
-__all__ = ["SqliteDiaryStore"]
+__all__ = ["SqliteDomainStore"]

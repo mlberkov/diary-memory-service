@@ -39,7 +39,7 @@ class FallbackMode(StrEnum):
       :class:`~diary_rag.core.answers.ChatProviderUnavailableError`;
       no LLM output was produced.
     - ``PARSE_FAILURE`` — chat client returned text that
-      :func:`~diary_rag.core.diary.answer_schema.parse_structured_answer`
+      :func:`~diary_rag.core.domain.answer_schema.parse_structured_answer`
       rejected with a :class:`StructuredAnswerError`.
     """
 
@@ -144,7 +144,7 @@ class Evidence:
 
 @dataclass(frozen=True, slots=True)
 class IngestResult:
-    """Outcome of ``DiaryService.ingest``.
+    """Outcome of ``DomainService.ingest``.
 
     ``replayed`` is ``True`` when the inbound message hit a previously
     persisted ``(external_chat_id, external_message_id, edit_seq)`` row

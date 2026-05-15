@@ -12,7 +12,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from diary_rag.core.diary import (
+from diary_rag.core.domain import (
     PROMPT_VERSION,
     AnswerContext,
     AnswerPrompt,

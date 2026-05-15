@@ -13,7 +13,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from diary_rag.core.diary.models import SourceMessage
+    from diary_rag.core.domain.models import SourceMessage
     from diary_rag.core.export.models import ExportPayload
 
 RouteSource = Literal["command", "heuristic"]

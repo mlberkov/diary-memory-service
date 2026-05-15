@@ -6,7 +6,7 @@ Used by every automated test by default and by any boot configured with
 (D-024-style convention applied to the chat seam).
 
 The mock emits a JSON ``raw_text`` that round-trips through
-:func:`~diary_rag.core.diary.answer_schema.parse_structured_answer`:
+:func:`~diary_rag.core.domain.answer_schema.parse_structured_answer`:
 ``cited_chunk_ids`` mirrors ``prompt.cited_chunk_ids``, ``answer_text``
 deterministically summarises the cited chunks (or notes their absence),
 and ``uncertainty`` is ``"confident"`` whenever there are citations,
@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 
 from diary_rag.core.answers.client import ChatResponse
-from diary_rag.core.diary.answer_prompt import AnswerPrompt
+from diary_rag.core.domain.answer_prompt import AnswerPrompt
 
 
 class MockChatClient:

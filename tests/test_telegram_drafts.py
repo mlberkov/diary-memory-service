@@ -14,10 +14,10 @@ from diary_rag.adapters.embeddings import MockEmbeddingClient
 from diary_rag.adapters.telegram.webhook import get_dispatcher, get_telegram_client
 from diary_rag.app import create_app
 from diary_rag.config import Settings
-from diary_rag.core.diary.models import SourceMessage
+from diary_rag.core.domain.models import SourceMessage
 from diary_rag.core.routing import RouteKind
-from diary_rag.services import DiaryService, Dispatcher, ExportService, QueryService
-from diary_rag.storage.mock import MockDiaryStore
+from diary_rag.services import Dispatcher, DomainService, ExportService, QueryService
+from diary_rag.storage.mock import MockDomainStore
 
 
 class RecordingTelegramClient:
@@ -75,12 +75,12 @@ def _settings(**overrides: Any) -> Settings:
 def _build_client(
     settings: Settings,
     telegram_client: Any | None = None,
-) -> tuple[TestClient, MockDiaryStore, Any]:
-    store = MockDiaryStore()
+) -> tuple[TestClient, MockDomainStore, Any]:
+    store = MockDomainStore()
     embed = MockEmbeddingClient()
     chat = MockChatClient()
     dispatcher = Dispatcher(
-        DiaryService(store, embedding_client=embed),
+        DomainService(store, embedding_client=embed),
         QueryService(store, store, embed, chat),
         ExportService(store),
         settings,
@@ -114,7 +114,7 @@ def _update(text: str, *, update_id: int = 1, message_id: int = 1) -> dict[str, 
     }
 
 
-def _seed_short_drafts(store: MockDiaryStore, *, count: int) -> None:
+def _seed_short_drafts(store: MockDomainStore, *, count: int) -> None:
     base = datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC)
     for i in range(count):
         store.save_source_message(

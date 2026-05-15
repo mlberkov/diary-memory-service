@@ -1,4 +1,4 @@
-"""Integration tests for ``PostgresDiaryStore`` (ingest contract only).
+"""Integration tests for ``PostgresDomainStore`` (ingest contract only).
 
 Skipped unless ``DIARY_RAG_PG_TEST_DSN`` is set, so the offline test
 flow stays green. Retrieval coverage lives in
@@ -13,7 +13,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from diary_rag.core.diary.models import DiaryEntry, EventChunk, SourceMessage
+from diary_rag.core.domain.models import DiaryEntry, EventChunk, SourceMessage
 from diary_rag.core.routing import RouteKind
 
 PG_DSN = os.environ.get("DIARY_RAG_PG_TEST_DSN")
@@ -26,7 +26,7 @@ pytestmark = pytest.mark.skipif(
 if PG_DSN is not None:
     import psycopg
 
-    from diary_rag.storage.postgres import PostgresDiaryStore
+    from diary_rag.storage.postgres import PostgresDomainStore
 
 
 def _truncate(dsn: str) -> None:
@@ -38,9 +38,9 @@ def _truncate(dsn: str) -> None:
 
 
 @pytest.fixture
-def store() -> Iterator[PostgresDiaryStore]:
+def store() -> Iterator[PostgresDomainStore]:
     assert PG_DSN is not None
-    s = PostgresDiaryStore(PG_DSN)
+    s = PostgresDomainStore(PG_DSN)
     try:
         _truncate(PG_DSN)
         yield s
@@ -107,13 +107,13 @@ def _chunk(
     )
 
 
-def test_round_trip_source_message(store: PostgresDiaryStore) -> None:
+def test_round_trip_source_message(store: PostgresDomainStore) -> None:
     src = _source()
     store.save_source_message(src)
     assert store.get_source_message("s1") == src
 
 
-def test_get_source_message_missing_returns_none(store: PostgresDiaryStore) -> None:
+def test_get_source_message_missing_returns_none(store: PostgresDomainStore) -> None:
     assert store.get_source_message("nope") is None
 
 
@@ -122,7 +122,7 @@ def test_restart_survival() -> None:
     assert PG_DSN is not None
     _truncate(PG_DSN)
 
-    first = PostgresDiaryStore(PG_DSN)
+    first = PostgresDomainStore(PG_DSN)
     try:
         first.save_source_message(_source(sid="s1", family_id="fam-A"))
         first.save_diary_entry(_entry(eid="e1", sid="s1", family_id="fam-A"))
@@ -132,7 +132,7 @@ def test_restart_survival() -> None:
     finally:
         first.close()
 
-    second = PostgresDiaryStore(PG_DSN)
+    second = PostgresDomainStore(PG_DSN)
     try:
         fetched = second.get_source_message("s1")
         assert fetched is not None
@@ -146,7 +146,7 @@ def test_restart_survival() -> None:
 
 
 def test_get_or_create_source_message_returns_false_on_first_insert(
-    store: PostgresDiaryStore,
+    store: PostgresDomainStore,
 ) -> None:
     src = _source(sid="s1", external_message_id="42", edit_seq=0)
 
@@ -158,7 +158,7 @@ def test_get_or_create_source_message_returns_false_on_first_insert(
 
 
 def test_get_or_create_source_message_returns_true_on_replay(
-    store: PostgresDiaryStore,
+    store: PostgresDomainStore,
 ) -> None:
     original = _source(sid="s1", external_message_id="42", edit_seq=0)
     duplicate = _source(sid="different-uuid", external_message_id="42", edit_seq=0)
@@ -172,7 +172,7 @@ def test_get_or_create_source_message_returns_true_on_replay(
 
 
 def test_get_or_create_source_message_distinguishes_edit_seq(
-    store: PostgresDiaryStore,
+    store: PostgresDomainStore,
 ) -> None:
     original = _source(sid="s1", external_message_id="42", edit_seq=0)
     edited = _source(sid="s2", external_message_id="42", edit_seq=1715300100)
@@ -186,7 +186,7 @@ def test_get_or_create_source_message_distinguishes_edit_seq(
     assert store.get_source_message("s2") is not None
 
 
-def test_save_source_message_raises_on_duplicate_triple(store: PostgresDiaryStore) -> None:
+def test_save_source_message_raises_on_duplicate_triple(store: PostgresDomainStore) -> None:
     import psycopg.errors
 
     store.save_source_message(_source(sid="s1", external_message_id="42", edit_seq=0))
@@ -195,7 +195,7 @@ def test_save_source_message_raises_on_duplicate_triple(store: PostgresDiaryStor
         store.save_source_message(_source(sid="s2", external_message_id="42", edit_seq=0))
 
 
-def test_get_diary_entry_by_source_message_id(store: PostgresDiaryStore) -> None:
+def test_get_diary_entry_by_source_message_id(store: PostgresDomainStore) -> None:
     store.save_source_message(_source(sid="s1"))
     store.save_diary_entry(_entry(eid="e1", sid="s1"))
 
@@ -205,12 +205,12 @@ def test_get_diary_entry_by_source_message_id(store: PostgresDiaryStore) -> None
 
 
 def test_get_diary_entry_by_source_message_id_missing_returns_none(
-    store: PostgresDiaryStore,
+    store: PostgresDomainStore,
 ) -> None:
     assert store.get_diary_entry_by_source_message_id("nope") is None
 
 
-def test_count_event_chunks_for_source(store: PostgresDiaryStore) -> None:
+def test_count_event_chunks_for_source(store: PostgresDomainStore) -> None:
     store.save_source_message(_source(sid="s1"))
     store.save_diary_entry(_entry(eid="e1", sid="s1"))
     store.save_event_chunks(
@@ -224,7 +224,7 @@ def test_count_event_chunks_for_source(store: PostgresDiaryStore) -> None:
     assert store.count_event_chunks_for_source("nope") == 0
 
 
-def test_save_source_message_accepts_draft_route(store: PostgresDiaryStore) -> None:
+def test_save_source_message_accepts_draft_route(store: PostgresDomainStore) -> None:
     """D-027: the CHECK constraint on ``detected_route`` includes ``'draft'``."""
     draft = SourceMessage(
         source_message_id="d1",
@@ -247,7 +247,7 @@ def test_save_source_message_accepts_draft_route(store: PostgresDiaryStore) -> N
 
 
 def test_get_or_create_source_message_idempotent_for_draft_route(
-    store: PostgresDiaryStore,
+    store: PostgresDomainStore,
 ) -> None:
     """R-2 holds for drafts: replay returns the existing row, no duplicate."""
     draft = SourceMessage(
@@ -284,7 +284,7 @@ def test_get_or_create_source_message_idempotent_for_draft_route(
 
 
 def test_list_source_messages_is_family_scoped_and_ordered(
-    store: PostgresDiaryStore,
+    store: PostgresDomainStore,
 ) -> None:
     base = datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC)
     store.save_source_message(

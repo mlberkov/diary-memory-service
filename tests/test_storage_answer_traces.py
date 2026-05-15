@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from diary_rag.core.diary.models import (
+from diary_rag.core.domain.models import (
     AnswerTrace,
     DiaryEntry,
     EventChunk,
@@ -24,8 +24,8 @@ from diary_rag.core.diary.models import (
     SourceMessage,
 )
 from diary_rag.core.routing import RouteKind
-from diary_rag.storage.mock import MockDiaryStore
-from diary_rag.storage.sqlite import SqliteDiaryStore
+from diary_rag.storage.mock import MockDomainStore
+from diary_rag.storage.sqlite import SqliteDomainStore
 
 PG_DSN = os.environ.get("DIARY_RAG_PG_TEST_DSN")
 
@@ -111,12 +111,12 @@ def _chunk(cid: str = "c1", eid: str = "e1", sid: str = "s1", idx: int = 0) -> E
 
 
 # ---------------------------------------------------------------------------
-# MockDiaryStore
+# MockDomainStore
 # ---------------------------------------------------------------------------
 
 
 def test_mock_save_and_get_answer_trace_round_trip() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     store.save_query(_query())
     trace = _trace(latency_ms=42, token_counts={"prompt": 100, "completion": 25})
     store.save_answer_trace(trace)
@@ -126,12 +126,12 @@ def test_mock_save_and_get_answer_trace_round_trip() -> None:
 
 
 def test_mock_get_answer_trace_missing_returns_none() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     assert store.get_answer_trace_for_query("missing") is None
 
 
 def test_mock_save_answer_trace_rejects_duplicate_query_id() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     store.save_query(_query())
     store.save_answer_trace(_trace(aid="a1"))
     with pytest.raises(ValueError):
@@ -139,7 +139,7 @@ def test_mock_save_answer_trace_rejects_duplicate_query_id() -> None:
 
 
 def test_mock_save_answer_trace_with_empty_context_chunk_ids() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     store.save_query(_query(fallback=FallbackMode.NO_EVIDENCE))
     trace = _trace(
         context_chunk_ids=(),
@@ -169,7 +169,7 @@ _NEW_FALLBACK_MODES = [
 @pytest.mark.parametrize("mode", _NEW_FALLBACK_MODES)
 def test_mock_round_trips_new_fallback_modes(mode: FallbackMode) -> None:
     """Slice 4.3b: each new FallbackMode round-trips through the mock store."""
-    store = MockDiaryStore()
+    store = MockDomainStore()
     store.save_query(_query(fallback=mode))
     trace = _trace(fallback_mode=mode, latency_ms=11, token_counts={"prompt": 3})
     store.save_answer_trace(trace)
@@ -179,12 +179,12 @@ def test_mock_round_trips_new_fallback_modes(mode: FallbackMode) -> None:
 
 
 # ---------------------------------------------------------------------------
-# SqliteDiaryStore
+# SqliteDomainStore
 # ---------------------------------------------------------------------------
 
 
-def _sqlite_store(tmp_path: Path) -> SqliteDiaryStore:
-    store = SqliteDiaryStore(str(tmp_path / "diary.db"))
+def _sqlite_store(tmp_path: Path) -> SqliteDomainStore:
+    store = SqliteDomainStore(str(tmp_path / "diary.db"))
     store.save_source_message(_source())
     store.save_diary_entry(_entry())
     store.save_event_chunks([_chunk("c1", idx=0)])
@@ -243,7 +243,7 @@ def test_sqlite_round_trips_new_fallback_modes(tmp_path: Path, mode: FallbackMod
 
 
 # ---------------------------------------------------------------------------
-# PostgresDiaryStore
+# PostgresDomainStore
 # ---------------------------------------------------------------------------
 
 
@@ -257,7 +257,7 @@ if PG_DSN is not None:
     import psycopg
     from psycopg.types.json import Jsonb
 
-    from diary_rag.storage.postgres import PostgresDiaryStore
+    from diary_rag.storage.postgres import PostgresDomainStore
 
 
 def _truncate(dsn: str) -> None:
@@ -270,9 +270,9 @@ def _truncate(dsn: str) -> None:
 
 
 @pytest.fixture
-def pg_store() -> Iterator[PostgresDiaryStore]:
+def pg_store() -> Iterator[PostgresDomainStore]:
     assert PG_DSN is not None
-    s = PostgresDiaryStore(PG_DSN)
+    s = PostgresDomainStore(PG_DSN)
     try:
         _truncate(PG_DSN)
         s.save_source_message(_source())
@@ -284,7 +284,7 @@ def pg_store() -> Iterator[PostgresDiaryStore]:
 
 
 @pgmark
-def test_pg_save_and_get_answer_trace_round_trip(pg_store: PostgresDiaryStore) -> None:
+def test_pg_save_and_get_answer_trace_round_trip(pg_store: PostgresDomainStore) -> None:
     pg_store.save_query(_query())
     trace = _trace(latency_ms=42, token_counts={"prompt": 100, "completion": 25})
     pg_store.save_answer_trace(trace)
@@ -293,12 +293,12 @@ def test_pg_save_and_get_answer_trace_round_trip(pg_store: PostgresDiaryStore) -
 
 
 @pgmark
-def test_pg_get_answer_trace_missing_returns_none(pg_store: PostgresDiaryStore) -> None:
+def test_pg_get_answer_trace_missing_returns_none(pg_store: PostgresDomainStore) -> None:
     assert pg_store.get_answer_trace_for_query("missing") is None
 
 
 @pgmark
-def test_pg_save_answer_trace_rejects_duplicate_query_id(pg_store: PostgresDiaryStore) -> None:
+def test_pg_save_answer_trace_rejects_duplicate_query_id(pg_store: PostgresDomainStore) -> None:
     pg_store.save_query(_query())
     pg_store.save_answer_trace(_trace(aid="a1"))
     with pytest.raises(psycopg.errors.UniqueViolation):
@@ -307,7 +307,7 @@ def test_pg_save_answer_trace_rejects_duplicate_query_id(pg_store: PostgresDiary
 
 @pgmark
 def test_pg_save_answer_trace_with_empty_context_chunk_ids(
-    pg_store: PostgresDiaryStore,
+    pg_store: PostgresDomainStore,
 ) -> None:
     pg_store.save_query(_query(fallback=FallbackMode.NO_EVIDENCE))
     trace = _trace(
@@ -327,7 +327,7 @@ def test_pg_save_answer_trace_with_empty_context_chunk_ids(
 @pgmark
 @pytest.mark.parametrize("mode", _NEW_FALLBACK_MODES)
 def test_pg_round_trips_new_fallback_modes(
-    pg_store: PostgresDiaryStore, mode: FallbackMode
+    pg_store: PostgresDomainStore, mode: FallbackMode
 ) -> None:
     """Slice 4.3b: the widened CHECK admits each new mode on postgres."""
     pg_store.save_query(_query(fallback=mode))
@@ -340,7 +340,7 @@ def test_pg_round_trips_new_fallback_modes(
 
 @pgmark
 def test_pg_rejects_unknown_answer_trace_fallback_mode(
-    pg_store: PostgresDiaryStore,
+    pg_store: PostgresDomainStore,
 ) -> None:
     """The CHECK constraint still rejects values outside the FallbackMode set."""
     pg_store.save_query(_query())

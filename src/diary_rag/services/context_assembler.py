@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from diary_rag.core.diary import AnswerContext, Query
+from diary_rag.core.domain import AnswerContext, Query
 from diary_rag.services.retrieval import FusedHit
 
 

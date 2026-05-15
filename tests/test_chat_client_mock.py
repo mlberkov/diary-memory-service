@@ -12,8 +12,8 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 
 from diary_rag.adapters.answers import MockChatClient
-from diary_rag.core.diary import build_answer_prompt, parse_structured_answer
-from diary_rag.core.diary.models import AnswerContext, EventChunk
+from diary_rag.core.domain import build_answer_prompt, parse_structured_answer
+from diary_rag.core.domain.models import AnswerContext, EventChunk
 from diary_rag.core.embeddings import EmbeddingStatus
 
 

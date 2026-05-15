@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from diary_rag.core.diary.answer_prompt import AnswerPrompt
+from diary_rag.core.domain.answer_prompt import AnswerPrompt
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,7 +23,7 @@ class ChatResponse:
     """Channel-neutral return shape for one chat-client call.
 
     ``raw_text`` is the provider's structured-answer JSON, parsed by
-    :func:`~diary_rag.core.diary.answer_schema.parse_structured_answer`.
+    :func:`~diary_rag.core.domain.answer_schema.parse_structured_answer`.
     ``token_counts`` is a free-form provider-attributed map (e.g.
     ``{"prompt": …, "completion": …}``); empty when the backend cannot
     report tokens (the mock approximates it from character counts).

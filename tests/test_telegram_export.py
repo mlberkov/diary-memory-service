@@ -17,8 +17,8 @@ from diary_rag.adapters.telegram.webhook import get_dispatcher, get_telegram_cli
 from diary_rag.app import create_app
 from diary_rag.config import Settings
 from diary_rag.core.routing import RouteKind
-from diary_rag.services import DiaryService, Dispatcher, ExportService, QueryService
-from diary_rag.storage.mock import MockDiaryStore
+from diary_rag.services import Dispatcher, DomainService, ExportService, QueryService
+from diary_rag.storage.mock import MockDomainStore
 
 
 class RecordingTelegramClient:
@@ -62,13 +62,13 @@ def _settings() -> Settings:
 
 def _client_with(
     telegram_client: TelegramClient | None = None,
-) -> tuple[TestClient, MockDiaryStore, TelegramClient]:
-    store = MockDiaryStore()
+) -> tuple[TestClient, MockDomainStore, TelegramClient]:
+    store = MockDomainStore()
     embed = MockEmbeddingClient()
     chat = MockChatClient()
     settings = _settings()
     dispatcher = Dispatcher(
-        DiaryService(store, embedding_client=embed),
+        DomainService(store, embedding_client=embed),
         QueryService(store, store, embed, chat),
         ExportService(store),
         settings,
@@ -102,15 +102,15 @@ def _update(text: str) -> dict[str, Any]:
     }
 
 
-def _seed_one(store: MockDiaryStore) -> None:
+def _seed_one(store: MockDomainStore) -> None:
     _post_or_seed(store)
 
 
-def _post_or_seed(store: MockDiaryStore) -> None:
+def _post_or_seed(store: MockDomainStore) -> None:
     """Seed one note row directly through the store so /export has content."""
     from datetime import UTC, datetime
 
-    from diary_rag.core.diary.models import SourceMessage
+    from diary_rag.core.domain.models import SourceMessage
 
     store.save_source_message(
         SourceMessage(

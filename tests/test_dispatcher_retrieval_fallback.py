@@ -23,7 +23,7 @@ from typing import Literal
 import pytest
 
 from diary_rag.config import Settings
-from diary_rag.core.diary import AnswerResult, Evidence, FallbackMode
+from diary_rag.core.domain import AnswerResult, Evidence, FallbackMode
 from diary_rag.core.routing import InboundMessage, RouteKind
 from diary_rag.services.dispatcher import Dispatcher
 
@@ -43,7 +43,7 @@ class _FixedAnswerQueryService:
         return self._result
 
 
-class _UnusedDiaryService:
+class _UnusedDomainService:
     def ingest(self, message: InboundMessage) -> object:  # pragma: no cover - not called
         raise AssertionError("ingest should not be called on an /ask path")
 
@@ -72,7 +72,7 @@ def _ask(
 
 def _build_dispatcher(answer: AnswerResult) -> Dispatcher:
     return Dispatcher(
-        _UnusedDiaryService(),  # type: ignore[arg-type]
+        _UnusedDomainService(),  # type: ignore[arg-type]
         _FixedAnswerQueryService(answer),  # type: ignore[arg-type]
         _UnusedExportService(),  # type: ignore[arg-type]
         Settings(_env_file=None),  # type: ignore[call-arg]
@@ -87,7 +87,7 @@ def test_not_implemented_error_translates_to_no_evidence(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     dispatcher = Dispatcher(
-        _UnusedDiaryService(),  # type: ignore[arg-type]
+        _UnusedDomainService(),  # type: ignore[arg-type]
         _RaisingQueryService(),  # type: ignore[arg-type]
         _UnusedExportService(),  # type: ignore[arg-type]
         Settings(_env_file=None),  # type: ignore[call-arg]

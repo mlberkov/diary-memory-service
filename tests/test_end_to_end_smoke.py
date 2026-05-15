@@ -1,6 +1,6 @@
 """End-to-end webhook smoke: /note then /ask via TestClient.
 
-Each test wires a fresh ``MockDiaryStore`` + ``Dispatcher`` into the
+Each test wires a fresh ``MockDomainStore`` + ``Dispatcher`` into the
 FastAPI app via ``app.dependency_overrides`` so per-test state is
 isolated from the module-level singleton in ``webhook.py``. The
 ``QueryService`` runs the baseline hybrid path (D-025): on the mock
@@ -23,10 +23,10 @@ from diary_rag.adapters.telegram.webhook import get_dispatcher
 from diary_rag.app import create_app
 from diary_rag.config import Settings
 from diary_rag.core.answers import ChatClient, ChatResponse
-from diary_rag.core.diary import FallbackMode
-from diary_rag.core.diary.answer_prompt import AnswerPrompt
-from diary_rag.services import DiaryService, Dispatcher, ExportService, QueryService
-from diary_rag.storage.mock import MockDiaryStore
+from diary_rag.core.domain import FallbackMode
+from diary_rag.core.domain.answer_prompt import AnswerPrompt
+from diary_rag.services import Dispatcher, DomainService, ExportService, QueryService
+from diary_rag.storage.mock import MockDomainStore
 
 
 def _settings() -> Settings:
@@ -35,13 +35,13 @@ def _settings() -> Settings:
 
 def _client_with_fresh_store(
     *, chat_client: ChatClient | None = None
-) -> tuple[TestClient, MockDiaryStore]:
-    store = MockDiaryStore()
+) -> tuple[TestClient, MockDomainStore]:
+    store = MockDomainStore()
     embed = MockEmbeddingClient()
     chat: ChatClient = chat_client if chat_client is not None else MockChatClient()
     settings = _settings()
     dispatcher = Dispatcher(
-        DiaryService(store, embedding_client=embed),
+        DomainService(store, embedding_client=embed),
         QueryService(store, store, embed, chat),
         ExportService(store),
         settings,

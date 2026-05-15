@@ -9,8 +9,8 @@ from diary_rag.adapters.embeddings import MockEmbeddingClient
 from diary_rag.adapters.telegram.reply import build_send_message_payload
 from diary_rag.config import Settings
 from diary_rag.core.routing import InboundMessage, RouteKind, RouteSource
-from diary_rag.services import DiaryService, Dispatcher, ExportService, QueryService
-from diary_rag.storage.mock import MockDiaryStore
+from diary_rag.services import Dispatcher, DomainService, ExportService, QueryService
+from diary_rag.storage.mock import MockDomainStore
 
 
 def _inbound(
@@ -37,11 +37,11 @@ def _settings() -> Settings:
 
 
 def _dispatcher() -> Dispatcher:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     embed = MockEmbeddingClient()
     chat = MockChatClient()
     return Dispatcher(
-        DiaryService(store, embedding_client=embed),
+        DomainService(store, embedding_client=embed),
         QueryService(store, store, embed, chat),
         ExportService(store),
         _settings(),

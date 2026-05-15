@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from diary_rag.adapters.embeddings.mock import MockEmbeddingClient
-from diary_rag.core.diary.models import EventChunk
+from diary_rag.core.domain.models import EventChunk
 from diary_rag.core.embeddings.models import EmbeddingStatus
 from diary_rag.core.routing import InboundMessage, RouteKind
 from diary_rag.eval.retrieval.harness import (
@@ -42,8 +42,8 @@ from diary_rag.eval.retrieval.harness import (
     recall_at_k,
     run_harness,
 )
-from diary_rag.services.diary_service import DiaryService
-from diary_rag.storage.mock.store import MockDiaryStore
+from diary_rag.services.domain_service import DomainService
+from diary_rag.storage.mock.store import MockDomainStore
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GOLD_PATH = REPO_ROOT / "eval" / "retrieval" / "gold.json"
@@ -51,7 +51,7 @@ CORPUS_PATH = REPO_ROOT / "eval" / "retrieval" / "corpus.jsonl"
 
 
 def _build_chunks_for_source(
-    store: MockDiaryStore,
+    store: MockDomainStore,
 ) -> Callable[[str], list[EventChunk]]:
     def chunks_for_source(source_message_id: str) -> list[EventChunk]:
         return [
@@ -67,7 +67,7 @@ def _build_chunks_for_source(
 def _run_mock_end_to_end() -> HarnessReport:
     gold = load_gold(GOLD_PATH)
     corpus = load_corpus(CORPUS_PATH)
-    store = MockDiaryStore()
+    store = MockDomainStore()
     embedding_client = MockEmbeddingClient()
     chunks_for_source = _build_chunks_for_source(store)
     handles = ingest_fixture_corpus(store, chunks_for_source, embedding_client, corpus)
@@ -177,7 +177,7 @@ def test_first_relevant_rank_pure() -> None:
 
 def test_ingest_fixture_corpus_resolves_handles() -> None:
     """``event_index`` is the 0-based EventChunk ordinal within the source message."""
-    store = MockDiaryStore()
+    store = MockDomainStore()
     embedding_client = MockEmbeddingClient()
     corpus = (
         CorpusMessage(
@@ -195,7 +195,7 @@ def test_ingest_fixture_corpus_resolves_handles() -> None:
 
 
 def test_mock_corpus_embeddings_have_honest_provenance() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     embedding_client = MockEmbeddingClient()
     corpus = load_corpus(CORPUS_PATH)
     chunks_for_source = _build_chunks_for_source(store)
@@ -206,7 +206,7 @@ def test_mock_corpus_embeddings_have_honest_provenance() -> None:
 
 
 def test_run_harness_raises_when_handle_unknown() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     embedding_client = MockEmbeddingClient()
     corpus = (
         CorpusMessage(
@@ -262,11 +262,11 @@ def test_postgres_mode_imports_cleanly_without_dsn() -> None:
 # -------------------------------------------------------------- smoke: ingest
 
 
-def test_diary_service_drives_corpus_ingestion() -> None:
-    """Sanity: ``DiaryService.ingest`` succeeds on every fixture corpus message."""
-    store = MockDiaryStore()
+def test_domain_service_drives_corpus_ingestion() -> None:
+    """Sanity: ``DomainService.ingest`` succeeds on every fixture corpus message."""
+    store = MockDomainStore()
     embedding_client = MockEmbeddingClient()
-    service = DiaryService(store, embedding_client=embedding_client)
+    service = DomainService(store, embedding_client=embedding_client)
     received_at = datetime.now(tz=UTC)
     corpus = load_corpus(CORPUS_PATH)
     for cm in corpus:

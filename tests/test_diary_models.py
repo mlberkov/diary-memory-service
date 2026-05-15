@@ -1,4 +1,4 @@
-"""Unit tests for ``core/diary`` value objects.
+"""Unit tests for ``core/domain`` value objects.
 
 Currently covers the ``DateRange`` retrieval-filter value object
 (Slice 3.4, D-040): both bounds optional and inclusive, both-``None``
@@ -13,7 +13,7 @@ from datetime import date
 
 import pytest
 
-from diary_rag.core.diary.models import DateRange
+from diary_rag.core.domain.models import DateRange
 
 _EARLY = date(2026, 5, 10)
 _LATE = date(2026, 5, 12)

@@ -1,6 +1,6 @@
 # Quickstart
 
-> **Milestone 1 complete.** Telegram webhook + ingest, durable PostgreSQL backend behind `DiaryRepository` (D-022),
+> **Milestone 1 complete.** Telegram webhook + ingest, durable PostgreSQL backend behind `DomainRepository` (D-022),
 > idempotent ingest on `(external_chat_id, external_message_id, edit_seq)` (D-023), sync chunk embedding
 > indexing on pgvector with `text-embedding-3-large` @ 3072 dim (D-024), and **baseline hybrid retrieval**
 > (`SearchRepository` with exact dense family-scoped scan + Postgres FTS `tsvector('simple')` + service-layer
@@ -142,7 +142,7 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
 
 #### Durable local store (Postgres)
 
-`STORAGE_BACKEND=postgres` is the canonical durable backend (D-007 / D-022). It writes through `PostgresDiaryStore` to the local Postgres provided by `docker-compose.yml`. Schema is bootstrapped on first boot from `src/diary_rag/storage/postgres/schema.sql` via `CREATE TABLE / CREATE INDEX IF NOT EXISTS`. Default backend is still `memory`; SQLite (below) remains an opt-in non-default backend.
+`STORAGE_BACKEND=postgres` is the canonical durable backend (D-007 / D-022). It writes through `PostgresDomainStore` to the local Postgres provided by `docker-compose.yml`. Schema is bootstrapped on first boot from `src/diary_rag/storage/postgres/schema.sql` via `CREATE TABLE / CREATE INDEX IF NOT EXISTS`. Default backend is still `memory`; SQLite (below) remains an opt-in non-default backend.
 
 ```bash
 # 0. Bring up Postgres (compose defaults work without a custom .env)
@@ -206,7 +206,7 @@ The reply trailer now reads "hybrid retrieval — dense+sparse RRF" (D-025); the
 
 #### Durable local store (SQLite — opt-in, ingest only)
 
-`STORAGE_BACKEND=sqlite` writes through `SqliteDiaryStore` to a single file at `SQLITE_PATH` (default `./data/diary.db`). Schema is bootstrapped on first boot via `CREATE TABLE IF NOT EXISTS`. Useful for offline dev / tests; the canonical durable path is Postgres (D-022). **Retrieval is not supported on SQLite (D-025):** `/ask` against a SQLite-backed app raises `NotImplementedError` internally and the dispatcher returns `NO_EVIDENCE`. Use Postgres if you want `/ask` to actually retrieve evidence.
+`STORAGE_BACKEND=sqlite` writes through `SqliteDomainStore` to a single file at `SQLITE_PATH` (default `./data/diary.db`). Schema is bootstrapped on first boot via `CREATE TABLE IF NOT EXISTS`. Useful for offline dev / tests; the canonical durable path is Postgres (D-022). **Retrieval is not supported on SQLite (D-025):** `/ask` against a SQLite-backed app raises `NotImplementedError` internally and the dispatcher returns `NO_EVIDENCE`. Use Postgres if you want `/ask` to actually retrieve evidence.
 
 ```bash
 export TELEGRAM_WEBHOOK_SECRET=dev-secret

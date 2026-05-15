@@ -14,7 +14,7 @@ import json
 from collections.abc import Iterable
 from datetime import datetime
 
-from diary_rag.core.diary.models import SourceMessage
+from diary_rag.core.domain.models import SourceMessage
 
 SCHEMA_VERSION = 1
 

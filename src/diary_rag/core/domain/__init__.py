@@ -5,13 +5,13 @@ types returned by the diary and query services, and the deterministic
 date-line parser used by the ingestion path.
 """
 
-from diary_rag.core.diary.answer_prompt import (
+from diary_rag.core.domain.answer_prompt import (
     PROMPT_VERSION,
     AnswerPrompt,
     CrossFamilyContextError,
     build_answer_prompt,
 )
-from diary_rag.core.diary.answer_schema import (
+from diary_rag.core.domain.answer_schema import (
     AnswerSchemaMismatchError,
     FabricatedCitationError,
     MalformedAnswerJSONError,
@@ -20,7 +20,7 @@ from diary_rag.core.diary.answer_schema import (
     UncertaintyMarker,
     parse_structured_answer,
 )
-from diary_rag.core.diary.models import (
+from diary_rag.core.domain.models import (
     AnswerContext,
     AnswerResult,
     AnswerTrace,
@@ -35,7 +35,7 @@ from diary_rag.core.diary.models import (
     RetrievalLeg,
     SourceMessage,
 )
-from diary_rag.core.diary.parser import ParsedEntry, parse_diary_entry
+from diary_rag.core.domain.parser import ParsedEntry, parse_diary_entry
 
 __all__ = [
     "PROMPT_VERSION",

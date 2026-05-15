@@ -39,7 +39,7 @@
 -- Weak-evidence / ambiguous / provider-unavailable grading is deferred
 -- to Slice 4.3.
 --
--- Bootstrapped by PostgresDiaryStore at __init__; safe to re-run on a fresh
+-- Bootstrapped by PostgresDomainStore at __init__; safe to re-run on a fresh
 -- database. Note: there is no migration tool yet
 -- (D-022/D-023/D-024/D-025/Slice-3.5/D-034), so existing local volumes
 -- that pre-date these tables must be reset (drop the named volume)

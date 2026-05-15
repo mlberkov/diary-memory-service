@@ -1,4 +1,4 @@
-"""SearchRepository tests against ``MockDiaryStore`` (Slice 3.3 / D-025).
+"""SearchRepository tests against ``MockDomainStore`` (Slice 3.3 / D-025).
 
 Mock semantics:
 
@@ -20,17 +20,17 @@ from uuid import uuid4
 import pytest
 
 from diary_rag.adapters.embeddings import MockEmbeddingClient
-from diary_rag.core.diary.models import DateRange, DiaryEntry, EventChunk, SourceMessage
+from diary_rag.core.domain.models import DateRange, DiaryEntry, EventChunk, SourceMessage
 from diary_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
 from diary_rag.core.routing import RouteKind
-from diary_rag.storage.mock import MockDiaryStore
+from diary_rag.storage.mock import MockDomainStore
 
 _NOW = datetime(2026, 5, 11, 12, 0, 0, tzinfo=UTC)
 _DATE = date(2026, 5, 11)
 
 
 def _seed(
-    store: MockDiaryStore,
+    store: MockDomainStore,
     *,
     cid: str,
     text: str,
@@ -100,7 +100,7 @@ def _seed(
 
 
 def test_sparse_orders_by_token_overlap() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _seed(store, cid="c1", text="Tried a new book today")
     _seed(store, cid="c2", text="Read another novel chapter")
     _seed(store, cid="c3", text="Walked the dog")
@@ -112,14 +112,14 @@ def test_sparse_orders_by_token_overlap() -> None:
 
 
 def test_sparse_returns_empty_for_disjoint_query() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _seed(store, cid="c1", text="Walked the dog")
 
     assert store.sparse_candidates("fam-A", "snowstorm", limit=10) == []
 
 
 def test_sparse_family_scope_isolates() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _seed(store, cid="cA", text="Family A book", family_id="fam-A")
     _seed(store, cid="cB", text="Family B book", family_id="fam-B")
 
@@ -130,7 +130,7 @@ def test_sparse_family_scope_isolates() -> None:
 
 def test_sparse_skips_non_ready_chunks_is_not_required() -> None:
     """Sparse is text-only, so it ignores embedding status (matches Postgres FTS)."""
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _seed(store, cid="c1", text="Tried a new book", status=EmbeddingStatus.PENDING)
 
     hits = store.sparse_candidates("fam-A", "book", 10)
@@ -138,7 +138,7 @@ def test_sparse_skips_non_ready_chunks_is_not_required() -> None:
 
 
 def test_dense_matches_only_identical_text() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     client = MockEmbeddingClient()
     _seed(store, cid="c1", text="Walked the dog", embed_with=client)
     _seed(store, cid="c2", text="Read a book", embed_with=client)
@@ -150,7 +150,7 @@ def test_dense_matches_only_identical_text() -> None:
 
 
 def test_dense_excludes_unready_chunks() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     client = MockEmbeddingClient()
     _seed(store, cid="c1", text="Walked the dog", status=EmbeddingStatus.FAILED)
 
@@ -159,7 +159,7 @@ def test_dense_excludes_unready_chunks() -> None:
 
 
 def test_dense_family_scope_isolates() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     client = MockEmbeddingClient()
     _seed(store, cid="cA", text="Walked the dog", family_id="fam-A", embed_with=client)
     _seed(store, cid="cB", text="Walked the dog", family_id="fam-B", embed_with=client)
@@ -173,7 +173,7 @@ def test_dense_family_scope_isolates() -> None:
 
 
 def test_dense_uses_model_name_filter() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     client = MockEmbeddingClient()
     _seed(store, cid="c1", text="Walked the dog", embed_with=client)
 
@@ -182,7 +182,7 @@ def test_dense_uses_model_name_filter() -> None:
 
 
 def test_both_legs_require_family_id() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     client = MockEmbeddingClient()
 
     with pytest.raises(ValueError, match="family_id"):
@@ -192,7 +192,7 @@ def test_both_legs_require_family_id() -> None:
 
 
 def test_both_legs_clamp_on_limit() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     client = MockEmbeddingClient()
     for i in range(5):
         _seed(store, cid=f"c{i}", text=f"keyword {i}", embed_with=client)
@@ -211,7 +211,7 @@ _MID = date(2026, 5, 11)
 _LATE = date(2026, 5, 12)
 
 
-def _seed_three_dates(store: MockDiaryStore, client: MockEmbeddingClient, *, text: str) -> None:
+def _seed_three_dates(store: MockDomainStore, client: MockEmbeddingClient, *, text: str) -> None:
     """Seed identical-text chunks on three distinct entry dates."""
     _seed(store, cid="c-early", text=text, embed_with=client, entry_date=_EARLY)
     _seed(store, cid="c-mid", text=text, embed_with=client, entry_date=_MID)
@@ -219,7 +219,7 @@ def _seed_three_dates(store: MockDiaryStore, client: MockEmbeddingClient, *, tex
 
 
 def test_sparse_date_range_full() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _seed_three_dates(store, MockEmbeddingClient(), text="book chapter")
 
     hits = store.sparse_candidates(
@@ -229,7 +229,7 @@ def test_sparse_date_range_full() -> None:
 
 
 def test_sparse_date_range_only_lower() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _seed_three_dates(store, MockEmbeddingClient(), text="book chapter")
 
     hits = store.sparse_candidates("fam-A", "book chapter", 10, date_range=DateRange(start=_MID))
@@ -237,7 +237,7 @@ def test_sparse_date_range_only_lower() -> None:
 
 
 def test_sparse_date_range_only_upper() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _seed_three_dates(store, MockEmbeddingClient(), text="book chapter")
 
     hits = store.sparse_candidates("fam-A", "book chapter", 10, date_range=DateRange(end=_MID))
@@ -245,7 +245,7 @@ def test_sparse_date_range_only_upper() -> None:
 
 
 def test_sparse_date_range_inclusive_bounds() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _seed_three_dates(store, MockEmbeddingClient(), text="book chapter")
 
     hits = store.sparse_candidates(
@@ -255,7 +255,7 @@ def test_sparse_date_range_inclusive_bounds() -> None:
 
 
 def test_dense_date_range_full() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     client = MockEmbeddingClient()
     _seed_three_dates(store, client, text="Walked the dog")
 
@@ -267,7 +267,7 @@ def test_dense_date_range_full() -> None:
 
 
 def test_dense_date_range_only_lower() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     client = MockEmbeddingClient()
     _seed_three_dates(store, client, text="Walked the dog")
 
@@ -279,7 +279,7 @@ def test_dense_date_range_only_lower() -> None:
 
 
 def test_dense_date_range_only_upper() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     client = MockEmbeddingClient()
     _seed_three_dates(store, client, text="Walked the dog")
 
@@ -292,7 +292,7 @@ def test_dense_date_range_only_upper() -> None:
 
 def test_date_range_none_is_unchanged() -> None:
     """Explicit ``None`` and an omitted arg return the same set (shape preservation)."""
-    store = MockDiaryStore()
+    store = MockDomainStore()
     client = MockEmbeddingClient()
     _seed_three_dates(store, client, text="book chapter")
 
@@ -303,7 +303,7 @@ def test_date_range_none_is_unchanged() -> None:
 
 
 def test_date_range_all_none_equals_no_filter() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     client = MockEmbeddingClient()
     _seed_three_dates(store, client, text="book chapter")
 

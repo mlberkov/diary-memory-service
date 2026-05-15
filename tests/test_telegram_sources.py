@@ -21,12 +21,12 @@ from diary_rag.adapters.embeddings import MockEmbeddingClient
 from diary_rag.adapters.telegram.webhook import get_dispatcher, get_telegram_client
 from diary_rag.app import create_app
 from diary_rag.config import Settings
-from diary_rag.core.diary import AnswerResult, Evidence, FallbackMode
-from diary_rag.core.diary.models import AnswerContext, EventChunk
+from diary_rag.core.domain import AnswerResult, Evidence, FallbackMode
+from diary_rag.core.domain.models import AnswerContext, EventChunk
 from diary_rag.core.embeddings import EmbeddingStatus
 from diary_rag.core.routing import InboundMessage
-from diary_rag.services import DiaryService, Dispatcher, ExportService, QueryService
-from diary_rag.storage.mock import MockDiaryStore
+from diary_rag.services import Dispatcher, DomainService, ExportService, QueryService
+from diary_rag.storage.mock import MockDomainStore
 
 
 class _RecordingTelegramClient:
@@ -109,7 +109,7 @@ def _build_client(
     chunks: tuple[EventChunk, ...] | None = None,
 ) -> tuple[TestClient, _RecordingTelegramClient]:
     settings = _settings()
-    store = MockDiaryStore()
+    store = MockDomainStore()
     embed = MockEmbeddingClient()
     chat = MockChatClient()
     if chunks is None:
@@ -117,7 +117,7 @@ def _build_client(
     else:
         query_service = _FixedAnswerQueryService(chunks)
     dispatcher = Dispatcher(
-        DiaryService(store, embedding_client=embed),
+        DomainService(store, embedding_client=embed),
         query_service,
         ExportService(store),
         settings,

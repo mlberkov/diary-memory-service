@@ -1,4 +1,4 @@
-"""Local PostgreSQL store implementing ``DiaryRepository`` and
+"""Local PostgreSQL store implementing ``DomainRepository`` and
 ``SearchRepository`` (D-022, D-023, D-024, D-025).
 
 Schema is bootstrapped at construction by executing ``schema.sql`` (loaded
@@ -45,7 +45,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from diary_rag.core.diary.models import (
+from diary_rag.core.domain.models import (
     AnswerTrace,
     DateRange,
     DiaryEntry,
@@ -94,8 +94,8 @@ def _configure_connection(conn: Connection[Any]) -> None:
     register_vector(conn)
 
 
-class PostgresDiaryStore:
-    """Local Postgres implementation of ``DiaryRepository``."""
+class PostgresDomainStore:
+    """Local Postgres implementation of ``DomainRepository``."""
 
     def __init__(self, dsn: str, *, min_size: int = 1, max_size: int = 4) -> None:
         # Bootstrap pass: a tiny pool with no codec config so `CREATE EXTENSION`
@@ -643,4 +643,4 @@ def _row_to_chunk(row: dict[str, Any]) -> EventChunk:
     )
 
 
-__all__ = ["PostgresDiaryStore"]
+__all__ = ["PostgresDomainStore"]

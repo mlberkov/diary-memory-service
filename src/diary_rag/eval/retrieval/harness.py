@@ -1,7 +1,7 @@
 """Retrieval-quality inspection harness against the D-025 baseline (D-038).
 
 Pure data + pure metric functions plus the orchestration that drives
-``DiaryService.ingest`` on a fixture corpus and then calls
+``DomainService.ingest`` on a fixture corpus and then calls
 ``SearchRepository.dense_candidates`` / ``sparse_candidates`` followed by
 ``reciprocal_rank_fusion`` exactly the way ``QueryService`` does. The
 harness does **not** route through ``QueryService.answer`` because
@@ -14,7 +14,7 @@ Handle contract — restated everywhere it matters: every entry in
 ``f"{external_message_id}#{event_index}"``, where ``event_index`` is the
 **0-based ordinal of the produced ``EventChunk`` within the source
 message after canonical ``parse_diary_entry`` + chunking by
-``DiaryService.ingest``**. It is NOT a business event id, NOT a Telegram
+``DomainService.ingest``**. It is NOT a business event id, NOT a Telegram
 message id, NOT any external domain identifier. The handle only exists
 because ``chunk_id`` is uuid4 at ingest time and so cannot be pinned in
 ``eval/retrieval/gold.json`` directly.
@@ -28,12 +28,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from diary_rag.core.diary.models import EventChunk
+from diary_rag.core.domain.models import EventChunk
 from diary_rag.core.embeddings import EmbeddingClient
 from diary_rag.core.routing import InboundMessage, RouteKind
-from diary_rag.services.diary_service import DiaryService
+from diary_rag.services.domain_service import DomainService
 from diary_rag.services.retrieval import reciprocal_rank_fusion
-from diary_rag.storage.repository import DiaryRepository
+from diary_rag.storage.repository import DomainRepository
 from diary_rag.storage.search_repository import SearchRepository
 
 DEFAULT_TOP_K = 5
@@ -204,16 +204,16 @@ def load_query_embeddings_cache(
 
 
 def ingest_fixture_corpus(
-    repo: DiaryRepository,
+    repo: DomainRepository,
     chunks_for_source: Callable[[str], list[EventChunk]],
     embedding_client: EmbeddingClient,
     corpus: tuple[CorpusMessage, ...],
 ) -> dict[str, str]:
-    """Drive ``DiaryService.ingest`` over the corpus and build the handle map.
+    """Drive ``DomainService.ingest`` over the corpus and build the handle map.
 
     ``chunks_for_source`` is a small backend-specific lookup the caller
-    passes in: ``MockDiaryStore`` reads its private chunks dict;
-    ``PostgresDiaryStore`` uses a separate psycopg query in the CLI. The
+    passes in: ``MockDomainStore`` reads its private chunks dict;
+    ``PostgresDomainStore`` uses a separate psycopg query in the CLI. The
     Protocol does not surface "list chunks for source" today; adding it
     is wider than this packet's scope, so the harness wires the lookup
     explicitly.
@@ -221,9 +221,9 @@ def ingest_fixture_corpus(
     The function's docstring restates the handle contract: returned keys
     are ``f"{external_message_id}#{event_index}"`` where ``event_index``
     is the 0-based ordinal of the produced ``EventChunk`` within the
-    parsed source message after ``DiaryService.ingest`` chunked it.
+    parsed source message after ``DomainService.ingest`` chunked it.
     """
-    service = DiaryService(repo, embedding_client=embedding_client)
+    service = DomainService(repo, embedding_client=embedding_client)
     handles: dict[str, str] = {}
     received_at = datetime.now(tz=UTC)
     for cm in corpus:

@@ -1,12 +1,12 @@
 """Channel-neutral raw-export service (D-029).
 
 Reads the requester's full ``SourceMessage`` set for a scope through
-``DiaryRepository.list_source_messages`` and renders it as bytes via the
+``DomainRepository.list_source_messages`` and renders it as bytes via the
 configured serializer. Synchronous and single-shot — no streaming, no
 async, no audit row.
 
 Family scoping is mandatory (I-7); the family argument matches what
-``DiaryService.ingest`` uses as the per-chat surrogate (the inbound
+``DomainService.ingest`` uses as the per-chat surrogate (the inbound
 ``external_chat_id``).
 """
 
@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from diary_rag.core.export.models import ExportFormat, ExportPayload
 from diary_rag.core.export.serializers import serialize_json, serialize_txt
 from diary_rag.logging import get_logger
-from diary_rag.storage.repository import DiaryRepository
+from diary_rag.storage.repository import DomainRepository
 
 log = get_logger(__name__)
 
@@ -30,7 +30,7 @@ def _filename(family_id: str, generated_at: datetime, extension: str) -> str:
 class ExportService:
     """Render the raw ``SourceMessage`` set for a scope as bytes."""
 
-    def __init__(self, store: DiaryRepository) -> None:
+    def __init__(self, store: DomainRepository) -> None:
         self._store = store
 
     def export(

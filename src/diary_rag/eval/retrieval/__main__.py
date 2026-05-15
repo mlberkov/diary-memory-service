@@ -17,7 +17,7 @@ Operator invocation patterns:
       uv run python -m diary_rag.eval.retrieval --mode postgres --json
 
   Truncates the four ingest tables on the connected DSN, re-ingests
-  ``eval/retrieval/corpus.jsonl`` through the canonical ``DiaryService``
+  ``eval/retrieval/corpus.jsonl`` through the canonical ``DomainService``
   path (so corpus chunks are embedded by the configured backend; under
   ``EMBEDDING_BACKEND=openai`` this makes live OpenAI embedding calls,
   which is acceptable because the operator chose this deliberately —
@@ -40,7 +40,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from diary_rag.adapters.embeddings.mock import MockEmbeddingClient
-from diary_rag.core.diary.models import EventChunk
+from diary_rag.core.domain.models import EventChunk
 from diary_rag.core.embeddings.models import EmbeddingStatus
 from diary_rag.eval.retrieval.harness import (
     DEFAULT_CANDIDATE_K,
@@ -92,11 +92,11 @@ def _run_mock(
     top_k: int,
     candidate_k: int,
 ) -> HarnessReport:
-    from diary_rag.storage.mock.store import MockDiaryStore
+    from diary_rag.storage.mock.store import MockDomainStore
 
     gold = load_gold(gold_path)
     corpus = load_corpus(corpus_path)
-    store = MockDiaryStore()
+    store = MockDomainStore()
     embedding_client = MockEmbeddingClient()
 
     def chunks_for_source(source_message_id: str) -> list[EventChunk]:
@@ -145,7 +145,7 @@ def _run_postgres(
 
     from diary_rag.adapters.embeddings.factory import build_embedding_client
     from diary_rag.config import Settings
-    from diary_rag.storage.postgres import PostgresDiaryStore
+    from diary_rag.storage.postgres import PostgresDomainStore
 
     settings = Settings()
     embedding_client = build_embedding_client(settings)
@@ -163,7 +163,7 @@ def _run_postgres(
     with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute("TRUNCATE " + ", ".join(_TRUNCATE_TABLES) + " RESTART IDENTITY CASCADE")
 
-    store = PostgresDiaryStore(dsn)
+    store = PostgresDomainStore(dsn)
     try:
 
         def chunks_for_source(source_message_id: str) -> list[EventChunk]:

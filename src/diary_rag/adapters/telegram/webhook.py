@@ -28,13 +28,13 @@ from diary_rag.adapters.telegram.drafts_packing import pack_drafts_into_messages
 from diary_rag.adapters.telegram.models import TelegramUpdate
 from diary_rag.adapters.telegram.reply import build_send_message_payload
 from diary_rag.config import Settings, get_settings
-from diary_rag.core.diary.models import SourceMessage
+from diary_rag.core.domain.models import SourceMessage
 from diary_rag.core.routing import InboundMessage, RouteKind, RouteSource, lifecycle_for
 from diary_rag.core.routing.classifier import classify_plain_text
 from diary_rag.logging import get_logger
-from diary_rag.services import DiaryService, Dispatcher, ExportService, QueryService
-from diary_rag.storage.mock import MockDiaryStore
-from diary_rag.storage.search_repository import HybridDiaryStore
+from diary_rag.services import Dispatcher, DomainService, ExportService, QueryService
+from diary_rag.storage.mock import MockDomainStore
+from diary_rag.storage.search_repository import HybridDomainStore
 
 log = get_logger(__name__)
 
@@ -42,16 +42,16 @@ _dispatcher: Dispatcher | None = None
 _telegram_client: TelegramClient | None = None
 
 
-def _build_store(settings: Settings) -> HybridDiaryStore:
+def _build_store(settings: Settings) -> HybridDomainStore:
     if settings.storage_backend == "postgres":
-        from diary_rag.storage.postgres import PostgresDiaryStore
+        from diary_rag.storage.postgres import PostgresDomainStore
 
-        return PostgresDiaryStore(settings.postgres_dsn())
+        return PostgresDomainStore(settings.postgres_dsn())
     if settings.storage_backend == "sqlite":
-        from diary_rag.storage.sqlite import SqliteDiaryStore
+        from diary_rag.storage.sqlite import SqliteDomainStore
 
-        return SqliteDiaryStore(settings.sqlite_path)
-    return MockDiaryStore()
+        return SqliteDomainStore(settings.sqlite_path)
+    return MockDomainStore()
 
 
 def get_dispatcher() -> Dispatcher:
@@ -62,7 +62,7 @@ def get_dispatcher() -> Dispatcher:
         embedding_client = build_embedding_client(settings)
         chat_client = build_chat_client(settings)
         _dispatcher = Dispatcher(
-            DiaryService(store, embedding_client=embedding_client),
+            DomainService(store, embedding_client=embedding_client),
             QueryService(
                 store,
                 store,

@@ -23,8 +23,8 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from diary_rag.core.diary.models import DateRange, EventChunk
-from diary_rag.storage.repository import DiaryRepository
+from diary_rag.core.domain.models import DateRange, EventChunk
+from diary_rag.storage.repository import DomainRepository
 
 
 class SearchRepository(Protocol):
@@ -74,13 +74,13 @@ class SearchRepository(Protocol):
         """
 
 
-class HybridDiaryStore(DiaryRepository, SearchRepository, Protocol):
+class HybridDomainStore(DomainRepository, SearchRepository, Protocol):
     """Combined ingest + retrieval seam.
 
     The three concrete stores (mock, sqlite, postgres) each satisfy both
     Protocols structurally; this combined name lets the webhook
-    construct one store object and pass it to both ``DiaryService`` (as
-    ``DiaryRepository``) and ``QueryService`` (as ``SearchRepository``)
+    construct one store object and pass it to both ``DomainService`` (as
+    ``DomainRepository``) and ``QueryService`` (as ``SearchRepository``)
     without losing the static-type guarantee at either call site.
     SQLite raises ``NotImplementedError`` from the retrieval methods —
     valid structurally; the dispatcher translates it to NO_EVIDENCE.

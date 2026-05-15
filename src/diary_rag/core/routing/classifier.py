@@ -6,7 +6,7 @@ one of:
 
 - ``RouteKind.ENTRY``  — first non-empty line is an ISO ``YYYY-MM-DD``
   date and the body has at least one event line. Detected by reusing
-  :func:`diary_rag.core.diary.parser.parse_diary_entry` so the ISO-only
+  :func:`diary_rag.core.domain.parser.parse_diary_entry` so the ISO-only
   rule (assumption A-28) lives in one place.
 - ``RouteKind.ASK``    — the text ends with ``?`` or its first token is
   in a fixed interrogative/imperative set.
@@ -24,7 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from diary_rag.core.diary.parser import parse_diary_entry
+from diary_rag.core.domain.parser import parse_diary_entry
 from diary_rag.core.routing.models import RouteKind
 
 Confidence = Literal["high", "low"]

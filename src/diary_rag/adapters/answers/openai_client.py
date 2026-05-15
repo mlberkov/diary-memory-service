@@ -24,7 +24,7 @@ import time
 from typing import TYPE_CHECKING
 
 from diary_rag.core.answers.client import ChatProviderUnavailableError, ChatResponse
-from diary_rag.core.diary.answer_prompt import AnswerPrompt
+from diary_rag.core.domain.answer_prompt import AnswerPrompt
 
 if TYPE_CHECKING:
     from openai import OpenAI

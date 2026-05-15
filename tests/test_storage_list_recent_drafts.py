@@ -1,4 +1,4 @@
-"""Storage-backend tests for ``DiaryRepository.list_recent_drafts`` (D-030)."""
+"""Storage-backend tests for ``DomainRepository.list_recent_drafts`` (D-030)."""
 
 from __future__ import annotations
 
@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from diary_rag.core.diary.models import SourceMessage
+from diary_rag.core.domain.models import SourceMessage
 from diary_rag.core.routing import RouteKind
-from diary_rag.storage.mock import MockDiaryStore
-from diary_rag.storage.sqlite import SqliteDiaryStore
+from diary_rag.storage.mock import MockDomainStore
+from diary_rag.storage.sqlite import SqliteDomainStore
 
 PG_DSN = os.environ.get("DIARY_RAG_PG_TEST_DSN")
 
@@ -41,12 +41,12 @@ def _source(
 
 
 # ---------------------------------------------------------------------------
-# MockDiaryStore parity tests
+# MockDomainStore parity tests
 # ---------------------------------------------------------------------------
 
 
 def test_mock_list_recent_drafts_returns_drafts_only() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     base = datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC)
     store.save_source_message(_source(sid="d", msg_id="1", route=RouteKind.DRAFT, created_at=base))
     store.save_source_message(_source(sid="n", msg_id="2", route=RouteKind.ENTRY, created_at=base))
@@ -56,7 +56,7 @@ def test_mock_list_recent_drafts_returns_drafts_only() -> None:
 
 
 def test_mock_list_recent_drafts_is_family_scoped() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     base = datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC)
     store.save_source_message(_source(sid="a", family_id="fam-A", msg_id="1", created_at=base))
     store.save_source_message(_source(sid="b", family_id="fam-B", msg_id="2", created_at=base))
@@ -66,7 +66,7 @@ def test_mock_list_recent_drafts_is_family_scoped() -> None:
 
 
 def test_mock_list_recent_drafts_orders_most_recent_first() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     base = datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC)
     store.save_source_message(_source(sid="old", msg_id="1", created_at=base))
     store.save_source_message(_source(sid="newer", msg_id="2", created_at=base.replace(hour=11)))
@@ -77,7 +77,7 @@ def test_mock_list_recent_drafts_orders_most_recent_first() -> None:
 
 
 def test_mock_list_recent_drafts_respects_limit() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     base = datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC)
     for i in range(5):
         store.save_source_message(
@@ -89,35 +89,35 @@ def test_mock_list_recent_drafts_respects_limit() -> None:
 
 
 def test_mock_list_recent_drafts_empty_when_no_drafts() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     assert store.list_recent_drafts("fam-A", limit=10) == []
 
 
 def test_mock_list_recent_drafts_rejects_empty_family_id() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     with pytest.raises(ValueError):
         store.list_recent_drafts("", limit=10)
 
 
 def test_mock_list_recent_drafts_rejects_zero_limit() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     with pytest.raises(ValueError):
         store.list_recent_drafts("fam-A", limit=0)
 
 
 # ---------------------------------------------------------------------------
-# SqliteDiaryStore — NotImplementedError per D-022 / D-030 pattern
+# SqliteDomainStore — NotImplementedError per D-022 / D-030 pattern
 # ---------------------------------------------------------------------------
 
 
 def test_sqlite_list_recent_drafts_raises_not_implemented(tmp_path: Path) -> None:
-    store = SqliteDiaryStore(str(tmp_path / "diary.db"))
+    store = SqliteDomainStore(str(tmp_path / "diary.db"))
     with pytest.raises(NotImplementedError):
         store.list_recent_drafts("fam-A", limit=5)
 
 
 # ---------------------------------------------------------------------------
-# PostgresDiaryStore parity tests (skipped without DSN)
+# PostgresDomainStore parity tests (skipped without DSN)
 # ---------------------------------------------------------------------------
 
 
@@ -128,7 +128,7 @@ pgmark = pytest.mark.skipif(
 
 
 if PG_DSN is not None:
-    from diary_rag.storage.postgres import PostgresDiaryStore
+    from diary_rag.storage.postgres import PostgresDomainStore
 
 
 def _truncate(dsn: str) -> None:
@@ -141,9 +141,9 @@ def _truncate(dsn: str) -> None:
 
 
 @pytest.fixture
-def pg_store() -> Iterator[PostgresDiaryStore]:
+def pg_store() -> Iterator[PostgresDomainStore]:
     assert PG_DSN is not None
-    s = PostgresDiaryStore(PG_DSN)
+    s = PostgresDomainStore(PG_DSN)
     try:
         _truncate(PG_DSN)
         yield s
@@ -153,7 +153,7 @@ def pg_store() -> Iterator[PostgresDiaryStore]:
 
 @pgmark
 def test_pg_list_recent_drafts_returns_drafts_only_most_recent_first(
-    pg_store: PostgresDiaryStore,
+    pg_store: PostgresDomainStore,
 ) -> None:
     base = datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC)
     pg_store.save_source_message(
@@ -177,7 +177,7 @@ def test_pg_list_recent_drafts_returns_drafts_only_most_recent_first(
 
 @pgmark
 def test_pg_list_recent_drafts_respects_family_scope_and_limit(
-    pg_store: PostgresDiaryStore,
+    pg_store: PostgresDomainStore,
 ) -> None:
     base = datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC)
     for i in range(3):

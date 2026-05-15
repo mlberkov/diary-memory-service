@@ -2,12 +2,12 @@
 
 Maps a channel-neutral :class:`InboundMessage` to a
 :class:`DispatchResult` carrying a reply string. ``ENTRY``, ``DRAFT``,
-and ``ASK`` delegate to :class:`DiaryService` / :class:`QueryService`;
+and ``ASK`` delegate to :class:`DomainService` / :class:`QueryService`;
 ``CLARIFY`` returns a fixed clarification message; other routes return
 fixed strings appropriate for the current phase.
 
 Draft floor (D-027 / R-13): the ``DRAFT`` path persists the inbound
-raw text via ``DiaryService.ingest`` and stops there — no parse,
+raw text via ``DomainService.ingest`` and stops there — no parse,
 chunk, embed, or index. ``DRAFT`` is set by the no-command default for
 plain text, so no plain-text message is silently discarded.
 
@@ -32,12 +32,12 @@ rather than a 500.
 from __future__ import annotations
 
 from diary_rag.config import Settings
-from diary_rag.core.diary import AnswerResult, FallbackMode, IngestResult
-from diary_rag.core.diary.models import EventChunk
+from diary_rag.core.domain import AnswerResult, FallbackMode, IngestResult
+from diary_rag.core.domain.models import EventChunk
 from diary_rag.core.export import ExportFormat
 from diary_rag.core.routing import DispatchResult, InboundMessage, RouteKind
 from diary_rag.logging import get_logger
-from diary_rag.services.diary_service import DiaryService
+from diary_rag.services.domain_service import DomainService
 from diary_rag.services.export_service import ExportService
 from diary_rag.services.query_service import QueryService
 
@@ -196,7 +196,7 @@ class Dispatcher:
 
     def __init__(
         self,
-        diary: DiaryService,
+        diary: DomainService,
         query: QueryService,
         export: ExportService,
         settings: Settings,

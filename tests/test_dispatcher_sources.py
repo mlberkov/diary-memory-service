@@ -20,8 +20,8 @@ from datetime import UTC, date, datetime
 from typing import Literal
 
 from diary_rag.config import Settings
-from diary_rag.core.diary import AnswerResult, Evidence, FallbackMode
-from diary_rag.core.diary.models import AnswerContext, EventChunk
+from diary_rag.core.domain import AnswerResult, Evidence, FallbackMode
+from diary_rag.core.domain.models import AnswerContext, EventChunk
 from diary_rag.core.embeddings import EmbeddingStatus
 from diary_rag.core.routing import InboundMessage, RouteKind
 from diary_rag.services.dispatcher import Dispatcher
@@ -89,7 +89,7 @@ class _ScriptedQueryService:
         return self._answers.pop(0)
 
 
-class _UnusedDiaryService:
+class _UnusedDomainService:
     def ingest(self, message: InboundMessage) -> object:  # pragma: no cover
         raise AssertionError("ingest should not be called on /ask or /sources")
 
@@ -101,7 +101,7 @@ class _UnusedExportService:
 
 def _dispatcher(answers: list[AnswerResult]) -> Dispatcher:
     return Dispatcher(
-        _UnusedDiaryService(),  # type: ignore[arg-type]
+        _UnusedDomainService(),  # type: ignore[arg-type]
         _ScriptedQueryService(answers),  # type: ignore[arg-type]
         _UnusedExportService(),  # type: ignore[arg-type]
         Settings(_env_file=None),  # type: ignore[call-arg]

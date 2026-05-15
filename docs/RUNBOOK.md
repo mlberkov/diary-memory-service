@@ -166,7 +166,7 @@ The state behind `/sources` is a process-local `Dispatcher._latest_sources: dict
 
 Fail-closed: when nothing is cached, `/sources` returns `"No selected chunks available — ask a question with /ask first."` via the inline `sendMessage` body — no outbound HTTP call. The fail-closed reply also fires after process restart and after any `/ask` that produced no retrieval.
 
-Multi-worker caveat: each uvicorn worker / pod holds its own dispatcher singleton, so `/ask` on worker A followed by `/sources` on worker B will fail closed (or return stale chunks). The current contour is single-process local dev; promoting the cache to a durable seam (e.g. `DiaryRepository.get_latest_answer_trace_for_family(family_id)` + per-chunk lookups via `get_event_chunk`) is the named follow-up trigger if the deployment shape flips.
+Multi-worker caveat: each uvicorn worker / pod holds its own dispatcher singleton, so `/ask` on worker A followed by `/sources` on worker B will fail closed (or return stale chunks). The current contour is single-process local dev; promoting the cache to a durable seam (e.g. `DomainRepository.get_latest_answer_trace_for_family(family_id)` + per-chunk lookups via `get_event_chunk`) is the named follow-up trigger if the deployment shape flips.
 
 ### Retrieval-quality inspection harness (D-038)
 `src/diary_rag/eval/retrieval/` ships a hand-curated harness that measures the D-025 baseline contour against a small fixture corpus + gold-query set. It is **inspection, not a gate** — the CLI exit code is always `0` regardless of the observed metrics.
@@ -179,7 +179,7 @@ Two modes share one metric shape (aggregate `recall@{5,10,20}`, `mrr@20`, `per_l
   uv run python -m diary_rag.eval.retrieval --mode mock
   ```
 
-- **Postgres mode (operator baseline).** Truncates `embedding_records`, `event_chunks`, `diary_entries`, `source_messages` on the connected DSN, then re-ingests `eval/retrieval/corpus.jsonl` through the canonical `DiaryService.ingest` path. Point the DSN at a **dedicated eval database** so production data is never touched:
+- **Postgres mode (operator baseline).** Truncates `embedding_records`, `event_chunks`, `diary_entries`, `source_messages` on the connected DSN, then re-ingests `eval/retrieval/corpus.jsonl` through the canonical `DomainService.ingest` path. Point the DSN at a **dedicated eval database** so production data is never touched:
 
   ```bash
   DIARY_RAG_PG_TEST_DSN=postgresql://... \
@@ -204,12 +204,12 @@ OPENAI_API_KEY=... uv run python -m diary_rag.eval.retrieval.regenerate_embeddin
 The cache is **not** committed by the D-038 implementation packet — it is produced by this ritual. Postgres-mode refuses to start if the cache is missing.
 
 #### Gold-set handle contract
-`expected_handles` entries in `eval/retrieval/gold.json` use the form `"{external_message_id}#{event_index}"` where `event_index` is the 0-based ordinal of the produced `EventChunk` within the source message after `DiaryService.ingest` chunks it. This is internal to the harness only — it is **not** a business event id, **not** a Telegram message id, **not** any external domain identifier. It exists because `chunk_id` is uuid4 at ingest time.
+`expected_handles` entries in `eval/retrieval/gold.json` use the form `"{external_message_id}#{event_index}"` where `event_index` is the 0-based ordinal of the produced `EventChunk` within the source message after `DomainService.ingest` chunks it. This is internal to the harness only — it is **not** a business event id, **not** a Telegram message id, **not** any external domain identifier. It exists because `chunk_id` is uuid4 at ingest time.
 
 ### Hybrid retrieval (D-025)
 `/ask` runs the baseline hybrid path: a single query-embedding call followed by dense + sparse legs against `SearchRepository`, fused with service-layer RRF. Every retrieval call logs `retrieval.hybrid family_id=… model=… dense_n=… sparse_n=… merged_n=…` so an operator can confirm both legs ran. The dispatcher reply trailer for a successful answer is `(hybrid retrieval — dense+sparse RRF)`; an empty merged set returns `FallbackMode.NO_EVIDENCE` with the plain "No memories matched 'X'." reply.
 
-Postgres is the only canonical retrieval backend. When `STORAGE_BACKEND=sqlite`, `SqliteDiaryStore.dense_candidates` / `sparse_candidates` raise `NotImplementedError`; the dispatcher catches that, logs `retrieval.unavailable reason=… family_id=…`, and returns `NO_EVIDENCE`. Operators running SQLite see ingest work and `/ask` always fall back — that is the canonical contour, not a bug.
+Postgres is the only canonical retrieval backend. When `STORAGE_BACKEND=sqlite`, `SqliteDomainStore.dense_candidates` / `sparse_candidates` raise `NotImplementedError`; the dispatcher catches that, logs `retrieval.unavailable reason=… family_id=…`, and returns `NO_EVIDENCE`. Operators running SQLite see ingest work and `/ask` always fall back — that is the canonical contour, not a bug.
 
 BM25, reranker, Qdrant, halfvec/HNSW (A-36b), and multilingual sparse tuning (A-37) are deferred to the next quality-decision packet.
 
@@ -219,7 +219,7 @@ Webhook only (D-019). Expose the local process via a tunnel (e.g. `ngrok`, `clou
 ### Command surface (D-028, D-030, D-031, D-036)
 The Telegram code path exposes `/note`, `/ask`, `/sources`, `/drafts`, and `/export`, with absence of an explicit command defaulting to **draft** (D-028). The explicit `/draft` command was removed in D-030 — drafts are created only by the no-command default and recalled via `/drafts`. `/sources` (D-036) returns the chunks retrieval selected for the chat's most recent `/ask`. Internal symbol renames (`RouteKind.ENTRY` → `NOTE`, persisted `detected_route='entry'`) remain deferred under D-026.
 
-Operationally: the draft floor (R-13) means no inbound message is silently discarded, even when routing confidence is low. The webhook log line records `lifecycle=draft|note|query|other` so an operator can see which lifecycle state each delivery resolved to. `DiaryService` emits `draft.persisted source_message_id=… family_id=… effective_path=fresh|replay` when the draft path commits. CLARIFY (D-020) remains a valid reply shape for the rare case where a heuristic would actively conflict with intent, but the classifier no longer emits CLARIFY for plain text; raw persistence is unconditional.
+Operationally: the draft floor (R-13) means no inbound message is silently discarded, even when routing confidence is low. The webhook log line records `lifecycle=draft|note|query|other` so an operator can see which lifecycle state each delivery resolved to. `DomainService` emits `draft.persisted source_message_id=… family_id=… effective_path=fresh|replay` when the draft path commits. CLARIFY (D-020) remains a valid reply shape for the rare case where a heuristic would actively conflict with intent, but the classifier no longer emits CLARIFY for plain text; raw persistence is unconditional.
 
 Schema upgrade note: the `source_messages.detected_route` CHECK constraint extended from `{start, help, entry, ask, clarify, unknown}` to `{start, help, entry, ask, draft, clarify, unknown}` (D-028). Per A-34, existing local Postgres volumes must be reset with `docker compose down -v` before the new CHECK applies; SQLite has no enum constraint on the column. Until the reset is performed, inserts with `detected_route='draft'` raise a CHECK violation against the live Postgres backend.
 

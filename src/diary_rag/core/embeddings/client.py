@@ -16,7 +16,7 @@ from typing import Protocol
 
 
 class EmbeddingClient(Protocol):
-    """Sync embedding provider seam used by ``DiaryService.ingest``."""
+    """Sync embedding provider seam used by ``DomainService.ingest``."""
 
     @property
     def model_name(self) -> str: ...

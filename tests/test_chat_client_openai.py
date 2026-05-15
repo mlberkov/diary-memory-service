@@ -8,7 +8,7 @@ and ``test_postgres_store.py``.
 When enabled it verifies that ``gpt-4.1`` with
 ``response_format={"type": "json_object"}`` returns a structured-answer
 JSON that round-trips through
-:func:`~diary_rag.core.diary.answer_schema.parse_structured_answer`.
+:func:`~diary_rag.core.domain.answer_schema.parse_structured_answer`.
 """
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ from datetime import UTC, date, datetime
 import pytest
 
 from diary_rag.adapters.answers.openai_client import OpenAIChatClient
-from diary_rag.core.diary import build_answer_prompt, parse_structured_answer
-from diary_rag.core.diary.models import AnswerContext, EventChunk
+from diary_rag.core.domain import build_answer_prompt, parse_structured_answer
+from diary_rag.core.domain.models import AnswerContext, EventChunk
 from diary_rag.core.embeddings import EmbeddingStatus
 
 OPENAI_TEST_KEY = os.environ.get("DIARY_RAG_OPENAI_TEST_KEY")

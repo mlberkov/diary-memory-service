@@ -41,7 +41,7 @@ Grading flow on the success branch of retrieval:
    caught once and graded as ``PROVIDER_UNAVAILABLE`` (no retry, no
    repair — recovery is Phase-6 work).
 3. Parse the response with ``parse_structured_answer``. Any
-   :class:`~diary_rag.core.diary.answer_schema.StructuredAnswerError` is
+   :class:`~diary_rag.core.domain.answer_schema.StructuredAnswerError` is
    caught and graded as ``PARSE_FAILURE``; the trace preserves
    ``response.raw_text`` as ``answer_text`` for forensics.
 4. Map the structured answer's ``uncertainty`` marker to
@@ -59,7 +59,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from diary_rag.core.answers import ChatClient, ChatProviderUnavailableError
-from diary_rag.core.diary import (
+from diary_rag.core.domain import (
     AnswerResult,
     AnswerTrace,
     DateRange,
@@ -69,19 +69,19 @@ from diary_rag.core.diary import (
     RetrievalHit,
     RetrievalLeg,
 )
-from diary_rag.core.diary.answer_prompt import PROMPT_VERSION, build_answer_prompt
-from diary_rag.core.diary.answer_schema import (
+from diary_rag.core.domain.answer_prompt import PROMPT_VERSION, build_answer_prompt
+from diary_rag.core.domain.answer_schema import (
     StructuredAnswerError,
     UncertaintyMarker,
     parse_structured_answer,
 )
-from diary_rag.core.diary.models import AnswerContext, EventChunk
+from diary_rag.core.domain.models import AnswerContext, EventChunk
 from diary_rag.core.embeddings import EmbeddingClient
 from diary_rag.core.routing import InboundMessage
 from diary_rag.logging import get_logger
 from diary_rag.services.context_assembler import assemble_answer_context
 from diary_rag.services.retrieval import DEFAULT_RRF_K, FusedHit, reciprocal_rank_fusion
-from diary_rag.storage.repository import DiaryRepository
+from diary_rag.storage.repository import DomainRepository
 from diary_rag.storage.search_repository import SearchRepository
 
 log = get_logger(__name__)
@@ -115,7 +115,7 @@ class QueryService:
 
     def __init__(
         self,
-        repo: DiaryRepository,
+        repo: DomainRepository,
         search_repo: SearchRepository,
         embedding_client: EmbeddingClient,
         chat_client: ChatClient,

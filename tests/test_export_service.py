@@ -8,11 +8,11 @@ from datetime import UTC, datetime
 
 import pytest
 
-from diary_rag.core.diary.models import SourceMessage
+from diary_rag.core.domain.models import SourceMessage
 from diary_rag.core.export.models import ExportFormat
 from diary_rag.core.routing import RouteKind
 from diary_rag.services.export_service import ExportService
-from diary_rag.storage.mock import MockDiaryStore
+from diary_rag.storage.mock import MockDomainStore
 
 
 def _source(
@@ -39,7 +39,7 @@ def _source(
     )
 
 
-def _seed_two_families(store: MockDiaryStore) -> None:
+def _seed_two_families(store: MockDomainStore) -> None:
     base = datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC)
     store.save_source_message(
         _source(sid="A-1", family_id="fam-A", msg_id="1", raw_text="alpha", created_at=base)
@@ -66,7 +66,7 @@ def _seed_two_families(store: MockDiaryStore) -> None:
 
 
 def test_export_json_envelope_includes_notes_and_drafts_in_order() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _seed_two_families(store)
     service = ExportService(store)
 
@@ -88,7 +88,7 @@ def test_export_json_envelope_includes_notes_and_drafts_in_order() -> None:
 
 
 def test_export_txt_format_uses_text_media_type_and_block_layout() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _seed_two_families(store)
     service = ExportService(store)
 
@@ -106,7 +106,7 @@ def test_export_txt_format_uses_text_media_type_and_block_layout() -> None:
 
 
 def test_export_family_scoped_excludes_other_families() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _seed_two_families(store)
     service = ExportService(store)
 
@@ -121,7 +121,7 @@ def test_export_family_scoped_excludes_other_families() -> None:
 
 
 def test_export_empty_scope_produces_valid_empty_envelope() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     service = ExportService(store)
 
     payload = service.export(
@@ -136,7 +136,7 @@ def test_export_empty_scope_produces_valid_empty_envelope() -> None:
 
 
 def test_export_deterministic_ordering_breaks_created_at_ties_by_source_message_id() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     same = datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC)
     store.save_source_message(
         _source(sid="b-second-id", family_id="fam-A", msg_id="2", created_at=same)
@@ -157,7 +157,7 @@ def test_export_deterministic_ordering_breaks_created_at_ties_by_source_message_
 
 
 def test_export_filename_carries_family_and_timestamp() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     service = ExportService(store)
     payload = service.export(
         family_id="fam-A",
@@ -169,7 +169,7 @@ def test_export_filename_carries_family_and_timestamp() -> None:
 
 
 def test_export_logs_provenance(caplog: pytest.LogCaptureFixture) -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _seed_two_families(store)
     service = ExportService(store)
 
@@ -188,6 +188,6 @@ def test_export_logs_provenance(caplog: pytest.LogCaptureFixture) -> None:
 
 
 def test_export_rejects_empty_family_id() -> None:
-    service = ExportService(MockDiaryStore())
+    service = ExportService(MockDomainStore())
     with pytest.raises(ValueError):
         service.export(family_id="", requester_user_id="user-1", format=ExportFormat.JSON)

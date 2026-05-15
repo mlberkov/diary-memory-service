@@ -1,4 +1,4 @@
-"""Unit tests for ``SqliteDiaryStore``.
+"""Unit tests for ``SqliteDomainStore``.
 
 Covers round-trip save/fetch, restart survival, idempotent ingest (R-2 /
 D-023), and the Slice 3.3 retirement of the substring search path:
@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from diary_rag.core.diary.models import DiaryEntry, EventChunk, SourceMessage
+from diary_rag.core.domain.models import DiaryEntry, EventChunk, SourceMessage
 from diary_rag.core.routing import RouteKind
-from diary_rag.storage.sqlite import SqliteDiaryStore
+from diary_rag.storage.sqlite import SqliteDomainStore
 
 
 def _now() -> datetime:
@@ -80,7 +80,7 @@ def _chunk(
 
 
 def test_round_trip_source_message(tmp_path: Path) -> None:
-    store = SqliteDiaryStore(str(tmp_path / "diary.db"))
+    store = SqliteDomainStore(str(tmp_path / "diary.db"))
     src = _source()
 
     store.save_source_message(src)
@@ -89,12 +89,12 @@ def test_round_trip_source_message(tmp_path: Path) -> None:
 
 
 def test_get_source_message_missing_returns_none(tmp_path: Path) -> None:
-    store = SqliteDiaryStore(str(tmp_path / "diary.db"))
+    store = SqliteDomainStore(str(tmp_path / "diary.db"))
     assert store.get_source_message("nope") is None
 
 
 def test_hybrid_retrieval_unsupported_on_sqlite(tmp_path: Path) -> None:
-    store = SqliteDiaryStore(str(tmp_path / "diary.db"))
+    store = SqliteDomainStore(str(tmp_path / "diary.db"))
 
     with pytest.raises(NotImplementedError, match="sqlite"):
         store.dense_candidates("fam-A", [0.0], "mock", 5)
@@ -105,7 +105,7 @@ def test_hybrid_retrieval_unsupported_on_sqlite(tmp_path: Path) -> None:
 def test_restart_survival(tmp_path: Path) -> None:
     db_path = tmp_path / "diary.db"
 
-    first = SqliteDiaryStore(str(db_path))
+    first = SqliteDomainStore(str(db_path))
     first.save_source_message(_source(sid="s1", family_id="fam-A"))
     first.save_diary_entry(_entry(eid="e1", sid="s1", family_id="fam-A"))
     first.save_event_chunks(
@@ -113,7 +113,7 @@ def test_restart_survival(tmp_path: Path) -> None:
     )
     del first
 
-    second = SqliteDiaryStore(str(db_path))
+    second = SqliteDomainStore(str(db_path))
     fetched = second.get_source_message("s1")
     assert fetched is not None
     assert fetched.source_message_id == "s1"
@@ -124,7 +124,7 @@ def test_restart_survival(tmp_path: Path) -> None:
 
 
 def test_get_or_create_source_message_returns_false_on_first_insert(tmp_path: Path) -> None:
-    store = SqliteDiaryStore(str(tmp_path / "diary.db"))
+    store = SqliteDomainStore(str(tmp_path / "diary.db"))
     src = _source(sid="s1", external_message_id="42", edit_seq=0)
 
     persisted, replayed = store.get_or_create_source_message(src)
@@ -135,7 +135,7 @@ def test_get_or_create_source_message_returns_false_on_first_insert(tmp_path: Pa
 
 
 def test_get_or_create_source_message_returns_true_on_replay(tmp_path: Path) -> None:
-    store = SqliteDiaryStore(str(tmp_path / "diary.db"))
+    store = SqliteDomainStore(str(tmp_path / "diary.db"))
     original = _source(sid="s1", external_message_id="42", edit_seq=0)
     duplicate = _source(sid="different-uuid", external_message_id="42", edit_seq=0)
 
@@ -148,7 +148,7 @@ def test_get_or_create_source_message_returns_true_on_replay(tmp_path: Path) -> 
 
 
 def test_get_or_create_source_message_distinguishes_edit_seq(tmp_path: Path) -> None:
-    store = SqliteDiaryStore(str(tmp_path / "diary.db"))
+    store = SqliteDomainStore(str(tmp_path / "diary.db"))
     original = _source(sid="s1", external_message_id="42", edit_seq=0)
     edited = _source(sid="s2", external_message_id="42", edit_seq=1715300100)
 
@@ -162,7 +162,7 @@ def test_get_or_create_source_message_distinguishes_edit_seq(tmp_path: Path) -> 
 
 
 def test_save_source_message_raises_on_duplicate_triple(tmp_path: Path) -> None:
-    store = SqliteDiaryStore(str(tmp_path / "diary.db"))
+    store = SqliteDomainStore(str(tmp_path / "diary.db"))
     store.save_source_message(_source(sid="s1", external_message_id="42", edit_seq=0))
 
     with pytest.raises(sqlite3.IntegrityError):
@@ -170,7 +170,7 @@ def test_save_source_message_raises_on_duplicate_triple(tmp_path: Path) -> None:
 
 
 def test_get_diary_entry_by_source_message_id(tmp_path: Path) -> None:
-    store = SqliteDiaryStore(str(tmp_path / "diary.db"))
+    store = SqliteDomainStore(str(tmp_path / "diary.db"))
     store.save_source_message(_source(sid="s1"))
     store.save_diary_entry(_entry(eid="e1", sid="s1"))
 
@@ -180,12 +180,12 @@ def test_get_diary_entry_by_source_message_id(tmp_path: Path) -> None:
 
 
 def test_get_diary_entry_by_source_message_id_missing_returns_none(tmp_path: Path) -> None:
-    store = SqliteDiaryStore(str(tmp_path / "diary.db"))
+    store = SqliteDomainStore(str(tmp_path / "diary.db"))
     assert store.get_diary_entry_by_source_message_id("nope") is None
 
 
 def test_count_event_chunks_for_source(tmp_path: Path) -> None:
-    store = SqliteDiaryStore(str(tmp_path / "diary.db"))
+    store = SqliteDomainStore(str(tmp_path / "diary.db"))
     store.save_source_message(_source(sid="s1"))
     store.save_diary_entry(_entry(eid="e1", sid="s1"))
     store.save_event_chunks(
@@ -200,6 +200,6 @@ def test_count_event_chunks_for_source(tmp_path: Path) -> None:
 
 
 def test_list_source_messages_raises_not_implemented(tmp_path: Path) -> None:
-    store = SqliteDiaryStore(str(tmp_path / "diary.db"))
+    store = SqliteDomainStore(str(tmp_path / "diary.db"))
     with pytest.raises(NotImplementedError, match="sqlite raw export not supported"):
         store.list_source_messages("fam-A")

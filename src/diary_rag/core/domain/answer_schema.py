@@ -13,7 +13,7 @@ import json
 from dataclasses import dataclass
 from typing import Final, Literal, cast
 
-from diary_rag.core.diary.models import AnswerContext
+from diary_rag.core.domain.models import AnswerContext
 
 UncertaintyMarker = Literal["confident", "uncertain", "no_evidence", "ambiguous"]
 

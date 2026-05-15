@@ -13,7 +13,7 @@ chunking, or embedding. Drafts can be recalled via ``/drafts`` (D-030)
 but are not note-candidates and have no promotion path.
 
 Idempotency (R-2 / D-023): the source row is committed via
-``DiaryRepository.get_or_create_source_message`` keyed on
+``DomainRepository.get_or_create_source_message`` keyed on
 ``(external_chat_id, external_message_id, edit_seq)``. A replay short-
 circuits parse, chunking, and the embedding step (D-024) and
 reconstructs the original ``IngestResult`` from persisted state; the
@@ -37,7 +37,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from diary_rag.core.diary import (
+from diary_rag.core.domain import (
     DiaryEntry,
     EventChunk,
     FallbackMode,
@@ -48,7 +48,7 @@ from diary_rag.core.diary import (
 from diary_rag.core.embeddings import EmbeddingClient, EmbeddingRecord, EmbeddingStatus
 from diary_rag.core.routing import InboundMessage, RouteKind
 from diary_rag.logging import get_logger
-from diary_rag.storage.repository import DiaryRepository
+from diary_rag.storage.repository import DomainRepository
 
 log = get_logger(__name__)
 
@@ -62,12 +62,12 @@ def _first_line(text: str) -> str:
     return text.splitlines()[0].strip() if text else ""
 
 
-class DiaryService:
+class DomainService:
     """Ingests an ``InboundMessage`` carrying a ``/note`` payload."""
 
     def __init__(
         self,
-        store: DiaryRepository,
+        store: DomainRepository,
         embedding_client: EmbeddingClient | None = None,
     ) -> None:
         self._store = store

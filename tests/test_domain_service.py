@@ -7,11 +7,11 @@ from datetime import UTC, date, datetime
 import pytest
 
 from diary_rag.adapters.embeddings import MockEmbeddingClient
-from diary_rag.core.diary import EventChunk, FallbackMode
+from diary_rag.core.domain import EventChunk, FallbackMode
 from diary_rag.core.embeddings import EmbeddingStatus
 from diary_rag.core.routing import InboundMessage, RouteKind
-from diary_rag.services import DiaryService
-from diary_rag.storage.mock import MockDiaryStore
+from diary_rag.services import DomainService
+from diary_rag.storage.mock import MockDomainStore
 
 
 def _entry_message(
@@ -36,8 +36,8 @@ def _entry_message(
 
 
 def test_ingest_persists_source_entry_and_chunks() -> None:
-    store = MockDiaryStore()
-    service = DiaryService(store)
+    store = MockDomainStore()
+    service = DomainService(store)
 
     result = service.ingest(_entry_message("2026-05-09\nMorning routine\nTried a new book"))
 
@@ -51,8 +51,8 @@ def test_ingest_persists_source_entry_and_chunks() -> None:
 
 
 def test_ingest_records_source_even_when_parser_rejects() -> None:
-    store = MockDiaryStore()
-    service = DiaryService(store)
+    store = MockDomainStore()
+    service = DomainService(store)
 
     result = service.ingest(_entry_message("not-a-date\nstray line"))
 
@@ -64,8 +64,8 @@ def test_ingest_records_source_even_when_parser_rejects() -> None:
 
 
 def test_ingest_preserves_authorship_on_every_chunk() -> None:
-    store = MockDiaryStore()
-    service = DiaryService(store)
+    store = MockDomainStore()
+    service = DomainService(store)
 
     service.ingest(_entry_message("2026-05-09\nA\nB\nC", chat="42", user="alice"))
 
@@ -74,8 +74,8 @@ def test_ingest_preserves_authorship_on_every_chunk() -> None:
 
 
 def test_ingest_records_route_on_source_message() -> None:
-    store = MockDiaryStore()
-    service = DiaryService(store)
+    store = MockDomainStore()
+    service = DomainService(store)
 
     service.ingest(_entry_message("2026-05-09\nA"))
 
@@ -85,8 +85,8 @@ def test_ingest_records_route_on_source_message() -> None:
 
 
 def test_chunks_carry_lineage_back_to_source_and_entry() -> None:
-    store = MockDiaryStore()
-    service = DiaryService(store)
+    store = MockDomainStore()
+    service = DomainService(store)
 
     result = service.ingest(_entry_message("2026-05-09\nA\nB"))
 
@@ -98,8 +98,8 @@ def test_chunks_carry_lineage_back_to_source_and_entry() -> None:
 
 
 def test_ingest_assigns_event_index_in_order() -> None:
-    store = MockDiaryStore()
-    service = DiaryService(store)
+    store = MockDomainStore()
+    service = DomainService(store)
 
     service.ingest(_entry_message("2026-05-09\nFirst\nSecond\nThird"))
 
@@ -110,8 +110,8 @@ def test_ingest_assigns_event_index_in_order() -> None:
 
 @pytest.mark.parametrize("payload", ["", "   ", "\n\n"])
 def test_empty_payload_is_invalid_input(payload: str) -> None:
-    store = MockDiaryStore()
-    service = DiaryService(store)
+    store = MockDomainStore()
+    service = DomainService(store)
 
     result = service.ingest(_entry_message(payload))
 
@@ -120,8 +120,8 @@ def test_empty_payload_is_invalid_input(payload: str) -> None:
 
 
 def test_ingest_replay_short_circuits_and_does_not_duplicate() -> None:
-    store = MockDiaryStore()
-    service = DiaryService(store)
+    store = MockDomainStore()
+    service = DomainService(store)
     msg = _entry_message("2026-05-09\nMorning routine\nTried a new book", message_id="m1")
 
     first = service.ingest(msg)
@@ -139,8 +139,8 @@ def test_ingest_replay_short_circuits_and_does_not_duplicate() -> None:
 
 
 def test_ingest_replay_preserves_invalid_input_outcome() -> None:
-    store = MockDiaryStore()
-    service = DiaryService(store)
+    store = MockDomainStore()
+    service = DomainService(store)
     msg = _entry_message("not-a-date\nstray line", message_id="m1")
 
     first = service.ingest(msg)
@@ -156,8 +156,8 @@ def test_ingest_replay_preserves_invalid_input_outcome() -> None:
 
 
 def test_ingest_distinct_edit_seq_creates_separate_state() -> None:
-    store = MockDiaryStore()
-    service = DiaryService(store)
+    store = MockDomainStore()
+    service = DomainService(store)
     original = _entry_message("2026-05-09\nA\nB", message_id="m1", edit_seq=0)
     edited = _entry_message("2026-05-09\nA\nB\nC", message_id="m1", edit_seq=1715300100)
 
@@ -172,7 +172,7 @@ def test_ingest_distinct_edit_seq_creates_separate_state() -> None:
     assert store.len_chunks() == 5
 
 
-def _all_chunks(store: MockDiaryStore) -> list[EventChunk]:
+def _all_chunks(store: MockDomainStore) -> list[EventChunk]:
     return list(store._chunks.values())
 
 
@@ -187,8 +187,8 @@ class _RaisingEmbeddingClient:
 
 
 def test_ingest_without_embedding_client_leaves_chunks_pending() -> None:
-    store = MockDiaryStore()
-    service = DiaryService(store)
+    store = MockDomainStore()
+    service = DomainService(store)
 
     service.ingest(_entry_message("2026-05-09\nA\nB"))
 
@@ -197,9 +197,9 @@ def test_ingest_without_embedding_client_leaves_chunks_pending() -> None:
 
 
 def test_ingest_with_embedding_client_persists_embeddings_and_flips_status() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     client = MockEmbeddingClient(dimension=64)
-    service = DiaryService(store, embedding_client=client)
+    service = DomainService(store, embedding_client=client)
 
     result = service.ingest(_entry_message("2026-05-09\nA\nB"))
 
@@ -210,8 +210,8 @@ def test_ingest_with_embedding_client_persists_embeddings_and_flips_status() -> 
 
 
 def test_ingest_embedding_failure_marks_chunks_failed_and_keeps_lineage() -> None:
-    store = MockDiaryStore()
-    service = DiaryService(store, embedding_client=_RaisingEmbeddingClient())
+    store = MockDomainStore()
+    service = DomainService(store, embedding_client=_RaisingEmbeddingClient())
 
     result = service.ingest(_entry_message("2026-05-09\nA\nB"))
 
@@ -223,7 +223,7 @@ def test_ingest_embedding_failure_marks_chunks_failed_and_keeps_lineage() -> Non
 
 
 def test_ingest_replay_does_not_call_embedding_client() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
 
     class _CountingClient:
         model_name = "mock"
@@ -235,7 +235,7 @@ def test_ingest_replay_does_not_call_embedding_client() -> None:
             return [[0.0] * 64 for _ in texts]
 
     client = _CountingClient()
-    service = DiaryService(store, embedding_client=client)
+    service = DomainService(store, embedding_client=client)
     msg = _entry_message("2026-05-09\nA\nB", message_id="m1")
 
     service.ingest(msg)
@@ -246,7 +246,7 @@ def test_ingest_replay_does_not_call_embedding_client() -> None:
 
 
 def test_ingest_with_invalid_payload_does_not_call_embedding_client() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
 
     class _CountingClient:
         model_name = "mock"
@@ -258,7 +258,7 @@ def test_ingest_with_invalid_payload_does_not_call_embedding_client() -> None:
             return [[0.0] * 64 for _ in texts]
 
     client = _CountingClient()
-    service = DiaryService(store, embedding_client=client)
+    service = DomainService(store, embedding_client=client)
 
     service.ingest(_entry_message("not-a-date\nstray line"))
 
@@ -289,8 +289,8 @@ def _draft_message(
 
 
 def test_ingest_draft_persists_raw_only() -> None:
-    store = MockDiaryStore()
-    service = DiaryService(store)
+    store = MockDomainStore()
+    service = DomainService(store)
 
     result = service.ingest(_draft_message("just thinking out loud"))
 
@@ -304,8 +304,8 @@ def test_ingest_draft_persists_raw_only() -> None:
 
 
 def test_ingest_draft_records_draft_route_on_source_message() -> None:
-    store = MockDiaryStore()
-    service = DiaryService(store)
+    store = MockDomainStore()
+    service = DomainService(store)
 
     service.ingest(_draft_message("just thinking out loud"))
 
@@ -316,7 +316,7 @@ def test_ingest_draft_records_draft_route_on_source_message() -> None:
 
 
 def test_ingest_draft_does_not_call_embedding_client() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
 
     class _CountingClient:
         model_name = "mock"
@@ -328,7 +328,7 @@ def test_ingest_draft_does_not_call_embedding_client() -> None:
             return [[0.0] * 64 for _ in texts]
 
     client = _CountingClient()
-    service = DiaryService(store, embedding_client=client)
+    service = DomainService(store, embedding_client=client)
 
     service.ingest(_draft_message("ambiguous text"))
 
@@ -337,8 +337,8 @@ def test_ingest_draft_does_not_call_embedding_client() -> None:
 
 
 def test_ingest_draft_replay_short_circuits_without_duplicating() -> None:
-    store = MockDiaryStore()
-    service = DiaryService(store)
+    store = MockDomainStore()
+    service = DomainService(store)
     msg = _draft_message("recipe yesterday", message_id="d1")
 
     first = service.ingest(msg)
@@ -355,8 +355,8 @@ def test_ingest_draft_replay_short_circuits_without_duplicating() -> None:
 
 
 def test_ingest_draft_then_distinct_entry_message_keeps_both_states() -> None:
-    store = MockDiaryStore()
-    service = DiaryService(store)
+    store = MockDomainStore()
+    service = DomainService(store)
 
     draft = service.ingest(_draft_message("idea, not yet committed", message_id="d1"))
     note = service.ingest(_entry_message("2026-05-09\nMorning routine", message_id="n1"))
@@ -368,8 +368,8 @@ def test_ingest_draft_then_distinct_entry_message_keeps_both_states() -> None:
 
 
 def test_list_recent_drafts_returns_drafts_only_most_recent_first() -> None:
-    store = MockDiaryStore()
-    service = DiaryService(store)
+    store = MockDomainStore()
+    service = DomainService(store)
 
     service.ingest(_draft_message("first draft", message_id="d1"))
     service.ingest(_entry_message("2026-05-09\nA note", message_id="n1"))
@@ -380,8 +380,8 @@ def test_list_recent_drafts_returns_drafts_only_most_recent_first() -> None:
 
 
 def test_list_recent_drafts_is_family_scoped() -> None:
-    store = MockDiaryStore()
-    service = DiaryService(store)
+    store = MockDomainStore()
+    service = DomainService(store)
 
     service.ingest(_draft_message("fam-A draft", chat="fam-A", message_id="d1"))
     service.ingest(_draft_message("fam-B draft", chat="fam-B", message_id="d2"))
@@ -391,8 +391,8 @@ def test_list_recent_drafts_is_family_scoped() -> None:
 
 
 def test_list_recent_drafts_respects_limit() -> None:
-    store = MockDiaryStore()
-    service = DiaryService(store)
+    store = MockDomainStore()
+    service = DomainService(store)
 
     for i in range(5):
         service.ingest(_draft_message(f"draft-{i}", message_id=f"d{i}"))
@@ -402,8 +402,8 @@ def test_list_recent_drafts_respects_limit() -> None:
 
 
 def test_list_recent_drafts_empty_when_no_drafts() -> None:
-    store = MockDiaryStore()
-    service = DiaryService(store)
+    store = MockDomainStore()
+    service = DomainService(store)
 
     service.ingest(_entry_message("2026-05-09\nA note", message_id="n1"))
 
@@ -412,7 +412,7 @@ def test_list_recent_drafts_empty_when_no_drafts() -> None:
 
 
 def test_list_recent_drafts_rejects_zero_limit() -> None:
-    store = MockDiaryStore()
-    service = DiaryService(store)
+    store = MockDomainStore()
+    service = DomainService(store)
     with pytest.raises(ValueError):
         service.list_recent_drafts("42", limit=0)

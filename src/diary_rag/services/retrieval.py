@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from diary_rag.core.diary.models import EventChunk
+from diary_rag.core.domain.models import EventChunk
 
 DEFAULT_RRF_K = 60
 

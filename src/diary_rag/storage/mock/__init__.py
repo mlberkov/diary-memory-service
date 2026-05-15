@@ -4,6 +4,6 @@ Mocks stand in for the durable PostgreSQL repositories that arrive in
 Phase 2. They are intentionally minimal and process-local.
 """
 
-from diary_rag.storage.mock.store import MockDiaryStore
+from diary_rag.storage.mock.store import MockDomainStore
 
-__all__ = ["MockDiaryStore"]
+__all__ = ["MockDomainStore"]

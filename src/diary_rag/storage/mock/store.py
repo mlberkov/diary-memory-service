@@ -29,7 +29,7 @@ import math
 import re
 from dataclasses import replace
 
-from diary_rag.core.diary.models import (
+from diary_rag.core.domain.models import (
     AnswerTrace,
     DateRange,
     DiaryEntry,
@@ -62,7 +62,7 @@ def _chunk_in_date_range(chunk: EventChunk, date_range: DateRange | None) -> boo
     return not (date_range.end is not None and chunk.entry_date > date_range.end)
 
 
-class MockDiaryStore:
+class MockDomainStore:
     """Process-local store for ``SourceMessage``, ``DiaryEntry``, ``EventChunk``."""
 
     def __init__(self) -> None:

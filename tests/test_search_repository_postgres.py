@@ -1,4 +1,4 @@
-"""SearchRepository tests against ``PostgresDiaryStore`` (Slice 3.3 / D-025).
+"""SearchRepository tests against ``PostgresDomainStore`` (Slice 3.3 / D-025).
 
 Skipped unless ``DIARY_RAG_PG_TEST_DSN`` is set, mirroring
 ``test_postgres_store.py``. Exercises:
@@ -21,7 +21,7 @@ from uuid import uuid4
 import pytest
 
 from diary_rag.adapters.embeddings import MockEmbeddingClient
-from diary_rag.core.diary.models import DateRange, DiaryEntry, EventChunk, SourceMessage
+from diary_rag.core.domain.models import DateRange, DiaryEntry, EventChunk, SourceMessage
 from diary_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
 from diary_rag.core.routing import RouteKind
 
@@ -35,7 +35,7 @@ pytestmark = pytest.mark.skipif(
 if PG_DSN is not None:
     import psycopg
 
-    from diary_rag.storage.postgres import PostgresDiaryStore
+    from diary_rag.storage.postgres import PostgresDomainStore
 
 _NOW = datetime(2026, 5, 11, 12, 0, 0, tzinfo=UTC)
 _DATE = date(2026, 5, 11)
@@ -50,9 +50,9 @@ def _truncate(dsn: str) -> None:
 
 
 @pytest.fixture
-def store() -> Iterator[PostgresDiaryStore]:
+def store() -> Iterator[PostgresDomainStore]:
     assert PG_DSN is not None
-    s = PostgresDiaryStore(PG_DSN)
+    s = PostgresDomainStore(PG_DSN)
     try:
         _truncate(PG_DSN)
         yield s
@@ -61,7 +61,7 @@ def store() -> Iterator[PostgresDiaryStore]:
 
 
 def _seed(
-    store: PostgresDiaryStore,
+    store: PostgresDomainStore,
     *,
     cid: str,
     text: str,
@@ -132,7 +132,7 @@ def _seed(
     store.set_chunk_embedding_status(cid, status)
 
 
-def test_sparse_matches_keywords(store: PostgresDiaryStore) -> None:
+def test_sparse_matches_keywords(store: PostgresDomainStore) -> None:
     _seed(store, cid="c1", text="Tried a new book today")
     _seed(store, cid="c2", text="Walked the dog", event_index=1)
 
@@ -141,14 +141,14 @@ def test_sparse_matches_keywords(store: PostgresDiaryStore) -> None:
     assert [h.chunk_id for h in hits] == ["c1"]
 
 
-def test_sparse_empty_query_returns_empty(store: PostgresDiaryStore) -> None:
+def test_sparse_empty_query_returns_empty(store: PostgresDomainStore) -> None:
     _seed(store, cid="c1", text="Tried a new book today")
 
     assert store.sparse_candidates("fam-A", "", limit=10) == []
     assert store.sparse_candidates("fam-A", "   ", limit=10) == []
 
 
-def test_sparse_family_scope_isolates(store: PostgresDiaryStore) -> None:
+def test_sparse_family_scope_isolates(store: PostgresDomainStore) -> None:
     _seed(store, cid="cA", text="Family A book", family_id="fam-A")
     _seed(store, cid="cB", text="Family B book", family_id="fam-B")
 
@@ -157,12 +157,12 @@ def test_sparse_family_scope_isolates(store: PostgresDiaryStore) -> None:
     assert store.sparse_candidates("fam-C", "book", 10) == []
 
 
-def test_sparse_zero_limit_returns_empty(store: PostgresDiaryStore) -> None:
+def test_sparse_zero_limit_returns_empty(store: PostgresDomainStore) -> None:
     _seed(store, cid="c1", text="Tried a new book today")
     assert store.sparse_candidates("fam-A", "book", 0) == []
 
 
-def test_dense_returns_identical_text_first(store: PostgresDiaryStore) -> None:
+def test_dense_returns_identical_text_first(store: PostgresDomainStore) -> None:
     client = MockEmbeddingClient()
     _seed(store, cid="c1", text="Walked the dog", embed_with=client)
     _seed(store, cid="c2", text="Read a book", event_index=1, embed_with=client)
@@ -173,7 +173,7 @@ def test_dense_returns_identical_text_first(store: PostgresDiaryStore) -> None:
     assert hits[0].chunk_id == "c1"
 
 
-def test_dense_excludes_unready_chunks(store: PostgresDiaryStore) -> None:
+def test_dense_excludes_unready_chunks(store: PostgresDomainStore) -> None:
     client = MockEmbeddingClient()
     _seed(store, cid="c1", text="Walked the dog", status=EmbeddingStatus.FAILED)
     _seed(store, cid="c2", text="Walked the dog", event_index=1, embed_with=client)
@@ -184,7 +184,7 @@ def test_dense_excludes_unready_chunks(store: PostgresDiaryStore) -> None:
     assert [h.chunk_id for h in hits] == ["c2"]
 
 
-def test_dense_family_scope_isolates(store: PostgresDiaryStore) -> None:
+def test_dense_family_scope_isolates(store: PostgresDomainStore) -> None:
     client = MockEmbeddingClient()
     _seed(store, cid="cA", text="Walked the dog", family_id="fam-A", embed_with=client)
     _seed(store, cid="cB", text="Walked the dog", family_id="fam-B", embed_with=client)
@@ -197,7 +197,7 @@ def test_dense_family_scope_isolates(store: PostgresDiaryStore) -> None:
     assert [h.chunk_id for h in hits_b] == ["cB"]
 
 
-def test_dense_filters_by_model_name(store: PostgresDiaryStore) -> None:
+def test_dense_filters_by_model_name(store: PostgresDomainStore) -> None:
     client = MockEmbeddingClient()
     _seed(store, cid="c1", text="Walked the dog", embed_with=client)
 
@@ -205,19 +205,19 @@ def test_dense_filters_by_model_name(store: PostgresDiaryStore) -> None:
     assert store.dense_candidates("fam-A", query, "other-model", 10) == []
 
 
-def test_dense_empty_family_raises(store: PostgresDiaryStore) -> None:
+def test_dense_empty_family_raises(store: PostgresDomainStore) -> None:
     client = MockEmbeddingClient()
     with pytest.raises(ValueError, match="family_id"):
         store.dense_candidates("", client.embed(["x"])[0], client.model_name, 5)
 
 
-def test_sparse_empty_family_raises(store: PostgresDiaryStore) -> None:
+def test_sparse_empty_family_raises(store: PostgresDomainStore) -> None:
     with pytest.raises(ValueError, match="family_id"):
         store.sparse_candidates("", "book", 5)
 
 
 def test_tsvector_simple_dictionary_does_not_stem(
-    store: PostgresDiaryStore,
+    store: PostgresDomainStore,
 ) -> None:
     """``to_tsvector('simple', ...)`` indexes raw tokens, no stemming.
 
@@ -241,14 +241,16 @@ _MID = date(2026, 5, 11)
 _LATE = date(2026, 5, 12)
 
 
-def _seed_three_dates(store: PostgresDiaryStore, client: MockEmbeddingClient, *, text: str) -> None:
+def _seed_three_dates(
+    store: PostgresDomainStore, client: MockEmbeddingClient, *, text: str
+) -> None:
     """Seed identical-text chunks on three distinct entry dates."""
     _seed(store, cid="c-early", text=text, embed_with=client, entry_date=_EARLY)
     _seed(store, cid="c-mid", text=text, embed_with=client, entry_date=_MID)
     _seed(store, cid="c-late", text=text, embed_with=client, entry_date=_LATE)
 
 
-def test_sparse_date_range_full(store: PostgresDiaryStore) -> None:
+def test_sparse_date_range_full(store: PostgresDomainStore) -> None:
     _seed_three_dates(store, MockEmbeddingClient(), text="book chapter")
 
     hits = store.sparse_candidates(
@@ -257,21 +259,21 @@ def test_sparse_date_range_full(store: PostgresDiaryStore) -> None:
     assert {h.chunk_id for h in hits} == {"c-mid"}
 
 
-def test_sparse_date_range_only_lower(store: PostgresDiaryStore) -> None:
+def test_sparse_date_range_only_lower(store: PostgresDomainStore) -> None:
     _seed_three_dates(store, MockEmbeddingClient(), text="book chapter")
 
     hits = store.sparse_candidates("fam-A", "book chapter", 10, date_range=DateRange(start=_MID))
     assert {h.chunk_id for h in hits} == {"c-mid", "c-late"}
 
 
-def test_sparse_date_range_only_upper(store: PostgresDiaryStore) -> None:
+def test_sparse_date_range_only_upper(store: PostgresDomainStore) -> None:
     _seed_three_dates(store, MockEmbeddingClient(), text="book chapter")
 
     hits = store.sparse_candidates("fam-A", "book chapter", 10, date_range=DateRange(end=_MID))
     assert {h.chunk_id for h in hits} == {"c-early", "c-mid"}
 
 
-def test_sparse_date_range_inclusive_bounds(store: PostgresDiaryStore) -> None:
+def test_sparse_date_range_inclusive_bounds(store: PostgresDomainStore) -> None:
     _seed_three_dates(store, MockEmbeddingClient(), text="book chapter")
 
     hits = store.sparse_candidates(
@@ -280,7 +282,7 @@ def test_sparse_date_range_inclusive_bounds(store: PostgresDiaryStore) -> None:
     assert {h.chunk_id for h in hits} == {"c-early", "c-mid", "c-late"}
 
 
-def test_dense_date_range_full(store: PostgresDiaryStore) -> None:
+def test_dense_date_range_full(store: PostgresDomainStore) -> None:
     client = MockEmbeddingClient()
     _seed_three_dates(store, client, text="Walked the dog")
 
@@ -291,7 +293,7 @@ def test_dense_date_range_full(store: PostgresDiaryStore) -> None:
     assert {h.chunk_id for h in hits} == {"c-mid"}
 
 
-def test_dense_date_range_only_lower(store: PostgresDiaryStore) -> None:
+def test_dense_date_range_only_lower(store: PostgresDomainStore) -> None:
     client = MockEmbeddingClient()
     _seed_three_dates(store, client, text="Walked the dog")
 
@@ -302,7 +304,7 @@ def test_dense_date_range_only_lower(store: PostgresDiaryStore) -> None:
     assert {h.chunk_id for h in hits} == {"c-mid", "c-late"}
 
 
-def test_dense_date_range_only_upper(store: PostgresDiaryStore) -> None:
+def test_dense_date_range_only_upper(store: PostgresDomainStore) -> None:
     client = MockEmbeddingClient()
     _seed_three_dates(store, client, text="Walked the dog")
 
@@ -313,7 +315,7 @@ def test_dense_date_range_only_upper(store: PostgresDiaryStore) -> None:
     assert {h.chunk_id for h in hits} == {"c-early", "c-mid"}
 
 
-def test_date_range_none_unchanged(store: PostgresDiaryStore) -> None:
+def test_date_range_none_unchanged(store: PostgresDomainStore) -> None:
     """``date_range=None`` returns the pre-3.4 result set on both legs."""
     client = MockEmbeddingClient()
     _seed_three_dates(store, client, text="book chapter")

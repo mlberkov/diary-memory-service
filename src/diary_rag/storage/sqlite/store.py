@@ -1,4 +1,4 @@
-"""Local-disk SQLite store implementing ``DiaryRepository`` (ingest only).
+"""Local-disk SQLite store implementing ``DomainRepository`` (ingest only).
 
 Schema is bootstrapped at construction via ``CREATE TABLE IF NOT EXISTS``.
 A fresh ``sqlite3.Connection`` is opened per public method call, so the
@@ -33,7 +33,7 @@ import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
-from diary_rag.core.diary.models import (
+from diary_rag.core.domain.models import (
     AnswerTrace,
     DateRange,
     DiaryEntry,
@@ -175,8 +175,8 @@ def _decode_vector(blob: bytes, dimension: int) -> list[float]:
     return list(arr)
 
 
-class SqliteDiaryStore:
-    """Local-disk SQLite implementation of ``DiaryRepository``."""
+class SqliteDomainStore:
+    """Local-disk SQLite implementation of ``DomainRepository``."""
 
     def __init__(self, path: str) -> None:
         self._path = path

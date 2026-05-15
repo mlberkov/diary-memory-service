@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
-from diary_rag.core.diary.models import AnswerContext
+from diary_rag.core.domain.models import AnswerContext
 
 PROMPT_VERSION: Final[str] = "v1"
 
