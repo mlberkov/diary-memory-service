@@ -1,6 +1,6 @@
 # telegram-dairy
 
-Diary RAG Service for **TheyGrow** — a low-friction memory system for parents who write family and child observations in Telegram and later ask natural-language questions over them.
+A **generic shared-memory / note-grounded answer service** — a portable memory/journal core that captures notes into a durable corpus and answers natural-language questions grounded only in retrieved evidence. The first implemented use case is a low-friction Telegram diary for parents who write family and child observations and later ask questions over them; TheyGrow is a later integration host (D-026, D-041). Canonical vocabulary (`community` / `subject`) is in `docs/GLOSSARY.md`.
 
 > **Status:** Milestone 1 complete. Telegram webhook adapter and channel-neutral `DiaryService` / `QueryService`, durable PostgreSQL backend behind `DiaryRepository` (D-022), idempotent webhook + ingest keyed on `(external_chat_id, external_message_id, edit_seq)` (D-023), sync per-chunk embedding indexing on pgvector with `text-embedding-3-large` @ 3072 dim (D-024), and baseline hybrid retrieval with `SearchRepository` (dense exact family-scoped scan + Postgres FTS `tsvector('simple')`) fused by service-layer RRF (D-025) are all wired. The grounded-answer pipeline, provider hardening, and search-quality optimizations (BM25, reranker, Qdrant, halfvec/HNSW) land in later milestones.
 
@@ -32,6 +32,7 @@ Core rules (from `AGENTS.md` and the canonical docs):
 - `CLAUDE.md` — Claude Code read order and working mode.
 
 ### Supporting
+- `docs/GLOSSARY.md` — canonical `community` / `subject` vocabulary and the first-use-case mapping (D-041).
 - `docs/ARCHITECTURE.md` — one-page system shape and layer boundaries.
 - `docs/INVARIANTS.md` / `docs/RUNTIME-INVARIANTS.md` — non-negotiables.
 - `docs/RUNBOOK.md` — canonical workflow inside this repo.

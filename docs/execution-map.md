@@ -2,6 +2,8 @@
 
 Files listed are *targets*. Most do not exist yet. Each row will be split into one or more entries in `docs/todo.md` as the work approaches. Phase headers mirror `docs/product/BuildPlan.md`.
 
+Use-case nouns below (`family`, `child`) describe the first implemented use case; `community` / `subject` are the canonical core vocabulary — see `docs/GLOSSARY.md` and D-041.
+
 ## Phase 0 — Operating Setup
 | Slice | Files / artifacts |
 | --- | --- |

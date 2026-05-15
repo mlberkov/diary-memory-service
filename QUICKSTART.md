@@ -17,7 +17,7 @@ $EDITOR AGENTS.md
 
 Read order: `AGENTS.md` → `CLAUDE.md` → `docs/product/PRD.md` → `docs/product/BuildPlan.md` → `docs/product/TechSpec.md` → `docs/decision-log.md`.
 
-Then look at `docs/RUNBOOK.md` for how work is done here, and `docs/todo.md` for what's next.
+Then look at `docs/RUNBOOK.md` for how work is done here, and `docs/todo.md` for what's next. For the canonical `community` / `subject` vocabulary, see `docs/GLOSSARY.md` (D-041).
 
 ## Local bootstrap
 
@@ -262,5 +262,6 @@ curl "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
 - Workflow & recovery: `docs/RUNBOOK.md`
 - What must hold at runtime: `docs/RUNTIME-INVARIANTS.md`
 - Data shape rules: `docs/INVARIANTS.md`
+- Canonical vocabulary: `docs/GLOSSARY.md`
 - Open decisions: `docs/assumptions.md`
 - Why things are the way they are: `docs/decision-log.md`

@@ -37,6 +37,7 @@ Supporting operational context:
 9. `docs/execution-map.md`
 10. `docs/assumptions.md`
 11. `docs/assumption-audit.md`
+12. `docs/GLOSSARY.md`
 
 If any prompt conflicts with these files:
 - prefer the canonical repository documents,
@@ -45,10 +46,12 @@ If any prompt conflicts with these files:
 
 ## Product Context
 
-This project is a portable memory/journal core. The first use case is a Diary RAG Service that:
+This project is a **generic shared-memory / note-grounded answer service** — a portable memory/journal core (D-026, D-041). The first implemented use case is a Diary RAG Service that:
 - starts as a Telegram-based diary and Q&A interface,
 - later integrates into TheyGrow as a reusable memory subsystem,
 - is intended to support additional hosts (self-hosted OSS, managed cloud, other embedded products) without rewrite.
+
+The canonical core vocabulary is `community` (the outer scope owning a note corpus) and `subject` (a sub-entity a note is about); the first use case maps `family` → community, `child` → subject, `parent` → participant. See `docs/GLOSSARY.md` and D-041.
 
 Core architectural rule (D-026):
 - The functional core is the same subsystem across hosts.
@@ -70,7 +73,7 @@ Core service rule:
 8. Optional AI enrichments must be feature-flagged.
 9. No silent fallback may pretend that retrieval succeeded.
 10. Shared diary mode must preserve authorship.
-11. Host-specific types, provider SDKs, raw SQL, and use-case vocabulary (`family`, `child`, `parent`, "diary" as a type name) must not appear in newly added core code. Existing names persist until an explicit renaming packet (D-026).
+11. Host-specific types, provider SDKs, raw SQL, and use-case vocabulary (`family`, `child`, `parent`, "diary" as a type name) must not appear in newly added core code; new core code adopts the canonical `community` / `subject` vocabulary (D-041; see `docs/GLOSSARY.md`). Existing names persist until an explicit renaming packet (D-026).
 
 ## Working Rules for Agents
 

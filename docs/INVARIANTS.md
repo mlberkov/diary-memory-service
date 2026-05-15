@@ -4,6 +4,8 @@ These hold at all times. Code that breaks any of them must not be merged. Changi
 
 Derived from `AGENTS.md` §Non-Negotiable Product Rules and `docs/product/TechSpec.md` §14.
 
+For the canonical `community` / `subject` vocabulary see `docs/GLOSSARY.md` and D-041. This file deliberately still names the current code identifiers (`family_id`, `DiaryEntry`, …) — its wording matches what code enforces today, not the target vocabulary.
+
 ## I-1. Channel boundary
 Telegram is a channel, not the system of record. No Telegram-specific type or assumption may appear outside the channel adapter layer.
 
