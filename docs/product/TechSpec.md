@@ -257,8 +257,8 @@ Hybrid retrieval is required. Enforced as of D-025 as a **baseline** contour; qu
 ### Retrieval abstraction
 The retrieval backend is the `SearchRepository` Protocol (`src/diary_rag/storage/search_repository.py`), with two independent legs:
 
-- `dense_candidates(family_id, query_embedding, model_name, limit) -> list[EventChunk]`
-- `sparse_candidates(family_id, query_text, limit) -> list[EventChunk]`
+- `dense_candidates(family_id, query_embedding, model_name, limit, *, date_range=None) -> list[EventChunk]`
+- `sparse_candidates(family_id, query_text, limit, *, date_range=None) -> list[EventChunk]`
 
 The three concrete stores (mock, sqlite, postgres) each satisfy both `DiaryRepository` (ingest) and `SearchRepository` (retrieval); the union is named `HybridDiaryStore`. SQLite raises `NotImplementedError` from the retrieval methods because it is opt-in for ingest only; Postgres is the canonical retrieval backend.
 
@@ -271,7 +271,12 @@ The three concrete stores (mock, sqlite, postgres) each satisfy both `DiaryRepos
 6. wrap each chunk as `Evidence(chunk_id, entry_date, chunk_text)`,
 7. log `retrieval.hybrid family_id=… model=… dense_n=… sparse_n=… merged_n=…`.
 
-Date constraints, family/visibility/child filters, dedup, and retrieval-trace persistence belong to Phase 3.4 / 3.5; they are not in the D-025 baseline.
+The optional **date-range filter** has landed (D-040, Slice 3.4): both legs accept a keyword-only `date_range` carrying an inclusive `entry_date` lower/upper bound (either side optional). It defaults to `None` — no constraint — so the D-025 retrieval shape and the RRF inputs are unchanged when unused. The remaining visibility/child metadata filters, dedup, and retrieval-trace persistence belong to Phase 3.4 / 3.5; they are not in the D-025 baseline. Visibility filtering waits on A-15.
+
+### Metadata filtering
+- `DateRange(start, end)` is a channel-neutral frozen value object (`core/diary/models.py`); both bounds are `date | None` and inclusive. A both-`None` range is treated as no constraint; `start > end` is rejected at construction.
+- Postgres adds a conditional `entry_date >= / <=` predicate to both leg SQL queries; the mock backend applies the identical deterministic comparison, so mock and Postgres stay at parity. SQLite still raises `NotImplementedError`.
+- `QueryService.answer` accepts a per-call `date_range` and threads it to both legs. There is no inbound `/ask` date syntax yet — that is a separate packet.
 
 ### Dense leg (Postgres)
 - Exact family-scoped sequential scan over the canonical `vector(3072)` column.
@@ -290,7 +295,7 @@ Date constraints, family/visibility/child filters, dedup, and retrieval-trace pe
 
 ### Context policy
 - retrieve `retrieval_top_k` chunks (default 5) from a candidate pool of `retrieval_candidate_k` per leg (default 20),
-- prefer diversity across dates — deferred to Phase 3.4,
+- prefer diversity across dates — deferred (a retrieval-quality lever, not the D-040 date filter),
 - deduplicate near-identical lines — deferred,
 - optionally apply recency boost — deferred,
 - group by date in final answer prompt when useful — deferred to Phase 4.

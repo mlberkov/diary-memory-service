@@ -35,6 +35,7 @@ from pathlib import Path
 
 from diary_rag.core.diary.models import (
     AnswerTrace,
+    DateRange,
     DiaryEntry,
     EventChunk,
     FallbackMode,
@@ -380,6 +381,8 @@ class SqliteDiaryStore:
         query_embedding: list[float],
         model_name: str,
         limit: int,
+        *,
+        date_range: DateRange | None = None,
     ) -> list[EventChunk]:
         raise NotImplementedError(
             "sqlite hybrid retrieval not supported; "
@@ -391,6 +394,8 @@ class SqliteDiaryStore:
         family_id: str,
         query_text: str,
         limit: int,
+        *,
+        date_range: DateRange | None = None,
     ) -> list[EventChunk]:
         raise NotImplementedError(
             "sqlite hybrid retrieval not supported; "

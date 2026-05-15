@@ -62,6 +62,7 @@ from diary_rag.core.answers import ChatClient, ChatProviderUnavailableError
 from diary_rag.core.diary import (
     AnswerResult,
     AnswerTrace,
+    DateRange,
     Evidence,
     FallbackMode,
     Query,
@@ -133,7 +134,17 @@ class QueryService:
         self._top_k = top_k
         self._candidate_k = candidate_k
 
-    def answer(self, message: InboundMessage) -> AnswerResult:
+    def answer(
+        self, message: InboundMessage, *, date_range: DateRange | None = None
+    ) -> AnswerResult:
+        """Answer an ``/ask`` payload via baseline hybrid retrieval.
+
+        When ``date_range`` is given, both retrieval legs are restricted
+        to chunks whose ``entry_date`` falls within its inclusive bounds
+        (Slice 3.4, D-040); ``None`` (the default) applies no date
+        constraint. There is no inbound date syntax yet — the Telegram
+        webhook passes no ``date_range``.
+        """
         family_id = message.external_chat_id
         if not family_id:
             raise ValueError("InboundMessage.external_chat_id is required (R-3)")
@@ -173,9 +184,11 @@ class QueryService:
         query_embedding = self._embed.embed([query_text])[0]
 
         dense_hits = self._search.dense_candidates(
-            family_id, query_embedding, model_name, self._candidate_k
+            family_id, query_embedding, model_name, self._candidate_k, date_range=date_range
         )
-        sparse_hits = self._search.sparse_candidates(family_id, query_text, self._candidate_k)
+        sparse_hits = self._search.sparse_candidates(
+            family_id, query_text, self._candidate_k, date_range=date_range
+        )
         merged = reciprocal_rank_fusion([dense_hits, sparse_hits], top_k=self._top_k)
 
         # The persisted Query is constructed inside `_finalize` so its

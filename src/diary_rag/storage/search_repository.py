@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from diary_rag.core.diary.models import EventChunk
+from diary_rag.core.diary.models import DateRange, EventChunk
 from diary_rag.storage.repository import DiaryRepository
 
 
@@ -36,6 +36,8 @@ class SearchRepository(Protocol):
         query_embedding: list[float],
         model_name: str,
         limit: int,
+        *,
+        date_range: DateRange | None = None,
     ) -> list[EventChunk]:
         """Return up to ``limit`` chunks ranked by vector similarity.
 
@@ -44,6 +46,11 @@ class SearchRepository(Protocol):
         filter is what ties the query vector to the persisted vectors:
         a chunk indexed under a different model is not a candidate for
         this query.
+
+        When ``date_range`` is given, only chunks whose ``entry_date``
+        falls within its inclusive bounds participate; ``None`` (the
+        default) applies no date constraint and preserves the D-025
+        retrieval shape (Slice 3.4, D-040).
         """
 
     def sparse_candidates(
@@ -51,12 +58,19 @@ class SearchRepository(Protocol):
         family_id: str,
         query_text: str,
         limit: int,
+        *,
+        date_range: DateRange | None = None,
     ) -> list[EventChunk]:
         """Return up to ``limit`` chunks ranked by PostgreSQL FTS baseline.
 
         Family-scoped (I-7, R-3). Tokenization is whatever the backend
         configures — for Postgres, ``to_tsvector('simple', ...)``;
         ``websearch_to_tsquery('simple', ...)`` parses the query.
+
+        When ``date_range`` is given, only chunks whose ``entry_date``
+        falls within its inclusive bounds participate; ``None`` (the
+        default) applies no date constraint and preserves the D-025
+        retrieval shape (Slice 3.4, D-040).
         """
 
 

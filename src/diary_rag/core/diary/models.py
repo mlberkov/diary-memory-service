@@ -112,6 +112,28 @@ class EventChunk:
 
 
 @dataclass(frozen=True, slots=True)
+class DateRange:
+    """Inclusive ``entry_date`` bound for retrieval filtering (Slice 3.4, D-040).
+
+    Both bounds are optional and inclusive: a chunk matches when its
+    ``entry_date`` is ``>= start`` (when ``start`` is set) and ``<= end``
+    (when ``end`` is set). Both bounds ``None`` is a valid no-constraint
+    range, treated by every backend identically to passing no filter at
+    all. A range with ``start > end`` is contradictory and rejected at
+    construction; equal bounds (a single-day range) are valid.
+    """
+
+    start: date | None = None
+    end: date | None = None
+
+    def __post_init__(self) -> None:
+        if self.start is not None and self.end is not None and self.start > self.end:
+            raise ValueError(
+                f"DateRange.start must be <= end (got start={self.start}, end={self.end})"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class Evidence:
     """A retrieved chunk plus the metadata the reply layer needs to cite it."""
 
