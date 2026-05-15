@@ -2,10 +2,13 @@
 
 Top of list = pick next. Each item maps to a row in `docs/execution-map.md`. When a slice is done, remove it and add the next downstream slice.
 
-## Next quality-decision packet — search-quality fork
-- Owner: agent + human (decision boundary)
-- Map: execution-map 3.6 follow-up
-- Concrete: pick **one** first quality variant and measure it against the D-038 harness baseline (exact dense scan + Postgres FTS `simple` + service-layer RRF). Candidates: **BM25-grade sparse** (e.g. `pg_search`, `bm25_catalog`, or an app-side BM25 over tokenized chunks); **reranker / cross-encoder**; **Qdrant or another dedicated vector / search system**; multilingual sparse tuning beyond `simple`; **3072-dim ANN strategy** (A-36b: halfvec + HNSW vs alternatives). **Do not bundle more than one.** The remaining candidates stay deferred until a follow-up packet picks the next.
+## Slice 3.7 — Language-aware sparse FTS (dual-config tsvector union, D-039)
+- Owner: agent
+- Map: execution-map 3.7
+- Mechanism (decided — D-039 selected the first quality lever): retire the sparse-leg `simple` dictionary for a **dual-config tsvector union**. `event_chunks.chunk_text_tsv` generated as `to_tsvector('russian', chunk_text) || to_tsvector('english', chunk_text)`; `sparse_candidates` queries with `websearch_to_tsquery('russian', $q) || websearch_to_tsquery('english', $q)`, ranked by `ts_rank_cd`. No language detection on either side — every chunk and every query is processed under both built-in configs.
+- Sequencing (baseline-vs-quality discipline): **(1)** the operator runs the D-038 harness in Postgres mode and pastes the baseline snapshot into the D-038 entry; **(2)** *only then* this implementation packet lands the dual-config union and is re-measured against that snapshot. The implementation must not land before step (1).
+- Concrete: change the generated-column expression in `storage/postgres/schema.sql`; change the `tsquery` construction in `storage/postgres/store.py` `sparse_candidates`; preserve mock + sqlite parity (sqlite still `NotImplementedError`); A-34 destructive local upgrade (`docker compose down -v`); update TechSpec §9 + RUNBOOK; re-run the D-038 harness Postgres mode.
+- Deferred follow-up levers (one per future packet, **do not bundle more than one**): **BM25-grade sparse** (`pg_search`, `bm25_catalog`, or app-side BM25 over tokenized chunks); **reranker / cross-encoder**; **Qdrant or another dedicated vector / search system**; **3072-dim ANN strategy** (A-36b: halfvec + HNSW vs alternatives). Each measures against the D-038 baseline when picked.
 
 ## Slice 3.4 — Metadata filtering (after 3.3)
 - Owner: agent
