@@ -120,7 +120,7 @@ def _seed_short_drafts(store: MockDomainStore, *, count: int) -> None:
         store.save_source_message(
             SourceMessage(
                 source_message_id=f"draft-id-{i:03d}",
-                family_id="42",
+                community_id="42",
                 author_user_id="7",
                 external_chat_id="42",
                 external_user_id="7",
@@ -190,7 +190,7 @@ def test_drafts_overflow_splits_into_multiple_outbound_messages_at_block_boundar
         store.save_source_message(
             SourceMessage(
                 source_message_id=f"big-{i:02d}",
-                family_id="42",
+                community_id="42",
                 author_user_id="7",
                 external_chat_id="42",
                 external_user_id="7",
@@ -224,7 +224,7 @@ def test_drafts_oversized_block_emits_standalone_multipart_no_neighbour_interlea
     store.save_source_message(
         SourceMessage(
             source_message_id="short-before",
-            family_id="42",
+            community_id="42",
             author_user_id="7",
             external_chat_id="42",
             external_user_id="7",
@@ -238,7 +238,7 @@ def test_drafts_oversized_block_emits_standalone_multipart_no_neighbour_interlea
     store.save_source_message(
         SourceMessage(
             source_message_id="oversized-mid",
-            family_id="42",
+            community_id="42",
             author_user_id="7",
             external_chat_id="42",
             external_user_id="7",
@@ -252,7 +252,7 @@ def test_drafts_oversized_block_emits_standalone_multipart_no_neighbour_interlea
     store.save_source_message(
         SourceMessage(
             source_message_id="short-after",
-            family_id="42",
+            community_id="42",
             author_user_id="7",
             external_chat_id="42",
             external_user_id="7",
@@ -294,7 +294,7 @@ def test_drafts_partial_failure_aborts_and_sends_error_outbound(
         store.save_source_message(
             SourceMessage(
                 source_message_id=f"big-{i:02d}",
-                family_id="42",
+                community_id="42",
                 author_user_id="7",
                 external_chat_id="42",
                 external_user_id="7",

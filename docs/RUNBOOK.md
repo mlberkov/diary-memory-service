@@ -113,7 +113,7 @@ Most recent traces, full picture across legs:
 SELECT q.query_id, q.created_at, q.query_text, q.fallback,
        h.leg, h.rank, h.score, h.chunk_id
   FROM queries q LEFT JOIN retrieval_hits h ON h.query_id = q.query_id
- WHERE q.family_id = '<chat_id>'
+ WHERE q.community_id = '<chat_id>'
  ORDER BY q.created_at DESC, h.leg, h.rank
  LIMIT 50;
 ```
@@ -123,7 +123,7 @@ Failed answers only (queries where retrieval found nothing):
 ```sql
 SELECT q.query_id, q.created_at, q.query_text
   FROM queries q
- WHERE q.family_id = '<chat_id>' AND q.fallback = 'no_evidence'
+ WHERE q.community_id = '<chat_id>' AND q.fallback = 'no_evidence'
  ORDER BY q.created_at DESC
  LIMIT 20;
 ```
@@ -152,7 +152,7 @@ Most recent answer traces joined to their query:
 SELECT q.created_at, q.query_text, a.fallback_mode, a.model_name,
        a.latency_ms, a.prompt_version, a.context_chunk_ids, a.answer_text
   FROM queries q JOIN answer_traces a ON a.query_id = q.query_id
- WHERE q.family_id = '<chat_id>'
+ WHERE q.community_id = '<chat_id>'
  ORDER BY q.created_at DESC
  LIMIT 20;
 ```
@@ -162,11 +162,11 @@ A-34 destructive-upgrade discipline applies: existing local Postgres volumes tha
 ### Selected-chunks recall (`/sources`, D-036)
 `/sources` exposes the **selected chunks as-is** for the chat's most recent `/ask` turn: the post-RRF top-k chunks `services/context_assembler.assemble_answer_context` produced and `build_answer_prompt` fed to the LLM — i.e. the same `chunk_id` list `AnswerTrace.context_chunk_ids` records, rendered with `note_date`, `chunk_id`, and the full `chunk_text` verbatim. It is not citations, not fine-grained attribution, and not the full pre-RRF candidate pool. Outbound delivery is one Telegram message by default and splits across multiple messages only when the 4096-char cap forces it (whole-block boundaries; `(part k/N)` footers on an oversized single chunk; identical packing semantics to `/drafts`).
 
-The state behind `/sources` is a process-local `Dispatcher._latest_sources: dict[str, tuple[EventChunk, ...]]` keyed by `family_id`. The current FastAPI wiring at `adapters/telegram/webhook.py` makes `Dispatcher` a module-level singleton via `get_dispatcher()`, so `/ask` and a follow-up `/sources` are served by the same instance within one process. **Every `/ask` dispatch updates the cache**: non-empty `answer.context.ordered_chunks` overwrites; empty (empty-query, empty-retrieval `NO_EVIDENCE`, retrieval-unavailable on SQLite) clears. Non-`/ask` routes never touch the cache. `/sources` itself is read-only.
+The state behind `/sources` is a process-local `Dispatcher._latest_sources: dict[str, tuple[EventChunk, ...]]` keyed by `community_id`. The current FastAPI wiring at `adapters/telegram/webhook.py` makes `Dispatcher` a module-level singleton via `get_dispatcher()`, so `/ask` and a follow-up `/sources` are served by the same instance within one process. **Every `/ask` dispatch updates the cache**: non-empty `answer.context.ordered_chunks` overwrites; empty (empty-query, empty-retrieval `NO_EVIDENCE`, retrieval-unavailable on SQLite) clears. Non-`/ask` routes never touch the cache. `/sources` itself is read-only.
 
 Fail-closed: when nothing is cached, `/sources` returns `"No selected chunks available — ask a question with /ask first."` via the inline `sendMessage` body — no outbound HTTP call. The fail-closed reply also fires after process restart and after any `/ask` that produced no retrieval.
 
-Multi-worker caveat: each uvicorn worker / pod holds its own dispatcher singleton, so `/ask` on worker A followed by `/sources` on worker B will fail closed (or return stale chunks). The current contour is single-process local dev; promoting the cache to a durable seam (e.g. `DomainRepository.get_latest_answer_trace_for_family(family_id)` + per-chunk lookups via `get_event_chunk`) is the named follow-up trigger if the deployment shape flips.
+Multi-worker caveat: each uvicorn worker / pod holds its own dispatcher singleton, so `/ask` on worker A followed by `/sources` on worker B will fail closed (or return stale chunks). The current contour is single-process local dev; promoting the cache to a durable seam (e.g. `DomainRepository.get_latest_answer_trace_for_family(community_id)` + per-chunk lookups via `get_event_chunk`) is the named follow-up trigger if the deployment shape flips.
 
 ### Retrieval-quality inspection harness (D-038)
 `src/diary_rag/eval/retrieval/` ships a hand-curated harness that measures the D-025 baseline contour against a small fixture corpus + gold-query set. It is **inspection, not a gate** — the CLI exit code is always `0` regardless of the observed metrics.
@@ -207,9 +207,9 @@ The cache is **not** committed by the D-038 implementation packet — it is prod
 `expected_handles` entries in `eval/retrieval/gold.json` use the form `"{external_message_id}#{event_index}"` where `event_index` is the 0-based ordinal of the produced `EventChunk` within the source message after `DomainService.ingest` chunks it. This is internal to the harness only — it is **not** a business event id, **not** a Telegram message id, **not** any external domain identifier. It exists because `chunk_id` is uuid4 at ingest time.
 
 ### Hybrid retrieval (D-025)
-`/ask` runs the baseline hybrid path: a single query-embedding call followed by dense + sparse legs against `SearchRepository`, fused with service-layer RRF. Every retrieval call logs `retrieval.hybrid family_id=… model=… dense_n=… sparse_n=… merged_n=…` so an operator can confirm both legs ran. The dispatcher reply trailer for a successful answer is `(hybrid retrieval — dense+sparse RRF)`; an empty merged set returns `FallbackMode.NO_EVIDENCE` with the plain "No memories matched 'X'." reply.
+`/ask` runs the baseline hybrid path: a single query-embedding call followed by dense + sparse legs against `SearchRepository`, fused with service-layer RRF. Every retrieval call logs `retrieval.hybrid community_id=… model=… dense_n=… sparse_n=… merged_n=…` so an operator can confirm both legs ran. The dispatcher reply trailer for a successful answer is `(hybrid retrieval — dense+sparse RRF)`; an empty merged set returns `FallbackMode.NO_EVIDENCE` with the plain "No memories matched 'X'." reply.
 
-Postgres is the only canonical retrieval backend. When `STORAGE_BACKEND=sqlite`, `SqliteDomainStore.dense_candidates` / `sparse_candidates` raise `NotImplementedError`; the dispatcher catches that, logs `retrieval.unavailable reason=… family_id=…`, and returns `NO_EVIDENCE`. Operators running SQLite see ingest work and `/ask` always fall back — that is the canonical contour, not a bug.
+Postgres is the only canonical retrieval backend. When `STORAGE_BACKEND=sqlite`, `SqliteDomainStore.dense_candidates` / `sparse_candidates` raise `NotImplementedError`; the dispatcher catches that, logs `retrieval.unavailable reason=… community_id=…`, and returns `NO_EVIDENCE`. Operators running SQLite see ingest work and `/ask` always fall back — that is the canonical contour, not a bug.
 
 BM25, reranker, Qdrant, halfvec/HNSW (A-36b), and multilingual sparse tuning (A-37) are deferred to the next quality-decision packet.
 
@@ -219,7 +219,7 @@ Webhook only (D-019). Expose the local process via a tunnel (e.g. `ngrok`, `clou
 ### Command surface (D-028, D-030, D-031, D-036)
 The Telegram code path exposes `/note`, `/ask`, `/sources`, `/drafts`, and `/export`, with absence of an explicit command defaulting to **draft** (D-028). The explicit `/draft` command was removed in D-030 — drafts are created only by the no-command default and recalled via `/drafts`. `/sources` (D-036) returns the chunks retrieval selected for the chat's most recent `/ask`.
 
-Operationally: the draft floor (R-13) means no inbound message is silently discarded, even when routing confidence is low. The webhook log line records `lifecycle=draft|note|query|other` so an operator can see which lifecycle state each delivery resolved to. `DomainService` emits `draft.persisted source_message_id=… family_id=… effective_path=fresh|replay` when the draft path commits. CLARIFY (D-020) remains a valid reply shape for the rare case where a heuristic would actively conflict with intent, but the classifier no longer emits CLARIFY for plain text; raw persistence is unconditional.
+Operationally: the draft floor (R-13) means no inbound message is silently discarded, even when routing confidence is low. The webhook log line records `lifecycle=draft|note|query|other` so an operator can see which lifecycle state each delivery resolved to. `DomainService` emits `draft.persisted source_message_id=… community_id=… effective_path=fresh|replay` when the draft path commits. CLARIFY (D-020) remains a valid reply shape for the rare case where a heuristic would actively conflict with intent, but the classifier no longer emits CLARIFY for plain text; raw persistence is unconditional.
 
 Schema upgrade note: the `source_messages.detected_route` CHECK constraint extended from `{start, help, note, ask, clarify, unknown}` to `{start, help, note, ask, draft, clarify, unknown}` (D-028). Per A-34, existing local Postgres volumes must be reset with `docker compose down -v` before the new CHECK applies; SQLite has no enum constraint on the column. Until the reset is performed, inserts with `detected_route='draft'` raise a CHECK violation against the live Postgres backend.
 

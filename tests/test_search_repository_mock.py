@@ -34,7 +34,7 @@ def _seed(
     *,
     cid: str,
     text: str,
-    family_id: str = "fam-A",
+    community_id: str = "fam-A",
     status: EmbeddingStatus = EmbeddingStatus.READY,
     embed_with: MockEmbeddingClient | None = None,
     note_date: date = _DATE,
@@ -44,9 +44,9 @@ def _seed(
     store.save_source_message(
         SourceMessage(
             source_message_id=sid,
-            family_id=family_id,
+            community_id=community_id,
             author_user_id="u1",
-            external_chat_id=family_id,
+            external_chat_id=community_id,
             external_user_id="u1",
             external_message_id=sid,
             edit_seq=0,
@@ -59,7 +59,7 @@ def _seed(
         Note(
             note_id=eid,
             source_message_id=sid,
-            family_id=family_id,
+            community_id=community_id,
             author_user_id="u1",
             note_date=note_date,
             note_text=text,
@@ -70,7 +70,7 @@ def _seed(
         chunk_id=cid,
         note_id=eid,
         source_message_id=sid,
-        family_id=family_id,
+        community_id=community_id,
         author_user_id="u1",
         note_date=note_date,
         event_index=0,
@@ -87,7 +87,7 @@ def _seed(
                     embedding_record_id=str(uuid4()),
                     chunk_id=cid,
                     source_message_id=sid,
-                    family_id=family_id,
+                    community_id=community_id,
                     model_name=client.model_name,
                     dimension=client.dimension,
                     embedding=client.embed([text])[0],
@@ -120,8 +120,8 @@ def test_sparse_returns_empty_for_disjoint_query() -> None:
 
 def test_sparse_family_scope_isolates() -> None:
     store = MockDomainStore()
-    _seed(store, cid="cA", text="Family A book", family_id="fam-A")
-    _seed(store, cid="cB", text="Family B book", family_id="fam-B")
+    _seed(store, cid="cA", text="Family A book", community_id="fam-A")
+    _seed(store, cid="cB", text="Family B book", community_id="fam-B")
 
     assert [h.chunk_id for h in store.sparse_candidates("fam-A", "book", 10)] == ["cA"]
     assert [h.chunk_id for h in store.sparse_candidates("fam-B", "book", 10)] == ["cB"]
@@ -161,8 +161,8 @@ def test_dense_excludes_unready_chunks() -> None:
 def test_dense_family_scope_isolates() -> None:
     store = MockDomainStore()
     client = MockEmbeddingClient()
-    _seed(store, cid="cA", text="Walked the dog", family_id="fam-A", embed_with=client)
-    _seed(store, cid="cB", text="Walked the dog", family_id="fam-B", embed_with=client)
+    _seed(store, cid="cA", text="Walked the dog", community_id="fam-A", embed_with=client)
+    _seed(store, cid="cB", text="Walked the dog", community_id="fam-B", embed_with=client)
 
     query = client.embed(["Walked the dog"])[0]
     hits_a = store.dense_candidates("fam-A", query, client.model_name, 10)
@@ -181,13 +181,13 @@ def test_dense_uses_model_name_filter() -> None:
     assert store.dense_candidates("fam-A", query, "other-model", 10) == []
 
 
-def test_both_legs_require_family_id() -> None:
+def test_both_legs_require_community_id() -> None:
     store = MockDomainStore()
     client = MockEmbeddingClient()
 
-    with pytest.raises(ValueError, match="family_id"):
+    with pytest.raises(ValueError, match="community_id"):
         store.dense_candidates("", client.embed(["x"])[0], client.model_name, 5)
-    with pytest.raises(ValueError, match="family_id"):
+    with pytest.raises(ValueError, match="community_id"):
         store.sparse_candidates("", "x", 5)
 
 

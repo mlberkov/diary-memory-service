@@ -169,7 +169,7 @@ def _run_postgres(
         def chunks_for_source(source_message_id: str) -> list[EventChunk]:
             with psycopg.connect(dsn) as conn, conn.cursor() as cur:
                 cur.execute(
-                    "SELECT chunk_id, note_id, source_message_id, family_id, "
+                    "SELECT chunk_id, note_id, source_message_id, community_id, "
                     "       author_user_id, note_date, event_index, chunk_text, "
                     "       created_at, embedding_status "
                     "  FROM event_chunks "
@@ -183,7 +183,7 @@ def _run_postgres(
                     chunk_id=row[0],
                     note_id=row[1],
                     source_message_id=row[2],
-                    family_id=row[3],
+                    community_id=row[3],
                     author_user_id=row[4],
                     note_date=row[5],
                     event_index=row[6],

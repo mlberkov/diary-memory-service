@@ -27,12 +27,12 @@ from diary_rag.core.routing import InboundMessage, RouteKind
 from diary_rag.services.dispatcher import Dispatcher
 
 
-def _chunk(chunk_id: str, text: str, *, family_id: str = "fam-A") -> EventChunk:
+def _chunk(chunk_id: str, text: str, *, community_id: str = "fam-A") -> EventChunk:
     return EventChunk(
         chunk_id=chunk_id,
         note_id=f"note-{chunk_id}",
         source_message_id=f"src-{chunk_id}",
-        family_id=family_id,
+        community_id=community_id,
         author_user_id="user-1",
         note_date=date(2026, 5, 9),
         event_index=0,
@@ -297,7 +297,7 @@ def test_parse_failure_ask_overwrites_cache_with_retrieved_chunks() -> None:
 
 def test_two_family_caches_are_independent() -> None:
     a_chunks = (_chunk("a-1", "Family A note"),)
-    b_chunks = (_chunk("b-1", "Family B note", family_id="fam-B"),)
+    b_chunks = (_chunk("b-1", "Family B note", community_id="fam-B"),)
     dispatcher = _dispatcher(
         [
             _answer(fallback=FallbackMode.NONE, query_text="A?", chunks=a_chunks),

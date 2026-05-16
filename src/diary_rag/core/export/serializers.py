@@ -22,7 +22,7 @@ SCHEMA_VERSION = 1
 def _record_dict(source: SourceMessage) -> dict[str, object]:
     return {
         "source_message_id": source.source_message_id,
-        "family_id": source.family_id,
+        "community_id": source.community_id,
         "author_user_id": source.author_user_id,
         "external_chat_id": source.external_chat_id,
         "external_user_id": source.external_user_id,
@@ -37,7 +37,7 @@ def _record_dict(source: SourceMessage) -> dict[str, object]:
 def _envelope_dict(
     *,
     format_name: str,
-    family_id: str,
+    community_id: str,
     requester_user_id: str,
     generated_at: datetime,
     record_count: int,
@@ -46,7 +46,7 @@ def _envelope_dict(
         "format": format_name,
         "schema_version": SCHEMA_VERSION,
         "scope": {
-            "family_id": family_id,
+            "community_id": community_id,
             "requester_user_id": requester_user_id,
         },
         "generated_at": generated_at.isoformat(),
@@ -57,7 +57,7 @@ def _envelope_dict(
 def serialize_json(
     messages: Iterable[SourceMessage],
     *,
-    family_id: str,
+    community_id: str,
     requester_user_id: str,
     generated_at: datetime,
 ) -> bytes:
@@ -65,7 +65,7 @@ def serialize_json(
     records = [_record_dict(m) for m in messages]
     envelope = _envelope_dict(
         format_name="json",
-        family_id=family_id,
+        community_id=community_id,
         requester_user_id=requester_user_id,
         generated_at=generated_at,
         record_count=len(records),
@@ -103,7 +103,7 @@ def _txt_block(source: SourceMessage) -> str:
 def serialize_txt(
     messages: Iterable[SourceMessage],
     *,
-    family_id: str,
+    community_id: str,
     requester_user_id: str,
     generated_at: datetime,
 ) -> bytes:
@@ -113,7 +113,7 @@ def serialize_txt(
         "# raw export",
         "# format: txt",
         f"# schema_version: {SCHEMA_VERSION}",
-        f"# family_id: {family_id}",
+        f"# community_id: {community_id}",
         f"# requester_user_id: {requester_user_id}",
         f"# generated_at: {generated_at.isoformat()}",
         f"# record_count: {len(records)}",

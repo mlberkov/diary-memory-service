@@ -48,7 +48,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS source_messages (
     source_message_id   TEXT PRIMARY KEY,
-    family_id           TEXT NOT NULL,
+    community_id           TEXT NOT NULL,
     author_user_id      TEXT NOT NULL,
     external_chat_id    TEXT NOT NULL,
     external_user_id    TEXT NOT NULL,
@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS source_messages (
 CREATE TABLE IF NOT EXISTS notes (
     note_id    TEXT PRIMARY KEY,
     source_message_id TEXT NOT NULL REFERENCES source_messages(source_message_id),
-    family_id         TEXT NOT NULL,
+    community_id         TEXT NOT NULL,
     author_user_id    TEXT NOT NULL,
     note_date        DATE NOT NULL,
     note_text        TEXT NOT NULL,
@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS event_chunks (
     chunk_id          TEXT PRIMARY KEY,
     note_id    TEXT NOT NULL REFERENCES notes(note_id),
     source_message_id TEXT NOT NULL REFERENCES source_messages(source_message_id),
-    family_id         TEXT NOT NULL,
+    community_id         TEXT NOT NULL,
     author_user_id    TEXT NOT NULL,
     note_date        DATE NOT NULL,
     event_index       INTEGER NOT NULL CHECK (event_index >= 0),
@@ -90,8 +90,8 @@ CREATE TABLE IF NOT EXISTS event_chunks (
         (to_tsvector('simple', chunk_text)) STORED
 );
 
-CREATE INDEX IF NOT EXISTS idx_event_chunks_family_id
-    ON event_chunks(family_id);
+CREATE INDEX IF NOT EXISTS idx_event_chunks_community_id
+    ON event_chunks(community_id);
 
 CREATE INDEX IF NOT EXISTS idx_event_chunks_source_message_id
     ON event_chunks(source_message_id);
@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS embedding_records (
     embedding_record_id TEXT PRIMARY KEY,
     chunk_id            TEXT NOT NULL REFERENCES event_chunks(chunk_id),
     source_message_id   TEXT NOT NULL REFERENCES source_messages(source_message_id),
-    family_id           TEXT NOT NULL,
+    community_id           TEXT NOT NULL,
     model_name          TEXT NOT NULL,
     dimension           INTEGER NOT NULL,
     embedding           vector(3072) NOT NULL,
@@ -117,8 +117,8 @@ CREATE INDEX IF NOT EXISTS idx_embedding_records_chunk_id
 CREATE INDEX IF NOT EXISTS idx_embedding_records_source_message_id
     ON embedding_records(source_message_id);
 
-CREATE INDEX IF NOT EXISTS idx_embedding_records_family_id
-    ON embedding_records(family_id);
+CREATE INDEX IF NOT EXISTS idx_embedding_records_community_id
+    ON embedding_records(community_id);
 
 -- Slice 3.5: retrieval-trace persistence.
 -- One queries row per /ask call; zero-or-more retrieval_hits rows per
@@ -132,7 +132,7 @@ CREATE INDEX IF NOT EXISTS idx_embedding_records_family_id
 
 CREATE TABLE IF NOT EXISTS queries (
     query_id     TEXT PRIMARY KEY,
-    family_id    TEXT NOT NULL,
+    community_id    TEXT NOT NULL,
     query_text   TEXT NOT NULL,
     model_name   TEXT NOT NULL,
     fallback     TEXT NOT NULL
@@ -143,7 +143,7 @@ CREATE TABLE IF NOT EXISTS queries (
     created_at   TIMESTAMPTZ NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_queries_family_id ON queries(family_id);
+CREATE INDEX IF NOT EXISTS idx_queries_community_id ON queries(community_id);
 
 CREATE TABLE IF NOT EXISTS retrieval_hits (
     retrieval_hit_id TEXT PRIMARY KEY,

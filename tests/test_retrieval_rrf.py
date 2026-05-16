@@ -16,7 +16,7 @@ def _chunk(cid: str) -> EventChunk:
         chunk_id=cid,
         note_id="e1",
         source_message_id="s1",
-        family_id="fam-A",
+        community_id="fam-A",
         author_user_id="u1",
         note_date=date(2026, 5, 11),
         event_index=0,

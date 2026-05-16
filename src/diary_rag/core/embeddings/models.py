@@ -47,7 +47,7 @@ class EmbeddingRecord:
     embedding_record_id: str
     chunk_id: str
     source_message_id: str
-    family_id: str
+    community_id: str
     model_name: str
     dimension: int
     embedding: list[float]

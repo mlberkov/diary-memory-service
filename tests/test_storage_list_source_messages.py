@@ -14,7 +14,7 @@ from diary_rag.storage.mock import MockDomainStore
 def _source(
     *,
     sid: str,
-    family_id: str = "fam-A",
+    community_id: str = "fam-A",
     msg_id: str,
     raw_text: str = "hello",
     route: RouteKind = RouteKind.NOTE,
@@ -22,9 +22,9 @@ def _source(
 ) -> SourceMessage:
     return SourceMessage(
         source_message_id=sid,
-        family_id=family_id,
+        community_id=community_id,
         author_user_id="user-1",
-        external_chat_id=family_id,
+        external_chat_id=community_id,
         external_user_id="user-1",
         external_message_id=msg_id,
         edit_seq=0,
@@ -37,8 +37,8 @@ def _source(
 def test_mock_list_source_messages_is_family_scoped() -> None:
     store = MockDomainStore()
     now = datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC)
-    store.save_source_message(_source(sid="a", family_id="fam-A", msg_id="1", created_at=now))
-    store.save_source_message(_source(sid="b", family_id="fam-B", msg_id="2", created_at=now))
+    store.save_source_message(_source(sid="a", community_id="fam-A", msg_id="1", created_at=now))
+    store.save_source_message(_source(sid="b", community_id="fam-B", msg_id="2", created_at=now))
 
     rows = store.list_source_messages("fam-A")
     assert [r.source_message_id for r in rows] == ["a"]
@@ -86,7 +86,7 @@ def test_mock_list_source_messages_empty_when_no_rows_for_family() -> None:
     assert store.list_source_messages("fam-A") == []
 
 
-def test_mock_list_source_messages_rejects_empty_family_id() -> None:
+def test_mock_list_source_messages_rejects_empty_community_id() -> None:
     store = MockDomainStore()
     with pytest.raises(ValueError):
         store.list_source_messages("")

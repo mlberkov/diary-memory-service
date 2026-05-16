@@ -55,7 +55,7 @@ class DomainRepository(Protocol):
     def get_source_message(self, source_message_id: str) -> SourceMessage | None: ...
 
     def list_source_messages(
-        self, family_id: str, *, limit: int | None = None
+        self, community_id: str, *, limit: int | None = None
     ) -> list[SourceMessage]:
         """List raw source messages for a family in deterministic order.
 
@@ -66,7 +66,7 @@ class DomainRepository(Protocol):
         ingest-only) raise ``NotImplementedError`` (D-029).
         """
 
-    def list_recent_drafts(self, family_id: str, *, limit: int) -> list[SourceMessage]:
+    def list_recent_drafts(self, community_id: str, *, limit: int) -> list[SourceMessage]:
         """Return the most recent draft source messages for a family.
 
         Filter: ``detected_route == RouteKind.DRAFT``. Order:

@@ -28,7 +28,7 @@ def _chunk(chunk_id: str, *, text: str = "event", event_index: int = 0) -> Event
         chunk_id=chunk_id,
         note_id=f"note-{chunk_id}",
         source_message_id=f"src-{chunk_id}",
-        family_id="fam-A",
+        community_id="fam-A",
         author_user_id="user-1",
         note_date=date(2026, 5, 9),
         event_index=event_index,
@@ -48,7 +48,7 @@ def _query(
 ) -> Query:
     return Query(
         query_id=query_id,
-        family_id="fam-A",
+        community_id="fam-A",
         query_text=query_text,
         model_name=model_name,
         fallback=fallback,

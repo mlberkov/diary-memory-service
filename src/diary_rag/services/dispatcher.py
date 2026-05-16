@@ -246,7 +246,7 @@ class Dispatcher:
                 answer = self._query.answer(message)
             except NotImplementedError as exc:
                 log.warning(
-                    "retrieval.unavailable reason=%s family_id=%s",
+                    "retrieval.unavailable reason=%s community_id=%s",
                     exc,
                     message.external_chat_id,
                 )
@@ -321,8 +321,8 @@ class Dispatcher:
 
         max_limit = self._settings.drafts_max_limit
         effective_limit = min(requested, max_limit)
-        family_id = message.external_chat_id
-        drafts = self._diary.list_recent_drafts(family_id, limit=effective_limit)
+        community_id = message.external_chat_id
+        drafts = self._diary.list_recent_drafts(community_id, limit=effective_limit)
         returned = len(drafts)
 
         if returned == 0:
@@ -375,9 +375,9 @@ class Dispatcher:
                     "route_source": message.route_source,
                 },
             )
-        family_id = message.external_chat_id
+        community_id = message.external_chat_id
         payload = self._export.export(
-            family_id=family_id,
+            community_id=community_id,
             requester_user_id=message.external_user_id,
             format=fmt,
         )
@@ -394,7 +394,7 @@ class Dispatcher:
             },
         )
 
-    def _update_latest_sources(self, family_id: str, answer: AnswerResult) -> None:
+    def _update_latest_sources(self, community_id: str, answer: AnswerResult) -> None:
         """Cache the chunks retrieval selected for the family's last /ask (D-036).
 
         Every ``/ask`` dispatch writes the cache (no skip path). Non-empty
@@ -405,9 +405,9 @@ class Dispatcher:
         ``/ask`` invalidates this cache.
         """
         if answer.context is not None and answer.context.ordered_chunks:
-            self._latest_sources[family_id] = answer.context.ordered_chunks
+            self._latest_sources[community_id] = answer.context.ordered_chunks
         else:
-            self._latest_sources.pop(family_id, None)
+            self._latest_sources.pop(community_id, None)
 
     def _dispatch_sources(self, message: InboundMessage) -> DispatchResult:
         """Serve ``/sources`` by reading the latest-sources cache (D-036).
@@ -417,8 +417,8 @@ class Dispatcher:
         to the LLM, rendered with their full ``chunk_text``. Not
         citations, not fine-grained attribution.
         """
-        family_id = message.external_chat_id
-        chunks = self._latest_sources.get(family_id)
+        community_id = message.external_chat_id
+        chunks = self._latest_sources.get(community_id)
         if not chunks:
             return DispatchResult(
                 reply_text=_REPLY_SOURCES_NONE,

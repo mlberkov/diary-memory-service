@@ -64,7 +64,7 @@ class SourceMessage:
     """
 
     source_message_id: str
-    family_id: str
+    community_id: str
     author_user_id: str
     external_chat_id: str
     external_user_id: str
@@ -81,7 +81,7 @@ class Note:
 
     note_id: str
     source_message_id: str
-    family_id: str
+    community_id: str
     author_user_id: str
     note_date: date
     note_text: str
@@ -102,7 +102,7 @@ class EventChunk:
     chunk_id: str
     note_id: str
     source_message_id: str
-    family_id: str
+    community_id: str
     author_user_id: str
     note_date: date
     event_index: int
@@ -227,7 +227,7 @@ class Query:
     """
 
     query_id: str
-    family_id: str
+    community_id: str
     query_text: str
     model_name: str
     fallback: FallbackMode

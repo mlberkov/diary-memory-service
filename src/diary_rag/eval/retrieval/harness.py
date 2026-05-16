@@ -50,7 +50,7 @@ class GoldQuery:
     each handle to a live uuid4 ``chunk_id`` after ingest.
     """
 
-    family_id: str
+    community_id: str
     query: str
     expected_handles: tuple[str, ...]
 
@@ -70,7 +70,7 @@ class CorpusMessage:
     """
 
     external_message_id: str
-    family_id: str
+    community_id: str
     author_user_id: str
     raw_text: str
 
@@ -103,7 +103,7 @@ class PerQueryResult:
     """
 
     query: str
-    family_id: str
+    community_id: str
     expected_chunk_ids: tuple[str, ...]
     dense_top_k_ids: tuple[str, ...]
     sparse_top_k_ids: tuple[str, ...]
@@ -132,15 +132,17 @@ class HarnessReport:
 def load_gold(path: Path) -> GoldSet:
     """Read ``gold.json``. Schema: see ``eval/retrieval/gold.json``."""
     data = json.loads(path.read_text(encoding="utf-8"))
-    default_family = data.get("family_id_default", "")
+    default_community = data.get("community_id_default", "")
     queries: list[GoldQuery] = []
     for raw in data["queries"]:
-        family_id = raw.get("family_id", default_family)
-        if not family_id:
-            raise ValueError(f"gold query missing family_id (no family_id_default either): {raw!r}")
+        community_id = raw.get("community_id", default_community)
+        if not community_id:
+            raise ValueError(
+                f"gold query missing community_id (no community_id_default either): {raw!r}"
+            )
         queries.append(
             GoldQuery(
-                family_id=family_id,
+                community_id=community_id,
                 query=raw["query"],
                 expected_handles=tuple(raw.get("expected_handles", [])),
             )
@@ -159,7 +161,7 @@ def load_corpus(path: Path) -> tuple[CorpusMessage, ...]:
         messages.append(
             CorpusMessage(
                 external_message_id=obj["external_message_id"],
-                family_id=obj["family_id"],
+                community_id=obj["community_id"],
                 author_user_id=obj["author_user_id"],
                 raw_text=obj["raw_text"],
             )
@@ -229,7 +231,7 @@ def ingest_fixture_corpus(
     for cm in corpus:
         inbound = InboundMessage(
             external_message_id=cm.external_message_id,
-            external_chat_id=cm.family_id,
+            external_chat_id=cm.community_id,
             external_user_id=cm.author_user_id,
             text=cm.raw_text,
             payload=cm.raw_text,
@@ -349,9 +351,9 @@ def run_harness(
         query_embedding = query_embedding_lookup(gq.query)
 
         dense_hits = store.dense_candidates(
-            gq.family_id, query_embedding, embedding_model_name, candidate_k
+            gq.community_id, query_embedding, embedding_model_name, candidate_k
         )
-        sparse_hits = store.sparse_candidates(gq.family_id, gq.query, candidate_k)
+        sparse_hits = store.sparse_candidates(gq.community_id, gq.query, candidate_k)
         fused = reciprocal_rank_fusion([dense_hits, sparse_hits], top_k=candidate_k)
 
         dense_ids = tuple(c.chunk_id for c in dense_hits)
@@ -369,7 +371,7 @@ def run_harness(
         per_query_rows.append(
             PerQueryResult(
                 query=gq.query,
-                family_id=gq.family_id,
+                community_id=gq.community_id,
                 expected_chunk_ids=tuple(expected_ids),
                 dense_top_k_ids=dense_ids,
                 sparse_top_k_ids=sparse_ids,

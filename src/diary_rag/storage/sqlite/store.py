@@ -50,7 +50,7 @@ from diary_rag.core.routing import RouteKind
 _DDL = """
 CREATE TABLE IF NOT EXISTS source_messages (
     source_message_id   TEXT PRIMARY KEY,
-    family_id           TEXT NOT NULL,
+    community_id           TEXT NOT NULL,
     author_user_id      TEXT NOT NULL,
     external_chat_id    TEXT NOT NULL,
     external_user_id    TEXT NOT NULL,
@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS source_messages (
 CREATE TABLE IF NOT EXISTS notes (
     note_id    TEXT PRIMARY KEY,
     source_message_id TEXT NOT NULL REFERENCES source_messages(source_message_id),
-    family_id         TEXT NOT NULL,
+    community_id         TEXT NOT NULL,
     author_user_id    TEXT NOT NULL,
     note_date        TEXT NOT NULL,
     note_text        TEXT NOT NULL,
@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS event_chunks (
     chunk_id          TEXT PRIMARY KEY,
     note_id    TEXT NOT NULL REFERENCES notes(note_id),
     source_message_id TEXT NOT NULL REFERENCES source_messages(source_message_id),
-    family_id         TEXT NOT NULL,
+    community_id         TEXT NOT NULL,
     author_user_id    TEXT NOT NULL,
     note_date        TEXT NOT NULL,
     event_index       INTEGER NOT NULL CHECK (event_index >= 0),
@@ -89,8 +89,8 @@ CREATE TABLE IF NOT EXISTS event_chunks (
         CHECK (embedding_status IN ('pending','ready','failed'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_event_chunks_family_id
-    ON event_chunks(family_id);
+CREATE INDEX IF NOT EXISTS idx_event_chunks_community_id
+    ON event_chunks(community_id);
 
 CREATE INDEX IF NOT EXISTS idx_event_chunks_source_message_id
     ON event_chunks(source_message_id);
@@ -99,7 +99,7 @@ CREATE TABLE IF NOT EXISTS embedding_records (
     embedding_record_id TEXT PRIMARY KEY,
     chunk_id            TEXT NOT NULL REFERENCES event_chunks(chunk_id),
     source_message_id   TEXT NOT NULL REFERENCES source_messages(source_message_id),
-    family_id           TEXT NOT NULL,
+    community_id           TEXT NOT NULL,
     model_name          TEXT NOT NULL,
     dimension           INTEGER NOT NULL,
     embedding           BLOB NOT NULL,
@@ -115,7 +115,7 @@ CREATE INDEX IF NOT EXISTS idx_embedding_records_source_message_id
 
 CREATE TABLE IF NOT EXISTS queries (
     query_id     TEXT PRIMARY KEY,
-    family_id    TEXT NOT NULL,
+    community_id    TEXT NOT NULL,
     query_text   TEXT NOT NULL,
     model_name   TEXT NOT NULL,
     fallback     TEXT NOT NULL
@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS queries (
     created_at   TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_queries_family_id ON queries(family_id);
+CREATE INDEX IF NOT EXISTS idx_queries_community_id ON queries(community_id);
 
 CREATE TABLE IF NOT EXISTS retrieval_hits (
     retrieval_hit_id TEXT PRIMARY KEY,
@@ -196,13 +196,13 @@ class SqliteDomainStore:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO source_messages "
-                "(source_message_id, family_id, author_user_id, external_chat_id, "
+                "(source_message_id, community_id, author_user_id, external_chat_id, "
                 " external_user_id, external_message_id, edit_seq, raw_text, "
                 " detected_route, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     source.source_message_id,
-                    source.family_id,
+                    source.community_id,
                     source.author_user_id,
                     source.external_chat_id,
                     source.external_user_id,
@@ -219,13 +219,13 @@ class SqliteDomainStore:
         with self._connect() as conn:
             cur = conn.execute(
                 "INSERT OR IGNORE INTO source_messages "
-                "(source_message_id, family_id, author_user_id, external_chat_id, "
+                "(source_message_id, community_id, author_user_id, external_chat_id, "
                 " external_user_id, external_message_id, edit_seq, raw_text, "
                 " detected_route, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     source.source_message_id,
-                    source.family_id,
+                    source.community_id,
                     source.author_user_id,
                     source.external_chat_id,
                     source.external_user_id,
@@ -241,7 +241,7 @@ class SqliteDomainStore:
                 conn.commit()
                 return source, False
             row = conn.execute(
-                "SELECT source_message_id, family_id, author_user_id, "
+                "SELECT source_message_id, community_id, author_user_id, "
                 "       external_chat_id, external_user_id, external_message_id, "
                 "       edit_seq, raw_text, detected_route, created_at "
                 "  FROM source_messages "
@@ -258,13 +258,13 @@ class SqliteDomainStore:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO notes "
-                "(note_id, source_message_id, family_id, author_user_id, "
+                "(note_id, source_message_id, community_id, author_user_id, "
                 " note_date, note_text, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     note.note_id,
                     note.source_message_id,
-                    note.family_id,
+                    note.community_id,
                     note.author_user_id,
                     note.note_date.isoformat(),
                     note.note_text,
@@ -279,7 +279,7 @@ class SqliteDomainStore:
         with self._connect() as conn:
             conn.executemany(
                 "INSERT INTO event_chunks "
-                "(chunk_id, note_id, source_message_id, family_id, "
+                "(chunk_id, note_id, source_message_id, community_id, "
                 " author_user_id, note_date, event_index, chunk_text, created_at, "
                 " embedding_status) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -288,7 +288,7 @@ class SqliteDomainStore:
                         c.chunk_id,
                         c.note_id,
                         c.source_message_id,
-                        c.family_id,
+                        c.community_id,
                         c.author_user_id,
                         c.note_date.isoformat(),
                         c.event_index,
@@ -304,7 +304,7 @@ class SqliteDomainStore:
     def get_source_message(self, source_message_id: str) -> SourceMessage | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT source_message_id, family_id, author_user_id, "
+                "SELECT source_message_id, community_id, author_user_id, "
                 "       external_chat_id, external_user_id, external_message_id, "
                 "       edit_seq, raw_text, detected_route, created_at "
                 "  FROM source_messages "
@@ -316,14 +316,14 @@ class SqliteDomainStore:
         return _row_to_source(row)
 
     def list_source_messages(
-        self, family_id: str, *, limit: int | None = None
+        self, community_id: str, *, limit: int | None = None
     ) -> list[SourceMessage]:
         raise NotImplementedError(
             "sqlite raw export not supported; "
             "postgres is the canonical durable backend (D-022, D-029)"
         )
 
-    def list_recent_drafts(self, family_id: str, *, limit: int) -> list[SourceMessage]:
+    def list_recent_drafts(self, community_id: str, *, limit: int) -> list[SourceMessage]:
         raise NotImplementedError(
             "sqlite drafts recall not supported; "
             "postgres is the canonical durable backend (D-022, D-030)"
@@ -332,7 +332,7 @@ class SqliteDomainStore:
     def get_note_by_source_message_id(self, source_message_id: str) -> Note | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT note_id, source_message_id, family_id, author_user_id, "
+                "SELECT note_id, source_message_id, community_id, author_user_id, "
                 "       note_date, note_text, created_at "
                 "  FROM notes "
                 " WHERE source_message_id = ? "
@@ -344,7 +344,7 @@ class SqliteDomainStore:
         return Note(
             note_id=row["note_id"],
             source_message_id=row["source_message_id"],
-            family_id=row["family_id"],
+            community_id=row["community_id"],
             author_user_id=row["author_user_id"],
             note_date=date.fromisoformat(row["note_date"]),
             note_text=row["note_text"],
@@ -364,7 +364,7 @@ class SqliteDomainStore:
     def get_event_chunk(self, chunk_id: str) -> EventChunk | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT chunk_id, note_id, source_message_id, family_id, "
+                "SELECT chunk_id, note_id, source_message_id, community_id, "
                 "       author_user_id, note_date, event_index, chunk_text, "
                 "       created_at, embedding_status "
                 "  FROM event_chunks "
@@ -377,7 +377,7 @@ class SqliteDomainStore:
 
     def dense_candidates(
         self,
-        family_id: str,
+        community_id: str,
         query_embedding: list[float],
         model_name: str,
         limit: int,
@@ -391,7 +391,7 @@ class SqliteDomainStore:
 
     def sparse_candidates(
         self,
-        family_id: str,
+        community_id: str,
         query_text: str,
         limit: int,
         *,
@@ -410,7 +410,7 @@ class SqliteDomainStore:
                 r.embedding_record_id,
                 r.chunk_id,
                 r.source_message_id,
-                r.family_id,
+                r.community_id,
                 r.model_name,
                 r.dimension,
                 _encode_vector(r.embedding),
@@ -421,7 +421,7 @@ class SqliteDomainStore:
         with self._connect() as conn:
             conn.executemany(
                 "INSERT INTO embedding_records "
-                "(embedding_record_id, chunk_id, source_message_id, family_id, "
+                "(embedding_record_id, chunk_id, source_message_id, community_id, "
                 " model_name, dimension, embedding, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 params,
@@ -452,11 +452,11 @@ class SqliteDomainStore:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO queries "
-                "(query_id, family_id, query_text, model_name, fallback, created_at) "
+                "(query_id, community_id, query_text, model_name, fallback, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     query.query_id,
-                    query.family_id,
+                    query.community_id,
                     query.query_text,
                     query.model_name,
                     query.fallback.value,
@@ -494,7 +494,7 @@ class SqliteDomainStore:
     def get_query(self, query_id: str) -> Query | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT query_id, family_id, query_text, model_name, fallback, "
+                "SELECT query_id, community_id, query_text, model_name, fallback, "
                 "       created_at "
                 "  FROM queries "
                 " WHERE query_id = ?",
@@ -504,7 +504,7 @@ class SqliteDomainStore:
             return None
         return Query(
             query_id=row["query_id"],
-            family_id=row["family_id"],
+            community_id=row["community_id"],
             query_text=row["query_text"],
             model_name=row["model_name"],
             fallback=FallbackMode(row["fallback"]),
@@ -587,7 +587,7 @@ class SqliteDomainStore:
 def _row_to_source(row: sqlite3.Row) -> SourceMessage:
     return SourceMessage(
         source_message_id=row["source_message_id"],
-        family_id=row["family_id"],
+        community_id=row["community_id"],
         author_user_id=row["author_user_id"],
         external_chat_id=row["external_chat_id"],
         external_user_id=row["external_user_id"],
@@ -604,7 +604,7 @@ def _row_to_chunk(row: sqlite3.Row) -> EventChunk:
         chunk_id=row["chunk_id"],
         note_id=row["note_id"],
         source_message_id=row["source_message_id"],
-        family_id=row["family_id"],
+        community_id=row["community_id"],
         author_user_id=row["author_user_id"],
         note_date=date.fromisoformat(row["note_date"]),
         event_index=row["event_index"],

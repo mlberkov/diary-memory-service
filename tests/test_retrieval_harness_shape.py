@@ -116,7 +116,7 @@ def test_per_query_shape_includes_diagnostic_rank_fields() -> None:
     for row in report.per_query:
         assert isinstance(row, PerQueryResult)
         assert isinstance(row.query, str)
-        assert isinstance(row.family_id, str) and row.family_id
+        assert isinstance(row.community_id, str) and row.community_id
         assert isinstance(row.expected_chunk_ids, tuple)
         assert isinstance(row.dense_top_k_ids, tuple)
         assert isinstance(row.sparse_top_k_ids, tuple)
@@ -182,7 +182,7 @@ def test_ingest_fixture_corpus_resolves_handles() -> None:
     corpus = (
         CorpusMessage(
             external_message_id="t-1",
-            family_id="fam-x",
+            community_id="fam-x",
             author_user_id="u-1",
             raw_text="2026-05-15\n- first event line\n- second event line",
         ),
@@ -211,7 +211,7 @@ def test_run_harness_raises_when_handle_unknown() -> None:
     corpus = (
         CorpusMessage(
             external_message_id="t-1",
-            family_id="fam-x",
+            community_id="fam-x",
             author_user_id="u-1",
             raw_text="2026-05-15\n- single event",
         ),
@@ -219,7 +219,7 @@ def test_run_harness_raises_when_handle_unknown() -> None:
     chunks_for_source = _build_chunks_for_source(store)
     handles = ingest_fixture_corpus(store, chunks_for_source, embedding_client, corpus)
     gold = GoldSet(
-        queries=(GoldQuery(family_id="fam-x", query="anything", expected_handles=("t-9#7",)),)
+        queries=(GoldQuery(community_id="fam-x", query="anything", expected_handles=("t-9#7",)),)
     )
 
     def lookup(query: str) -> list[float]:
@@ -272,7 +272,7 @@ def test_domain_service_drives_corpus_ingestion() -> None:
     for cm in corpus:
         inbound = InboundMessage(
             external_message_id=cm.external_message_id,
-            external_chat_id=cm.family_id,
+            external_chat_id=cm.community_id,
             external_user_id=cm.author_user_id,
             text=cm.raw_text,
             payload=cm.raw_text,

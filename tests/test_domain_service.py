@@ -70,7 +70,7 @@ def test_ingest_preserves_authorship_on_every_chunk() -> None:
     service.ingest(_note_message("2026-05-09\nA\nB\nC", chat="42", user="alice"))
 
     assert {c.author_user_id for c in _all_chunks(store)} == {"alice"}
-    assert {c.family_id for c in _all_chunks(store)} == {"42"}
+    assert {c.community_id for c in _all_chunks(store)} == {"42"}
 
 
 def test_ingest_records_route_on_source_message() -> None:

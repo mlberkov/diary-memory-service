@@ -53,7 +53,7 @@ from diary_rag.storage.repository import DomainRepository
 log = get_logger(__name__)
 
 
-def _family_id_for(message: InboundMessage) -> str:
+def _community_id_for(message: InboundMessage) -> str:
     """Per-chat surrogate until explicit family bootstrap exists (A-14)."""
     return message.external_chat_id
 
@@ -75,13 +75,13 @@ class DomainService:
 
     def ingest(self, message: InboundMessage) -> IngestResult:
         now = datetime.now(tz=UTC)
-        family_id = _family_id_for(message)
+        community_id = _community_id_for(message)
         author_user_id = message.external_user_id
         candidate_id = str(uuid4())
 
         candidate = SourceMessage(
             source_message_id=candidate_id,
-            family_id=family_id,
+            community_id=community_id,
             author_user_id=author_user_id,
             external_chat_id=message.external_chat_id,
             external_user_id=message.external_user_id,
@@ -99,9 +99,9 @@ class DomainService:
 
         if message.route is RouteKind.DRAFT:
             log.info(
-                "draft.persisted source_message_id=%s family_id=%s effective_path=fresh",
+                "draft.persisted source_message_id=%s community_id=%s effective_path=fresh",
                 source_message_id,
-                family_id,
+                community_id,
             )
             return IngestResult(
                 fallback=FallbackMode.NONE,
@@ -120,7 +120,7 @@ class DomainService:
         note = Note(
             note_id=note_id,
             source_message_id=source_message_id,
-            family_id=family_id,
+            community_id=community_id,
             author_user_id=author_user_id,
             note_date=parsed.note_date,
             note_text="\n".join(parsed.events),
@@ -133,7 +133,7 @@ class DomainService:
                 chunk_id=str(uuid4()),
                 note_id=note_id,
                 source_message_id=source_message_id,
-                family_id=family_id,
+                community_id=community_id,
                 author_user_id=author_user_id,
                 note_date=parsed.note_date,
                 event_index=i,
@@ -145,7 +145,7 @@ class DomainService:
         self._store.save_event_chunks(chunks)
 
         if chunks and self._embedding_client is not None:
-            self._embed_chunks(chunks, source_message_id, family_id, now)
+            self._embed_chunks(chunks, source_message_id, community_id, now)
 
         return IngestResult(
             fallback=FallbackMode.NONE,
@@ -158,7 +158,7 @@ class DomainService:
         self,
         chunks: list[EventChunk],
         source_message_id: str,
-        family_id: str,
+        community_id: str,
         now: datetime,
     ) -> None:
         client = self._embedding_client
@@ -182,7 +182,7 @@ class DomainService:
                 embedding_record_id=str(uuid4()),
                 chunk_id=chunk.chunk_id,
                 source_message_id=source_message_id,
-                family_id=family_id,
+                community_id=community_id,
                 model_name=client.model_name,
                 dimension=client.dimension,
                 embedding=vec,
@@ -201,7 +201,7 @@ class DomainService:
             client.dimension,
         )
 
-    def list_recent_drafts(self, family_id: str, *, limit: int) -> list[SourceMessage]:
+    def list_recent_drafts(self, community_id: str, *, limit: int) -> list[SourceMessage]:
         """Return the most recent ``RouteKind.DRAFT`` source messages for a family.
 
         Family-scoped, ordered most-recent-first, capped at ``limit``.
@@ -210,10 +210,10 @@ class DomainService:
         """
         if limit < 1:
             raise ValueError("limit must be >= 1")
-        drafts = self._store.list_recent_drafts(family_id, limit=limit)
+        drafts = self._store.list_recent_drafts(community_id, limit=limit)
         log.info(
-            "drafts.recalled family_id=%s requested=%d returned=%d",
-            family_id,
+            "drafts.recalled community_id=%s requested=%d returned=%d",
+            community_id,
             limit,
             len(drafts),
         )
@@ -223,9 +223,9 @@ class DomainService:
         """Rebuild the original ``IngestResult`` from persisted state (R-2)."""
         if source.detected_route is RouteKind.DRAFT:
             log.info(
-                "draft.persisted source_message_id=%s family_id=%s effective_path=replay",
+                "draft.persisted source_message_id=%s community_id=%s effective_path=replay",
                 source.source_message_id,
-                source.family_id,
+                source.community_id,
             )
             return IngestResult(
                 fallback=FallbackMode.NONE,

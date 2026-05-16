@@ -16,11 +16,11 @@ from diary_rag.core.domain.models import AnswerContext
 PROMPT_VERSION: Final[str] = "v1"
 
 
-class CrossFamilyContextError(ValueError):
-    """Raised when an ``AnswerContext`` mixes chunks from more than one family.
+class CrossCommunityContextError(ValueError):
+    """Raised when an ``AnswerContext`` mixes chunks from more than one community.
 
     Enforces R-8 in code: prompt assembly never mixes chunks from more
-    than one ``family_id``.
+    than one ``community_id``.
     """
 
 
@@ -58,14 +58,14 @@ _NO_CHUNKS_PLACEHOLDER: Final[str] = "(no diary chunks were retrieved for this q
 def build_answer_prompt(context: AnswerContext) -> AnswerPrompt:
     """Render the channel-neutral prompt for one ``AnswerContext``.
 
-    Asserts R-8 (single ``family_id`` across ``ordered_chunks``) and
-    raises :class:`CrossFamilyContextError` on violation. Output is
+    Asserts R-8 (single ``community_id`` across ``ordered_chunks``) and
+    raises :class:`CrossCommunityContextError` on violation. Output is
     fully deterministic given input.
     """
-    families = {chunk.family_id for chunk in context.ordered_chunks}
-    if len(families) > 1:
-        raise CrossFamilyContextError(
-            "AnswerContext.ordered_chunks span multiple families: " f"{sorted(families)}"
+    communities = {chunk.community_id for chunk in context.ordered_chunks}
+    if len(communities) > 1:
+        raise CrossCommunityContextError(
+            "AnswerContext.ordered_chunks span multiple communities: " f"{sorted(communities)}"
         )
 
     cited_chunk_ids = tuple(chunk.chunk_id for chunk in context.ordered_chunks)

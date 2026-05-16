@@ -32,7 +32,7 @@ class SearchRepository(Protocol):
 
     def dense_candidates(
         self,
-        family_id: str,
+        community_id: str,
         query_embedding: list[float],
         model_name: str,
         limit: int,
@@ -55,7 +55,7 @@ class SearchRepository(Protocol):
 
     def sparse_candidates(
         self,
-        family_id: str,
+        community_id: str,
         query_text: str,
         limit: int,
         *,

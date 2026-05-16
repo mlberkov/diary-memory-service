@@ -8,7 +8,7 @@ date-line parser used by the ingestion path.
 from diary_rag.core.domain.answer_prompt import (
     PROMPT_VERSION,
     AnswerPrompt,
-    CrossFamilyContextError,
+    CrossCommunityContextError,
     build_answer_prompt,
 )
 from diary_rag.core.domain.answer_schema import (
@@ -44,7 +44,7 @@ __all__ = [
     "AnswerResult",
     "AnswerSchemaMismatchError",
     "AnswerTrace",
-    "CrossFamilyContextError",
+    "CrossCommunityContextError",
     "DateRange",
     "Note",
     "Evidence",

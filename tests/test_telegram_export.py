@@ -115,7 +115,7 @@ def _post_or_seed(store: MockDomainStore) -> None:
     store.save_source_message(
         SourceMessage(
             source_message_id="seed-1",
-            family_id="42",
+            community_id="42",
             author_user_id="7",
             external_chat_id="42",
             external_user_id="7",

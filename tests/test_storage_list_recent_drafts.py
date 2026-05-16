@@ -20,7 +20,7 @@ PG_DSN = os.environ.get("DIARY_RAG_PG_TEST_DSN")
 def _source(
     *,
     sid: str,
-    family_id: str = "fam-A",
+    community_id: str = "fam-A",
     msg_id: str,
     raw_text: str = "draft body",
     route: RouteKind = RouteKind.DRAFT,
@@ -28,9 +28,9 @@ def _source(
 ) -> SourceMessage:
     return SourceMessage(
         source_message_id=sid,
-        family_id=family_id,
+        community_id=community_id,
         author_user_id="user-1",
-        external_chat_id=family_id,
+        external_chat_id=community_id,
         external_user_id="user-1",
         external_message_id=msg_id,
         edit_seq=0,
@@ -58,8 +58,8 @@ def test_mock_list_recent_drafts_returns_drafts_only() -> None:
 def test_mock_list_recent_drafts_is_family_scoped() -> None:
     store = MockDomainStore()
     base = datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC)
-    store.save_source_message(_source(sid="a", family_id="fam-A", msg_id="1", created_at=base))
-    store.save_source_message(_source(sid="b", family_id="fam-B", msg_id="2", created_at=base))
+    store.save_source_message(_source(sid="a", community_id="fam-A", msg_id="1", created_at=base))
+    store.save_source_message(_source(sid="b", community_id="fam-B", msg_id="2", created_at=base))
 
     rows = store.list_recent_drafts("fam-A", limit=10)
     assert [r.source_message_id for r in rows] == ["a"]
@@ -93,7 +93,7 @@ def test_mock_list_recent_drafts_empty_when_no_drafts() -> None:
     assert store.list_recent_drafts("fam-A", limit=10) == []
 
 
-def test_mock_list_recent_drafts_rejects_empty_family_id() -> None:
+def test_mock_list_recent_drafts_rejects_empty_community_id() -> None:
     store = MockDomainStore()
     with pytest.raises(ValueError):
         store.list_recent_drafts("", limit=10)
@@ -182,7 +182,7 @@ def test_pg_list_recent_drafts_respects_family_scope_and_limit(
         pg_store.save_source_message(
             _source(
                 sid=f"a{i}",
-                family_id="fam-A",
+                community_id="fam-A",
                 msg_id=f"a{i}",
                 route=RouteKind.DRAFT,
                 created_at=base.replace(minute=i),
@@ -191,7 +191,7 @@ def test_pg_list_recent_drafts_respects_family_scope_and_limit(
     pg_store.save_source_message(
         _source(
             sid="other",
-            family_id="fam-B",
+            community_id="fam-B",
             msg_id="z",
             route=RouteKind.DRAFT,
             created_at=base.replace(minute=10),
@@ -200,4 +200,4 @@ def test_pg_list_recent_drafts_respects_family_scope_and_limit(
 
     rows = pg_store.list_recent_drafts("fam-A", limit=2)
     assert len(rows) == 2
-    assert all(r.family_id == "fam-A" for r in rows)
+    assert all(r.community_id == "fam-A" for r in rows)

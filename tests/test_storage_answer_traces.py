@@ -37,7 +37,7 @@ def _now() -> datetime:
 def _query(*, qid: str = "q1", fallback: FallbackMode = FallbackMode.NONE) -> Query:
     return Query(
         query_id=qid,
-        family_id="fam-A",
+        community_id="fam-A",
         query_text="book",
         model_name="mock",
         fallback=fallback,
@@ -72,7 +72,7 @@ def _trace(
 def _source(sid: str = "s1") -> SourceMessage:
     return SourceMessage(
         source_message_id=sid,
-        family_id="fam-A",
+        community_id="fam-A",
         author_user_id="u1",
         external_chat_id="fam-A",
         external_user_id="u1",
@@ -88,7 +88,7 @@ def _note(eid: str = "e1", sid: str = "s1") -> Note:
     return Note(
         note_id=eid,
         source_message_id=sid,
-        family_id="fam-A",
+        community_id="fam-A",
         author_user_id="u1",
         note_date=date(2026, 5, 9),
         note_text="Walked the dog",
@@ -101,7 +101,7 @@ def _chunk(cid: str = "c1", eid: str = "e1", sid: str = "s1", idx: int = 0) -> E
         chunk_id=cid,
         note_id=eid,
         source_message_id=sid,
-        family_id="fam-A",
+        community_id="fam-A",
         author_user_id="u1",
         note_date=date(2026, 5, 9),
         event_index=idx,

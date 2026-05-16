@@ -106,11 +106,11 @@ class MockDomainStore:
         return self._sources.get(source_message_id)
 
     def list_source_messages(
-        self, family_id: str, *, limit: int | None = None
+        self, community_id: str, *, limit: int | None = None
     ) -> list[SourceMessage]:
-        if not family_id:
-            raise ValueError("family_id is required (Runtime invariant R-3)")
-        rows = [s for s in self._sources.values() if s.family_id == family_id]
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        rows = [s for s in self._sources.values() if s.community_id == community_id]
         rows.sort(key=lambda s: (s.created_at, s.source_message_id))
         if limit is None:
             return rows
@@ -118,15 +118,15 @@ class MockDomainStore:
             raise ValueError("limit must be non-negative")
         return rows[:limit]
 
-    def list_recent_drafts(self, family_id: str, *, limit: int) -> list[SourceMessage]:
-        if not family_id:
-            raise ValueError("family_id is required (Runtime invariant R-3)")
+    def list_recent_drafts(self, community_id: str, *, limit: int) -> list[SourceMessage]:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
         if limit < 1:
             raise ValueError("limit must be >= 1")
         rows = [
             s
             for s in self._sources.values()
-            if s.family_id == family_id and s.detected_route is RouteKind.DRAFT
+            if s.community_id == community_id and s.detected_route is RouteKind.DRAFT
         ]
         rows.sort(key=lambda s: (s.created_at, s.source_message_id), reverse=True)
         return rows[:limit]
@@ -147,15 +147,15 @@ class MockDomainStore:
 
     def dense_candidates(
         self,
-        family_id: str,
+        community_id: str,
         query_embedding: list[float],
         model_name: str,
         limit: int,
         *,
         date_range: DateRange | None = None,
     ) -> list[EventChunk]:
-        if not family_id:
-            raise ValueError("family_id is required (Runtime invariant R-3)")
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
         if limit <= 0:
             return []
 
@@ -168,7 +168,7 @@ class MockDomainStore:
         # while refusing to fabricate relevance from random vectors.
         ranked: list[tuple[float, int, EventChunk]] = []
         for index, chunk in enumerate(self._chunks.values()):
-            if chunk.family_id != family_id:
+            if chunk.community_id != community_id:
                 continue
             if not _chunk_in_date_range(chunk, date_range):
                 continue
@@ -186,14 +186,14 @@ class MockDomainStore:
 
     def sparse_candidates(
         self,
-        family_id: str,
+        community_id: str,
         query_text: str,
         limit: int,
         *,
         date_range: DateRange | None = None,
     ) -> list[EventChunk]:
-        if not family_id:
-            raise ValueError("family_id is required (Runtime invariant R-3)")
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
         if limit <= 0:
             return []
         query_tokens = set(_tokenize(query_text))
@@ -202,7 +202,7 @@ class MockDomainStore:
 
         ranked: list[tuple[int, int, EventChunk]] = []
         for index, chunk in enumerate(self._chunks.values()):
-            if chunk.family_id != family_id:
+            if chunk.community_id != community_id:
                 continue
             if not _chunk_in_date_range(chunk, date_range):
                 continue

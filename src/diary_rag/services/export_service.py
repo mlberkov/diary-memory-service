@@ -22,9 +22,9 @@ from diary_rag.storage.repository import DomainRepository
 log = get_logger(__name__)
 
 
-def _filename(family_id: str, generated_at: datetime, extension: str) -> str:
+def _filename(community_id: str, generated_at: datetime, extension: str) -> str:
     stamp = generated_at.strftime("%Y%m%dT%H%M%SZ")
-    return f"raw_export_{family_id}_{stamp}.{extension}"
+    return f"raw_export_{community_id}_{stamp}.{extension}"
 
 
 class ExportService:
@@ -36,19 +36,19 @@ class ExportService:
     def export(
         self,
         *,
-        family_id: str,
+        community_id: str,
         requester_user_id: str,
         format: ExportFormat,
     ) -> ExportPayload:
-        if not family_id:
-            raise ValueError("family_id is required (Runtime invariant R-3)")
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
         generated_at = datetime.now(tz=UTC)
-        messages = self._store.list_source_messages(family_id)
+        messages = self._store.list_source_messages(community_id)
 
         if format is ExportFormat.JSON:
             content = serialize_json(
                 messages,
-                family_id=family_id,
+                community_id=community_id,
                 requester_user_id=requester_user_id,
                 generated_at=generated_at,
             )
@@ -57,7 +57,7 @@ class ExportService:
         else:
             content = serialize_txt(
                 messages,
-                family_id=family_id,
+                community_id=community_id,
                 requester_user_id=requester_user_id,
                 generated_at=generated_at,
             )
@@ -66,17 +66,17 @@ class ExportService:
 
         payload = ExportPayload(
             content=content,
-            filename=_filename(family_id, generated_at, extension),
+            filename=_filename(community_id, generated_at, extension),
             media_type=media_type,
             format=format,
             record_count=len(messages),
             generated_at=generated_at,
-            family_id=family_id,
+            community_id=community_id,
             requester_user_id=requester_user_id,
         )
         log.info(
-            "export.ok family_id=%s format=%s count=%d bytes=%d",
-            family_id,
+            "export.ok community_id=%s format=%s count=%d bytes=%d",
+            community_id,
             format.value,
             payload.record_count,
             len(content),

@@ -145,8 +145,8 @@ class QueryService:
         constraint. There is no inbound date syntax yet — the Telegram
         webhook passes no ``date_range``.
         """
-        family_id = message.external_chat_id
-        if not family_id:
+        community_id = message.external_chat_id
+        if not community_id:
             raise ValueError("InboundMessage.external_chat_id is required (R-3)")
 
         query_text = _normalize_query(message.payload)
@@ -157,7 +157,7 @@ class QueryService:
         if not query_text:
             return self._finalize(
                 query_id=query_id,
-                family_id=family_id,
+                community_id=community_id,
                 query_text=query_text,
                 model_name=model_name,
                 created_at=created_at,
@@ -184,10 +184,10 @@ class QueryService:
         query_embedding = self._embed.embed([query_text])[0]
 
         dense_hits = self._search.dense_candidates(
-            family_id, query_embedding, model_name, self._candidate_k, date_range=date_range
+            community_id, query_embedding, model_name, self._candidate_k, date_range=date_range
         )
         sparse_hits = self._search.sparse_candidates(
-            family_id, query_text, self._candidate_k, date_range=date_range
+            community_id, query_text, self._candidate_k, date_range=date_range
         )
         merged = reciprocal_rank_fusion([dense_hits, sparse_hits], top_k=self._top_k)
 
@@ -198,7 +198,7 @@ class QueryService:
         # but not the fallback.
         provisional_query = Query(
             query_id=query_id,
-            family_id=family_id,
+            community_id=community_id,
             query_text=query_text,
             model_name=model_name,
             fallback=FallbackMode.NONE,
@@ -218,7 +218,7 @@ class QueryService:
         if not merged:
             return self._finalize(
                 query_id=query_id,
-                family_id=family_id,
+                community_id=community_id,
                 query_text=query_text,
                 model_name=model_name,
                 created_at=created_at,
@@ -243,7 +243,7 @@ class QueryService:
         except ChatProviderUnavailableError:
             return self._finalize(
                 query_id=query_id,
-                family_id=family_id,
+                community_id=community_id,
                 query_text=query_text,
                 model_name=model_name,
                 created_at=created_at,
@@ -266,7 +266,7 @@ class QueryService:
         except StructuredAnswerError:
             return self._finalize(
                 query_id=query_id,
-                family_id=family_id,
+                community_id=community_id,
                 query_text=query_text,
                 model_name=model_name,
                 created_at=created_at,
@@ -287,7 +287,7 @@ class QueryService:
         graded = _MARKER_TO_FALLBACK[structured.uncertainty]
         return self._finalize(
             query_id=query_id,
-            family_id=family_id,
+            community_id=community_id,
             query_text=query_text,
             model_name=model_name,
             created_at=created_at,
@@ -309,7 +309,7 @@ class QueryService:
         self,
         *,
         query_id: str,
-        family_id: str,
+        community_id: str,
         query_text: str,
         model_name: str,
         created_at: datetime,
@@ -334,7 +334,7 @@ class QueryService:
         """
         query = Query(
             query_id=query_id,
-            family_id=family_id,
+            community_id=community_id,
             query_text=query_text,
             model_name=model_name,
             fallback=fallback,
@@ -354,7 +354,7 @@ class QueryService:
         )
         self._log(
             query_id=query_id,
-            family_id=family_id,
+            community_id=community_id,
             model_name=model_name,
             dense_n=len(dense_hits),
             sparse_n=len(sparse_hits),
@@ -408,7 +408,7 @@ class QueryService:
         self,
         *,
         query_id: str,
-        family_id: str,
+        community_id: str,
         model_name: str,
         dense_n: int,
         sparse_n: int,
@@ -417,11 +417,11 @@ class QueryService:
         answer_trace_id: str,
     ) -> None:
         log.info(
-            "retrieval.hybrid query_id=%s family_id=%s model=%s "
+            "retrieval.hybrid query_id=%s community_id=%s model=%s "
             "dense_n=%d sparse_n=%d merged_n=%d fallback=%s "
             "answer_trace_id=%s",
             query_id,
-            family_id,
+            community_id,
             model_name,
             dense_n,
             sparse_n,

@@ -53,15 +53,15 @@ def _now() -> datetime:
 def _source(
     *,
     sid: str = "s1",
-    family_id: str = "fam-A",
+    community_id: str = "fam-A",
     external_message_id: str | None = None,
     edit_seq: int = 0,
 ) -> SourceMessage:
     return SourceMessage(
         source_message_id=sid,
-        family_id=family_id,
+        community_id=community_id,
         author_user_id="u1",
-        external_chat_id=family_id,
+        external_chat_id=community_id,
         external_user_id="u1",
         external_message_id=external_message_id if external_message_id is not None else sid,
         edit_seq=edit_seq,
@@ -71,11 +71,11 @@ def _source(
     )
 
 
-def _note(*, eid: str = "e1", sid: str = "s1", family_id: str = "fam-A") -> Note:
+def _note(*, eid: str = "e1", sid: str = "s1", community_id: str = "fam-A") -> Note:
     return Note(
         note_id=eid,
         source_message_id=sid,
-        family_id=family_id,
+        community_id=community_id,
         author_user_id="u1",
         note_date=date(2026, 5, 9),
         note_text="Walked the dog",
@@ -88,7 +88,7 @@ def _chunk(
     cid: str = "c1",
     eid: str = "e1",
     sid: str = "s1",
-    family_id: str = "fam-A",
+    community_id: str = "fam-A",
     text: str = "Walked the dog",
     idx: int = 0,
 ) -> EventChunk:
@@ -96,7 +96,7 @@ def _chunk(
         chunk_id=cid,
         note_id=eid,
         source_message_id=sid,
-        family_id=family_id,
+        community_id=community_id,
         author_user_id="u1",
         note_date=date(2026, 5, 9),
         event_index=idx,
@@ -122,10 +122,10 @@ def test_restart_survival() -> None:
 
     first = PostgresDomainStore(PG_DSN)
     try:
-        first.save_source_message(_source(sid="s1", family_id="fam-A"))
-        first.save_note(_note(eid="e1", sid="s1", family_id="fam-A"))
+        first.save_source_message(_source(sid="s1", community_id="fam-A"))
+        first.save_note(_note(eid="e1", sid="s1", community_id="fam-A"))
         first.save_event_chunks(
-            [_chunk(cid="c1", eid="e1", sid="s1", family_id="fam-A", text="Walked the dog")]
+            [_chunk(cid="c1", eid="e1", sid="s1", community_id="fam-A", text="Walked the dog")]
         )
     finally:
         first.close()
@@ -226,7 +226,7 @@ def test_save_source_message_accepts_draft_route(store: PostgresDomainStore) -> 
     """D-027: the CHECK constraint on ``detected_route`` includes ``'draft'``."""
     draft = SourceMessage(
         source_message_id="d1",
-        family_id="fam-A",
+        community_id="fam-A",
         author_user_id="u1",
         external_chat_id="fam-A",
         external_user_id="u1",
@@ -250,7 +250,7 @@ def test_get_or_create_source_message_idempotent_for_draft_route(
     """R-2 holds for drafts: replay returns the existing row, no duplicate."""
     draft = SourceMessage(
         source_message_id="d1",
-        family_id="fam-A",
+        community_id="fam-A",
         author_user_id="u1",
         external_chat_id="fam-A",
         external_user_id="u1",
@@ -262,7 +262,7 @@ def test_get_or_create_source_message_idempotent_for_draft_route(
     )
     duplicate = SourceMessage(
         source_message_id="d2",
-        family_id="fam-A",
+        community_id="fam-A",
         author_user_id="u1",
         external_chat_id="fam-A",
         external_user_id="u1",
@@ -288,7 +288,7 @@ def test_list_source_messages_is_family_scoped_and_ordered(
     store.save_source_message(
         SourceMessage(
             source_message_id="a",
-            family_id="fam-A",
+            community_id="fam-A",
             author_user_id="u1",
             external_chat_id="fam-A",
             external_user_id="u1",
@@ -302,7 +302,7 @@ def test_list_source_messages_is_family_scoped_and_ordered(
     store.save_source_message(
         SourceMessage(
             source_message_id="b",
-            family_id="fam-A",
+            community_id="fam-A",
             author_user_id="u1",
             external_chat_id="fam-A",
             external_user_id="u1",
@@ -316,7 +316,7 @@ def test_list_source_messages_is_family_scoped_and_ordered(
     store.save_source_message(
         SourceMessage(
             source_message_id="other",
-            family_id="fam-B",
+            community_id="fam-B",
             author_user_id="u2",
             external_chat_id="fam-B",
             external_user_id="u2",

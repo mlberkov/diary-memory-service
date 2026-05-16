@@ -202,7 +202,7 @@ docker compose down           # stop, keep volume
 docker compose down -v        # also drop diary_pg_data
 ```
 
-The reply trailer now reads "hybrid retrieval — dense+sparse RRF" (D-025); the application server logs `retrieval.hybrid family_id=… model=… dense_n=… sparse_n=… merged_n=…` for every `/ask`.
+The reply trailer now reads "hybrid retrieval — dense+sparse RRF" (D-025); the application server logs `retrieval.hybrid community_id=… model=… dense_n=… sparse_n=… merged_n=…` for every `/ask`.
 
 #### Durable local store (SQLite — opt-in, ingest only)
 
@@ -239,7 +239,7 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
   -d '{"update_id":2,"message":{"message_id":2,"date":1715300100,"chat":{"id":42},"from":{"id":7},"text":"/ask book"}}'
 # → text: "No memories matched 'book'."
-# (server log includes "retrieval.unavailable reason=... family_id=...")
+# (server log includes "retrieval.unavailable reason=... community_id=...")
 
 # Cleanup
 rm -f ./data/diary.db ./data/diary.db-shm ./data/diary.db-wal

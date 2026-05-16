@@ -131,7 +131,7 @@ def test_top_k_caps_evidence_count() -> None:
     assert len(result.evidence) == 2
 
 
-def test_missing_family_id_raises() -> None:
+def test_missing_community_id_raises() -> None:
     store = MockDomainStore()
     query = _wire(store)
 
@@ -184,7 +184,7 @@ def test_successful_retrieval_persists_query_and_hits() -> None:
     assert store.len_queries() == 1
     # Persisted Query mirrors the AnswerResult.
     persisted = next(iter(store._queries.values()))
-    assert persisted.family_id == "42"
+    assert persisted.community_id == "42"
     assert persisted.query_text == "book"
     assert persisted.fallback is FallbackMode.NONE
     assert persisted.model_name == MockEmbeddingClient().model_name

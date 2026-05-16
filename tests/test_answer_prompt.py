@@ -16,7 +16,7 @@ from diary_rag.core.domain import (
     PROMPT_VERSION,
     AnswerContext,
     AnswerPrompt,
-    CrossFamilyContextError,
+    CrossCommunityContextError,
     EventChunk,
     build_answer_prompt,
 )
@@ -26,7 +26,7 @@ from diary_rag.core.embeddings.models import EmbeddingStatus
 def _chunk(
     chunk_id: str,
     *,
-    family_id: str = "fam-A",
+    community_id: str = "fam-A",
     text: str = "event text",
     event_index: int = 0,
     note_date: date = date(2026, 5, 9),
@@ -35,7 +35,7 @@ def _chunk(
         chunk_id=chunk_id,
         note_id=f"note-{chunk_id}",
         source_message_id=f"src-{chunk_id}",
-        family_id=family_id,
+        community_id=community_id,
         author_user_id="user-1",
         note_date=note_date,
         event_index=event_index,
@@ -101,12 +101,12 @@ def test_prompt_includes_query_text_in_user_section() -> None:
 
 def test_cross_family_context_raises() -> None:
     chunks = (
-        _chunk("c-0", family_id="fam-A"),
-        _chunk("c-1", family_id="fam-B"),
+        _chunk("c-0", community_id="fam-A"),
+        _chunk("c-1", community_id="fam-B"),
     )
     context = _context(*chunks)
 
-    with pytest.raises(CrossFamilyContextError) as excinfo:
+    with pytest.raises(CrossCommunityContextError) as excinfo:
         build_answer_prompt(context)
 
     assert "fam-A" in str(excinfo.value)

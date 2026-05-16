@@ -34,5 +34,5 @@ class ExportPayload:
     format: ExportFormat
     record_count: int
     generated_at: datetime
-    family_id: str
+    community_id: str
     requester_user_id: str

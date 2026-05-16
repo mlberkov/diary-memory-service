@@ -137,13 +137,13 @@ class PostgresDomainStore:
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO source_messages "
-                "(source_message_id, family_id, author_user_id, external_chat_id, "
+                "(source_message_id, community_id, author_user_id, external_chat_id, "
                 " external_user_id, external_message_id, edit_seq, raw_text, "
                 " detected_route, created_at) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (
                     source.source_message_id,
-                    source.family_id,
+                    source.community_id,
                     source.author_user_id,
                     source.external_chat_id,
                     source.external_user_id,
@@ -160,7 +160,7 @@ class PostgresDomainStore:
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "INSERT INTO source_messages "
-                "(source_message_id, family_id, author_user_id, external_chat_id, "
+                "(source_message_id, community_id, author_user_id, external_chat_id, "
                 " external_user_id, external_message_id, edit_seq, raw_text, "
                 " detected_route, created_at) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
@@ -168,7 +168,7 @@ class PostgresDomainStore:
                 "DO NOTHING",
                 (
                     source.source_message_id,
-                    source.family_id,
+                    source.community_id,
                     source.author_user_id,
                     source.external_chat_id,
                     source.external_user_id,
@@ -184,7 +184,7 @@ class PostgresDomainStore:
                 conn.commit()
                 return source, False
             cur.execute(
-                "SELECT source_message_id, family_id, author_user_id, "
+                "SELECT source_message_id, community_id, author_user_id, "
                 "       external_chat_id, external_user_id, external_message_id, "
                 "       edit_seq, raw_text, detected_route, created_at "
                 "  FROM source_messages "
@@ -202,13 +202,13 @@ class PostgresDomainStore:
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO notes "
-                "(note_id, source_message_id, family_id, author_user_id, "
+                "(note_id, source_message_id, community_id, author_user_id, "
                 " note_date, note_text, created_at) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s)",
                 (
                     note.note_id,
                     note.source_message_id,
-                    note.family_id,
+                    note.community_id,
                     note.author_user_id,
                     note.note_date,
                     note.note_text,
@@ -225,7 +225,7 @@ class PostgresDomainStore:
                 c.chunk_id,
                 c.note_id,
                 c.source_message_id,
-                c.family_id,
+                c.community_id,
                 c.author_user_id,
                 c.note_date,
                 c.event_index,
@@ -238,7 +238,7 @@ class PostgresDomainStore:
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.executemany(
                 "INSERT INTO event_chunks "
-                "(chunk_id, note_id, source_message_id, family_id, "
+                "(chunk_id, note_id, source_message_id, community_id, "
                 " author_user_id, note_date, event_index, chunk_text, created_at, "
                 " embedding_status) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
@@ -249,7 +249,7 @@ class PostgresDomainStore:
     def get_source_message(self, source_message_id: str) -> SourceMessage | None:
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                "SELECT source_message_id, family_id, author_user_id, "
+                "SELECT source_message_id, community_id, author_user_id, "
                 "       external_chat_id, external_user_id, external_message_id, "
                 "       edit_seq, raw_text, detected_route, created_at "
                 "  FROM source_messages "
@@ -262,44 +262,44 @@ class PostgresDomainStore:
         return _row_to_source(row)
 
     def list_source_messages(
-        self, family_id: str, *, limit: int | None = None
+        self, community_id: str, *, limit: int | None = None
     ) -> list[SourceMessage]:
-        if not family_id:
-            raise ValueError("family_id is required (Runtime invariant R-3)")
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
         if limit is not None and limit < 0:
             raise ValueError("limit must be non-negative")
         sql = (
-            "SELECT source_message_id, family_id, author_user_id, "
+            "SELECT source_message_id, community_id, author_user_id, "
             "       external_chat_id, external_user_id, external_message_id, "
             "       edit_seq, raw_text, detected_route, created_at "
             "  FROM source_messages "
-            " WHERE family_id = %s "
+            " WHERE community_id = %s "
             " ORDER BY created_at ASC, source_message_id ASC"
         )
-        params: tuple[object, ...] = (family_id,)
+        params: tuple[object, ...] = (community_id,)
         if limit is not None:
             sql += " LIMIT %s"
-            params = (family_id, limit)
+            params = (community_id, limit)
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(sql, params)
             rows = cur.fetchall()
         return [_row_to_source(row) for row in rows]
 
-    def list_recent_drafts(self, family_id: str, *, limit: int) -> list[SourceMessage]:
-        if not family_id:
-            raise ValueError("family_id is required (Runtime invariant R-3)")
+    def list_recent_drafts(self, community_id: str, *, limit: int) -> list[SourceMessage]:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
         if limit < 1:
             raise ValueError("limit must be >= 1")
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                "SELECT source_message_id, family_id, author_user_id, "
+                "SELECT source_message_id, community_id, author_user_id, "
                 "       external_chat_id, external_user_id, external_message_id, "
                 "       edit_seq, raw_text, detected_route, created_at "
                 "  FROM source_messages "
-                " WHERE family_id = %s AND detected_route = 'draft' "
+                " WHERE community_id = %s AND detected_route = 'draft' "
                 " ORDER BY created_at DESC, source_message_id DESC "
                 " LIMIT %s",
-                (family_id, limit),
+                (community_id, limit),
             )
             rows = cur.fetchall()
         return [_row_to_source(row) for row in rows]
@@ -307,7 +307,7 @@ class PostgresDomainStore:
     def get_note_by_source_message_id(self, source_message_id: str) -> Note | None:
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                "SELECT note_id, source_message_id, family_id, author_user_id, "
+                "SELECT note_id, source_message_id, community_id, author_user_id, "
                 "       note_date, note_text, created_at "
                 "  FROM notes "
                 " WHERE source_message_id = %s "
@@ -320,7 +320,7 @@ class PostgresDomainStore:
         return Note(
             note_id=row["note_id"],
             source_message_id=row["source_message_id"],
-            family_id=row["family_id"],
+            community_id=row["community_id"],
             author_user_id=row["author_user_id"],
             note_date=row["note_date"],
             note_text=row["note_text"],
@@ -341,7 +341,7 @@ class PostgresDomainStore:
     def get_event_chunk(self, chunk_id: str) -> EventChunk | None:
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                "SELECT chunk_id, note_id, source_message_id, family_id, "
+                "SELECT chunk_id, note_id, source_message_id, community_id, "
                 "       author_user_id, note_date, event_index, chunk_text, "
                 "       created_at, embedding_status "
                 "  FROM event_chunks "
@@ -355,15 +355,15 @@ class PostgresDomainStore:
 
     def dense_candidates(
         self,
-        family_id: str,
+        community_id: str,
         query_embedding: list[float],
         model_name: str,
         limit: int,
         *,
         date_range: DateRange | None = None,
     ) -> list[EventChunk]:
-        if not family_id:
-            raise ValueError("family_id is required (Runtime invariant R-3)")
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
         if limit <= 0:
             return []
         date_sql, date_params = _date_range_sql(date_range)
@@ -374,31 +374,31 @@ class PostgresDomainStore:
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT ec.chunk_id, ec.note_id, ec.source_message_id, "
-                "       ec.family_id, ec.author_user_id, ec.note_date, "
+                "       ec.community_id, ec.author_user_id, ec.note_date, "
                 "       ec.event_index, ec.chunk_text, ec.created_at, "
                 "       ec.embedding_status "
                 "  FROM event_chunks ec "
                 "  JOIN embedding_records er "
                 "    ON er.chunk_id = ec.chunk_id AND er.model_name = %s "
-                " WHERE ec.family_id = %s "
+                " WHERE ec.community_id = %s "
                 "   AND ec.embedding_status = 'ready'" + date_sql + " "
                 " ORDER BY er.embedding <=> %s::vector "
                 " LIMIT %s",
-                (model_name, family_id, *date_params, query_embedding, limit),
+                (model_name, community_id, *date_params, query_embedding, limit),
             )
             rows = cur.fetchall()
         return [_row_to_chunk(r) for r in rows]
 
     def sparse_candidates(
         self,
-        family_id: str,
+        community_id: str,
         query_text: str,
         limit: int,
         *,
         date_range: DateRange | None = None,
     ) -> list[EventChunk]:
-        if not family_id:
-            raise ValueError("family_id is required (Runtime invariant R-3)")
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
         if limit <= 0:
             return []
         if not query_text.strip():
@@ -408,16 +408,16 @@ class PostgresDomainStore:
             cur.execute(
                 "WITH q AS (SELECT websearch_to_tsquery('simple', %s) AS tsq) "
                 "SELECT ec.chunk_id, ec.note_id, ec.source_message_id, "
-                "       ec.family_id, ec.author_user_id, ec.note_date, "
+                "       ec.community_id, ec.author_user_id, ec.note_date, "
                 "       ec.event_index, ec.chunk_text, ec.created_at, "
                 "       ec.embedding_status "
                 "  FROM event_chunks ec, q "
-                " WHERE ec.family_id = %s "
+                " WHERE ec.community_id = %s "
                 "   AND ec.chunk_text_tsv @@ q.tsq" + date_sql + " "
                 " ORDER BY ts_rank_cd(ec.chunk_text_tsv, q.tsq) DESC, "
                 "          ec.created_at, ec.event_index "
                 " LIMIT %s",
-                (query_text, family_id, *date_params, limit),
+                (query_text, community_id, *date_params, limit),
             )
             rows = cur.fetchall()
         return [_row_to_chunk(r) for r in rows]
@@ -430,7 +430,7 @@ class PostgresDomainStore:
                 r.embedding_record_id,
                 r.chunk_id,
                 r.source_message_id,
-                r.family_id,
+                r.community_id,
                 r.model_name,
                 r.dimension,
                 r.embedding,
@@ -441,7 +441,7 @@ class PostgresDomainStore:
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.executemany(
                 "INSERT INTO embedding_records "
-                "(embedding_record_id, chunk_id, source_message_id, family_id, "
+                "(embedding_record_id, chunk_id, source_message_id, community_id, "
                 " model_name, dimension, embedding, created_at) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
                 params,
@@ -473,11 +473,11 @@ class PostgresDomainStore:
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO queries "
-                "(query_id, family_id, query_text, model_name, fallback, created_at) "
+                "(query_id, community_id, query_text, model_name, fallback, created_at) "
                 "VALUES (%s, %s, %s, %s, %s, %s)",
                 (
                     query.query_id,
-                    query.family_id,
+                    query.community_id,
                     query.query_text,
                     query.model_name,
                     query.fallback.value,
@@ -515,7 +515,7 @@ class PostgresDomainStore:
     def get_query(self, query_id: str) -> Query | None:
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                "SELECT query_id, family_id, query_text, model_name, fallback, "
+                "SELECT query_id, community_id, query_text, model_name, fallback, "
                 "       created_at "
                 "  FROM queries "
                 " WHERE query_id = %s",
@@ -526,7 +526,7 @@ class PostgresDomainStore:
             return None
         return Query(
             query_id=row["query_id"],
-            family_id=row["family_id"],
+            community_id=row["community_id"],
             query_text=row["query_text"],
             model_name=row["model_name"],
             fallback=FallbackMode(row["fallback"]),
@@ -616,7 +616,7 @@ class PostgresDomainStore:
 def _row_to_source(row: dict[str, Any]) -> SourceMessage:
     return SourceMessage(
         source_message_id=row["source_message_id"],
-        family_id=row["family_id"],
+        community_id=row["community_id"],
         author_user_id=row["author_user_id"],
         external_chat_id=row["external_chat_id"],
         external_user_id=row["external_user_id"],
@@ -633,7 +633,7 @@ def _row_to_chunk(row: dict[str, Any]) -> EventChunk:
         chunk_id=row["chunk_id"],
         note_id=row["note_id"],
         source_message_id=row["source_message_id"],
-        family_id=row["family_id"],
+        community_id=row["community_id"],
         author_user_id=row["author_user_id"],
         note_date=row["note_date"],
         event_index=row["event_index"],

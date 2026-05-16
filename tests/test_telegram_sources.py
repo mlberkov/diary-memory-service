@@ -70,7 +70,7 @@ def _chunk(chunk_id: str, text: str) -> EventChunk:
         chunk_id=chunk_id,
         note_id=f"e-{chunk_id}",
         source_message_id=f"s-{chunk_id}",
-        family_id="42",
+        community_id="42",
         author_user_id="7",
         note_date=date(2026, 5, 9),
         event_index=0,

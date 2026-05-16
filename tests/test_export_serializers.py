@@ -13,7 +13,7 @@ from diary_rag.core.routing import RouteKind
 def _source(
     *,
     sid: str = "src-1",
-    family_id: str = "fam-A",
+    community_id: str = "fam-A",
     author: str = "user-1",
     chat_id: str = "fam-A",
     msg_id: str = "100",
@@ -24,7 +24,7 @@ def _source(
 ) -> SourceMessage:
     return SourceMessage(
         source_message_id=sid,
-        family_id=family_id,
+        community_id=community_id,
         author_user_id=author,
         external_chat_id=chat_id,
         external_user_id=author,
@@ -40,7 +40,7 @@ def test_json_serializer_envelope_keys() -> None:
     generated_at = datetime(2026, 5, 11, 12, 0, 0, tzinfo=UTC)
     payload = serialize_json(
         [_source()],
-        family_id="fam-A",
+        community_id="fam-A",
         requester_user_id="user-1",
         generated_at=generated_at,
     )
@@ -49,7 +49,7 @@ def test_json_serializer_envelope_keys() -> None:
     envelope = document["export"]
     assert envelope["format"] == "json"
     assert envelope["schema_version"] == SCHEMA_VERSION
-    assert envelope["scope"] == {"family_id": "fam-A", "requester_user_id": "user-1"}
+    assert envelope["scope"] == {"community_id": "fam-A", "requester_user_id": "user-1"}
     assert envelope["generated_at"] == generated_at.isoformat()
     assert envelope["record_count"] == 1
 
@@ -67,7 +67,7 @@ def test_json_serializer_records_carry_every_source_field_with_iso_timestamps() 
     )
     payload = serialize_json(
         [src],
-        family_id="fam-A",
+        community_id="fam-A",
         requester_user_id="user-1",
         generated_at=datetime(2026, 5, 11, 12, 0, 0, tzinfo=UTC),
     )
@@ -75,7 +75,7 @@ def test_json_serializer_records_carry_every_source_field_with_iso_timestamps() 
     record = document["records"][0]
     assert record == {
         "source_message_id": "src-1",
-        "family_id": "fam-A",
+        "community_id": "fam-A",
         "author_user_id": "user-1",
         "external_chat_id": "fam-A",
         "external_user_id": "user-1",
@@ -90,7 +90,7 @@ def test_json_serializer_records_carry_every_source_field_with_iso_timestamps() 
 def test_json_serializer_empty_records_preserves_envelope() -> None:
     payload = serialize_json(
         [],
-        family_id="fam-A",
+        community_id="fam-A",
         requester_user_id="user-1",
         generated_at=datetime(2026, 5, 11, 12, 0, 0, tzinfo=UTC),
     )
@@ -103,7 +103,7 @@ def test_json_serializer_preserves_unicode() -> None:
     src = _source(raw_text="привет мир")
     payload = serialize_json(
         [src],
-        family_id="fam-A",
+        community_id="fam-A",
         requester_user_id="user-1",
         generated_at=datetime(2026, 5, 11, 12, 0, 0, tzinfo=UTC),
     )
@@ -114,7 +114,7 @@ def test_txt_serializer_header_lines() -> None:
     generated_at = datetime(2026, 5, 11, 12, 0, 0, tzinfo=UTC)
     payload = serialize_txt(
         [_source()],
-        family_id="fam-A",
+        community_id="fam-A",
         requester_user_id="user-1",
         generated_at=generated_at,
     )
@@ -122,7 +122,7 @@ def test_txt_serializer_header_lines() -> None:
     assert text.startswith("# raw export\n")
     assert "# format: txt\n" in text
     assert f"# schema_version: {SCHEMA_VERSION}\n" in text
-    assert "# family_id: fam-A\n" in text
+    assert "# community_id: fam-A\n" in text
     assert "# requester_user_id: user-1\n" in text
     assert f"# generated_at: {generated_at.isoformat()}\n" in text
     assert "# record_count: 1\n" in text
@@ -132,7 +132,7 @@ def test_txt_serializer_block_preserves_multiline_raw_text() -> None:
     src = _source(raw_text="line one\nline two\nline three")
     payload = serialize_txt(
         [src],
-        family_id="fam-A",
+        community_id="fam-A",
         requester_user_id="user-1",
         generated_at=datetime(2026, 5, 11, 12, 0, 0, tzinfo=UTC),
     )
@@ -145,7 +145,7 @@ def test_txt_serializer_blocks_are_separated_by_blank_line() -> None:
     b = _source(sid="src-B", msg_id="2", raw_text="beta")
     payload = serialize_txt(
         [a, b],
-        family_id="fam-A",
+        community_id="fam-A",
         requester_user_id="user-1",
         generated_at=datetime(2026, 5, 11, 12, 0, 0, tzinfo=UTC),
     )
@@ -156,7 +156,7 @@ def test_txt_serializer_blocks_are_separated_by_blank_line() -> None:
 def test_txt_serializer_empty_records_still_produces_header() -> None:
     payload = serialize_txt(
         [],
-        family_id="fam-A",
+        community_id="fam-A",
         requester_user_id="user-1",
         generated_at=datetime(2026, 5, 11, 12, 0, 0, tzinfo=UTC),
     )

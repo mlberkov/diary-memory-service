@@ -42,7 +42,7 @@ def _seed_drafts(store: MockDomainStore, *, count: int, family: str = "42") -> N
         store.save_source_message(
             SourceMessage(
                 source_message_id=f"d-{i:03d}",
-                family_id=family,
+                community_id=family,
                 author_user_id="7",
                 external_chat_id=family,
                 external_user_id="7",
