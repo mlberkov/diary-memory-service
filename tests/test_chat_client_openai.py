@@ -1,14 +1,14 @@
 """Optional live OpenAI smoke for :class:`OpenAIChatClient` (D-037).
 
 This test is **not part of the standard packet gate**. It hits the real
-OpenAI API and is skipped unless ``DIARY_RAG_OPENAI_TEST_KEY`` is set,
+OpenAI API and is skipped unless ``MEMORY_RAG_OPENAI_TEST_KEY`` is set,
 which matches the gating pattern used for ``test_embedding_client_openai.py``
 and ``test_postgres_store.py``.
 
 When enabled it verifies that ``gpt-4.1`` with
 ``response_format={"type": "json_object"}`` returns a structured-answer
 JSON that round-trips through
-:func:`~diary_rag.core.domain.answer_schema.parse_structured_answer`.
+:func:`~memory_rag.core.domain.answer_schema.parse_structured_answer`.
 """
 
 from __future__ import annotations
@@ -18,16 +18,16 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from diary_rag.adapters.answers.openai_client import OpenAIChatClient
-from diary_rag.core.domain import build_answer_prompt, parse_structured_answer
-from diary_rag.core.domain.models import AnswerContext, EventChunk
-from diary_rag.core.embeddings import EmbeddingStatus
+from memory_rag.adapters.answers.openai_client import OpenAIChatClient
+from memory_rag.core.domain import build_answer_prompt, parse_structured_answer
+from memory_rag.core.domain.models import AnswerContext, EventChunk
+from memory_rag.core.embeddings import EmbeddingStatus
 
-OPENAI_TEST_KEY = os.environ.get("DIARY_RAG_OPENAI_TEST_KEY")
+OPENAI_TEST_KEY = os.environ.get("MEMORY_RAG_OPENAI_TEST_KEY")
 
 pytestmark = pytest.mark.skipif(
     OPENAI_TEST_KEY is None,
-    reason="DIARY_RAG_OPENAI_TEST_KEY not set; live OpenAI smoke skipped.",
+    reason="MEMORY_RAG_OPENAI_TEST_KEY not set; live OpenAI smoke skipped.",
 )
 
 

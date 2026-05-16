@@ -13,14 +13,14 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from diary_rag.adapters.answers import MockChatClient
-from diary_rag.adapters.embeddings import MockEmbeddingClient
-from diary_rag.core.answers import ChatProviderUnavailableError, ChatResponse
-from diary_rag.core.domain import DateRange, FallbackMode, RetrievalLeg
-from diary_rag.core.domain.answer_prompt import AnswerPrompt
-from diary_rag.core.routing import InboundMessage, RouteKind
-from diary_rag.services import DomainService, QueryService
-from diary_rag.storage.mock import MockDomainStore
+from memory_rag.adapters.answers import MockChatClient
+from memory_rag.adapters.embeddings import MockEmbeddingClient
+from memory_rag.core.answers import ChatProviderUnavailableError, ChatResponse
+from memory_rag.core.domain import DateRange, FallbackMode, RetrievalLeg
+from memory_rag.core.domain.answer_prompt import AnswerPrompt
+from memory_rag.core.routing import InboundMessage, RouteKind
+from memory_rag.services import DomainService, QueryService
+from memory_rag.storage.mock import MockDomainStore
 
 
 def _ask(query: str, *, chat: str = "42", user: str = "7") -> InboundMessage:

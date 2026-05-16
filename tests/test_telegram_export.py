@@ -9,16 +9,16 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from diary_rag.adapters.answers import MockChatClient
-from diary_rag.adapters.embeddings import MockEmbeddingClient
-from diary_rag.adapters.telegram.client import TelegramClient
-from diary_rag.adapters.telegram.commands import parse_command
-from diary_rag.adapters.telegram.webhook import get_dispatcher, get_telegram_client
-from diary_rag.app import create_app
-from diary_rag.config import Settings
-from diary_rag.core.routing import RouteKind
-from diary_rag.services import Dispatcher, DomainService, ExportService, QueryService
-from diary_rag.storage.mock import MockDomainStore
+from memory_rag.adapters.answers import MockChatClient
+from memory_rag.adapters.embeddings import MockEmbeddingClient
+from memory_rag.adapters.telegram.client import TelegramClient
+from memory_rag.adapters.telegram.commands import parse_command
+from memory_rag.adapters.telegram.webhook import get_dispatcher, get_telegram_client
+from memory_rag.app import create_app
+from memory_rag.config import Settings
+from memory_rag.core.routing import RouteKind
+from memory_rag.services import Dispatcher, DomainService, ExportService, QueryService
+from memory_rag.storage.mock import MockDomainStore
 
 
 class RecordingTelegramClient:
@@ -110,7 +110,7 @@ def _post_or_seed(store: MockDomainStore) -> None:
     """Seed one note row directly through the store so /export has content."""
     from datetime import UTC, datetime
 
-    from diary_rag.core.domain.models import SourceMessage
+    from memory_rag.core.domain.models import SourceMessage
 
     store.save_source_message(
         SourceMessage(
@@ -218,7 +218,7 @@ def test_export_delivery_failure_returns_send_message_error(
 ) -> None:
     client, store, _telegram_client = _client_with(telegram_client=FailingTelegramClient())
     _seed_one(store)
-    with caplog.at_level(logging.WARNING, logger="diary_rag.adapters.telegram.webhook"):
+    with caplog.at_level(logging.WARNING, logger="memory_rag.adapters.telegram.webhook"):
         response = _post(client, _update("/export json"))
     assert response.status_code == 200
     body = response.json()

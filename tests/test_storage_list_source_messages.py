@@ -6,9 +6,9 @@ from datetime import UTC, datetime
 
 import pytest
 
-from diary_rag.core.domain.models import SourceMessage
-from diary_rag.core.routing import RouteKind
-from diary_rag.storage.mock import MockDomainStore
+from memory_rag.core.domain.models import SourceMessage
+from memory_rag.core.routing import RouteKind
+from memory_rag.storage.mock import MockDomainStore
 
 
 def _source(

@@ -44,7 +44,7 @@ Core rules (from `AGENTS.md` and the canonical docs):
 ### Scaffold
 - `pyproject.toml`, `.python-version`, `uv.lock` — Python 3.11 + uv project (D-016, D-017).
 - `Makefile` — `format`, `lint`, `typecheck`, `test`, `check`, `run` (D-018).
-- `src/diary_rag/` — package skeleton (`config`, `logging`, `app`, `__main__`) plus placeholder packages for `adapters/telegram`, `core/routing`, `services`, `storage/mock`.
+- `src/memory_rag/` — package skeleton (`config`, `logging`, `app`, `__main__`) plus placeholder packages for `adapters/telegram`, `core/routing`, `services`, `storage/mock`.
 - `tests/` — Slice 1.1 smoke tests.
 - `.env.example` — config keys we expect to need.
 - `.gitignore` — local artifacts and secrets.

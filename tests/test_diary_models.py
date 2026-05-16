@@ -13,7 +13,7 @@ from datetime import date
 
 import pytest
 
-from diary_rag.core.domain.models import DateRange
+from memory_rag.core.domain.models import DateRange
 
 _EARLY = date(2026, 5, 10)
 _LATE = date(2026, 5, 12)

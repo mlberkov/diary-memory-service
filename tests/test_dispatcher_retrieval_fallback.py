@@ -22,10 +22,10 @@ from typing import Literal
 
 import pytest
 
-from diary_rag.config import Settings
-from diary_rag.core.domain import AnswerResult, Evidence, FallbackMode
-from diary_rag.core.routing import InboundMessage, RouteKind
-from diary_rag.services.dispatcher import Dispatcher
+from memory_rag.config import Settings
+from memory_rag.core.domain import AnswerResult, Evidence, FallbackMode
+from memory_rag.core.routing import InboundMessage, RouteKind
+from memory_rag.services.dispatcher import Dispatcher
 
 
 class _RaisingQueryService:
@@ -93,7 +93,7 @@ def test_not_implemented_error_translates_to_no_evidence(
         Settings(_env_file=None),  # type: ignore[call-arg]
     )
 
-    with caplog.at_level(logging.WARNING, logger="diary_rag.services.dispatcher"):
+    with caplog.at_level(logging.WARNING, logger="memory_rag.services.dispatcher"):
         result = dispatcher.dispatch(_ask("book"))
 
     assert result.route is RouteKind.ASK

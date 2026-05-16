@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from diary_rag.core.domain.models import SourceMessage
-from diary_rag.core.export.serializers import SCHEMA_VERSION, serialize_json, serialize_txt
-from diary_rag.core.routing import RouteKind
+from memory_rag.core.domain.models import SourceMessage
+from memory_rag.core.export.serializers import SCHEMA_VERSION, serialize_json, serialize_txt
+from memory_rag.core.routing import RouteKind
 
 
 def _source(

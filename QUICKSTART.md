@@ -142,7 +142,7 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
 
 #### Durable local store (Postgres)
 
-`STORAGE_BACKEND=postgres` is the canonical durable backend (D-007 / D-022). It writes through `PostgresDomainStore` to the local Postgres provided by `docker-compose.yml`. Schema is bootstrapped on first boot from `src/diary_rag/storage/postgres/schema.sql` via `CREATE TABLE / CREATE INDEX IF NOT EXISTS`. Default backend is still `memory`; SQLite (below) remains an opt-in non-default backend.
+`STORAGE_BACKEND=postgres` is the canonical durable backend (D-007 / D-022). It writes through `PostgresDomainStore` to the local Postgres provided by `docker-compose.yml`. Schema is bootstrapped on first boot from `src/memory_rag/storage/postgres/schema.sql` via `CREATE TABLE / CREATE INDEX IF NOT EXISTS`. Default backend is still `memory`; SQLite (below) remains an opt-in non-default backend.
 
 ```bash
 # 0. Bring up Postgres (compose defaults work without a custom .env)
@@ -154,7 +154,7 @@ export TELEGRAM_WEBHOOK_SECRET=dev-secret
 export STORAGE_BACKEND=postgres
 export POSTGRES_HOST=localhost
 export POSTGRES_PORT=5432
-export POSTGRES_DB=theygrow_diary_rag
+export POSTGRES_DB=memory_rag
 export POSTGRES_USER=postgres
 export POSTGRES_PASSWORD=postgres
 
@@ -168,7 +168,7 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
 # → text: "Saved 2 events for 2026-05-09."
 
 # 3. Verify rows landed in Postgres
-docker compose exec -T postgres psql -U postgres -d theygrow_diary_rag -c \
+docker compose exec -T postgres psql -U postgres -d memory_rag -c \
   "SELECT
      (SELECT count(*) FROM source_messages)   AS sources,
      (SELECT count(*) FROM notes)     AS notes,
@@ -178,7 +178,7 @@ docker compose exec -T postgres psql -U postgres -d theygrow_diary_rag -c \
 
 # 3a. Verify embedding contour (D-024): status flipped to 'ready',
 #     model_name and vector dimension are correct.
-docker compose exec -T postgres psql -U postgres -d theygrow_diary_rag -c \
+docker compose exec -T postgres psql -U postgres -d memory_rag -c \
   "SELECT ec.chunk_id, ec.event_index, ec.embedding_status,
           er.model_name, er.dimension, vector_dims(er.embedding) AS vec_dim
      FROM event_chunks ec
@@ -199,22 +199,22 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
 
 # Cleanup
 docker compose down           # stop, keep volume
-docker compose down -v        # also drop diary_pg_data
+docker compose down -v        # also drop memory_rag_pg_data
 ```
 
 The reply trailer now reads "hybrid retrieval — dense+sparse RRF" (D-025); the application server logs `retrieval.hybrid community_id=… model=… dense_n=… sparse_n=… merged_n=…` for every `/ask`.
 
 #### Durable local store (SQLite — opt-in, ingest only)
 
-`STORAGE_BACKEND=sqlite` writes through `SqliteDomainStore` to a single file at `SQLITE_PATH` (default `./data/diary.db`). Schema is bootstrapped on first boot via `CREATE TABLE IF NOT EXISTS`. Useful for offline dev / tests; the canonical durable path is Postgres (D-022). **Retrieval is not supported on SQLite (D-025):** `/ask` against a SQLite-backed app raises `NotImplementedError` internally and the dispatcher returns `NO_EVIDENCE`. Use Postgres if you want `/ask` to actually retrieve evidence.
+`STORAGE_BACKEND=sqlite` writes through `SqliteDomainStore` to a single file at `SQLITE_PATH` (default `./data/memory_rag.db`). Schema is bootstrapped on first boot via `CREATE TABLE IF NOT EXISTS`. Useful for offline dev / tests; the canonical durable path is Postgres (D-022). **Retrieval is not supported on SQLite (D-025):** `/ask` against a SQLite-backed app raises `NotImplementedError` internally and the dispatcher returns `NO_EVIDENCE`. Use Postgres if you want `/ask` to actually retrieve evidence.
 
 ```bash
 export TELEGRAM_WEBHOOK_SECRET=dev-secret
 export STORAGE_BACKEND=sqlite
-export SQLITE_PATH=./data/diary.db   # default; override anywhere writable
+export SQLITE_PATH=./data/memory_rag.db   # default; override anywhere writable
 
 mkdir -p data
-make run    # boots uvicorn, creates ./data/diary.db on first call
+make run    # boots uvicorn, creates ./data/memory_rag.db on first call
 
 # 1. Ingest — same payload shape as the mock smoke above
 curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
@@ -224,14 +224,14 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
 # → text: "Saved 2 events for 2026-05-09."
 
 # 2. Verify rows landed in the SQLite file
-python -c "import sqlite3; c=sqlite3.connect('./data/diary.db'); \
+python -c "import sqlite3; c=sqlite3.connect('./data/memory_rag.db'); \
   print('sources:', c.execute('select count(*) from source_messages').fetchone()[0]); \
   print('notes:', c.execute('select count(*) from notes').fetchone()[0]); \
   print('chunks:',  c.execute('select count(*) from event_chunks').fetchone()[0])"
 # → sources: 1 / entries: 1 / chunks: 2
 
 # 3. Stop uvicorn (Ctrl+C), then `make run` again with the same env
-#    (a fresh process re-opens the same ./data/diary.db).
+#    (a fresh process re-opens the same ./data/memory_rag.db).
 
 # 4. Ask after restart — retrieval is unavailable on SQLite (D-025); reply is NO_EVIDENCE
 curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
@@ -242,7 +242,7 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
 # (server log includes "retrieval.unavailable reason=... community_id=...")
 
 # Cleanup
-rm -f ./data/diary.db ./data/diary.db-shm ./data/diary.db-wal
+rm -f ./data/memory_rag.db ./data/memory_rag.db-shm ./data/memory_rag.db-wal
 ```
 
 #### Registering the webhook with Telegram (when using a real bot)

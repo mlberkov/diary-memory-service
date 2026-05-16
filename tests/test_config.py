@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from diary_rag.config import Settings
+from memory_rag.config import Settings
 
 
 def test_settings_defaults_do_not_require_secrets() -> None:

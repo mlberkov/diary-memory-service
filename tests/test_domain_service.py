@@ -6,12 +6,12 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from diary_rag.adapters.embeddings import MockEmbeddingClient
-from diary_rag.core.domain import EventChunk, FallbackMode
-from diary_rag.core.embeddings import EmbeddingStatus
-from diary_rag.core.routing import InboundMessage, RouteKind
-from diary_rag.services import DomainService
-from diary_rag.storage.mock import MockDomainStore
+from memory_rag.adapters.embeddings import MockEmbeddingClient
+from memory_rag.core.domain import EventChunk, FallbackMode
+from memory_rag.core.embeddings import EmbeddingStatus
+from memory_rag.core.routing import InboundMessage, RouteKind
+from memory_rag.services import DomainService
+from memory_rag.storage.mock import MockDomainStore
 
 
 def _note_message(

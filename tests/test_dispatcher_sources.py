@@ -19,12 +19,12 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from typing import Literal
 
-from diary_rag.config import Settings
-from diary_rag.core.domain import AnswerResult, Evidence, FallbackMode
-from diary_rag.core.domain.models import AnswerContext, EventChunk
-from diary_rag.core.embeddings import EmbeddingStatus
-from diary_rag.core.routing import InboundMessage, RouteKind
-from diary_rag.services.dispatcher import Dispatcher
+from memory_rag.config import Settings
+from memory_rag.core.domain import AnswerResult, Evidence, FallbackMode
+from memory_rag.core.domain.models import AnswerContext, EventChunk
+from memory_rag.core.embeddings import EmbeddingStatus
+from memory_rag.core.routing import InboundMessage, RouteKind
+from memory_rag.services.dispatcher import Dispatcher
 
 
 def _chunk(chunk_id: str, text: str, *, community_id: str = "fam-A") -> EventChunk:

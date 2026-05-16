@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from diary_rag.adapters.telegram.commands import parse_command
-from diary_rag.core.routing import RouteKind
+from memory_rag.adapters.telegram.commands import parse_command
+from memory_rag.core.routing import RouteKind
 
 
 @pytest.mark.parametrize(

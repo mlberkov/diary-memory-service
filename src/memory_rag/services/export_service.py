@@ -1,0 +1,84 @@
+"""Channel-neutral raw-export service (D-029).
+
+Reads the requester's full ``SourceMessage`` set for a scope through
+``DomainRepository.list_source_messages`` and renders it as bytes via the
+configured serializer. Synchronous and single-shot — no streaming, no
+async, no audit row.
+
+Family scoping is mandatory (I-7); the family argument matches what
+``DomainService.ingest`` uses as the per-chat surrogate (the inbound
+``external_chat_id``).
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from memory_rag.core.export.models import ExportFormat, ExportPayload
+from memory_rag.core.export.serializers import serialize_json, serialize_txt
+from memory_rag.logging import get_logger
+from memory_rag.storage.repository import DomainRepository
+
+log = get_logger(__name__)
+
+
+def _filename(community_id: str, generated_at: datetime, extension: str) -> str:
+    stamp = generated_at.strftime("%Y%m%dT%H%M%SZ")
+    return f"raw_export_{community_id}_{stamp}.{extension}"
+
+
+class ExportService:
+    """Render the raw ``SourceMessage`` set for a scope as bytes."""
+
+    def __init__(self, store: DomainRepository) -> None:
+        self._store = store
+
+    def export(
+        self,
+        *,
+        community_id: str,
+        requester_user_id: str,
+        format: ExportFormat,
+    ) -> ExportPayload:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        generated_at = datetime.now(tz=UTC)
+        messages = self._store.list_source_messages(community_id)
+
+        if format is ExportFormat.JSON:
+            content = serialize_json(
+                messages,
+                community_id=community_id,
+                requester_user_id=requester_user_id,
+                generated_at=generated_at,
+            )
+            media_type = "application/json"
+            extension = "json"
+        else:
+            content = serialize_txt(
+                messages,
+                community_id=community_id,
+                requester_user_id=requester_user_id,
+                generated_at=generated_at,
+            )
+            media_type = "text/plain; charset=utf-8"
+            extension = "txt"
+
+        payload = ExportPayload(
+            content=content,
+            filename=_filename(community_id, generated_at, extension),
+            media_type=media_type,
+            format=format,
+            record_count=len(messages),
+            generated_at=generated_at,
+            community_id=community_id,
+            requester_user_id=requester_user_id,
+        )
+        log.info(
+            "export.ok community_id=%s format=%s count=%d bytes=%d",
+            community_id,
+            format.value,
+            payload.record_count,
+            len(content),
+        )
+        return payload

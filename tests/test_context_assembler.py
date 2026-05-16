@@ -12,15 +12,15 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
-from diary_rag.core.domain import (
+from memory_rag.core.domain import (
     AnswerContext,
     EventChunk,
     FallbackMode,
     Query,
 )
-from diary_rag.core.embeddings.models import EmbeddingStatus
-from diary_rag.services.context_assembler import assemble_answer_context
-from diary_rag.services.retrieval import FusedHit
+from memory_rag.core.embeddings.models import EmbeddingStatus
+from memory_rag.services.context_assembler import assemble_answer_context
+from memory_rag.services.retrieval import FusedHit
 
 
 def _chunk(chunk_id: str, *, text: str = "event", event_index: int = 0) -> EventChunk:

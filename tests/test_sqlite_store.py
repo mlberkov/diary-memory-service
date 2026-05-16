@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from diary_rag.core.domain.models import EventChunk, Note, SourceMessage
-from diary_rag.core.routing import RouteKind
-from diary_rag.storage.sqlite import SqliteDomainStore
+from memory_rag.core.domain.models import EventChunk, Note, SourceMessage
+from memory_rag.core.routing import RouteKind
+from memory_rag.storage.sqlite import SqliteDomainStore
 
 
 def _now() -> datetime:

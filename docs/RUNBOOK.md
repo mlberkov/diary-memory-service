@@ -61,7 +61,7 @@ The boot gate (R-10) refuses to start when `EMBEDDING_DIMENSION` is not `3072`, 
 On any provider exception during ingest, the chunks remain persisted, their `embedding_status` flips to `failed`, and zero `embedding_records` are written for that source. The ingest result still returns `FallbackMode.NONE` because raw + chunks survived (I-2, I-3). Inspect:
 
 ```bash
-docker compose exec -T postgres psql -U postgres -d theygrow_diary_rag -c \
+docker compose exec -T postgres psql -U postgres -d memory_rag -c \
   "SELECT chunk_id, source_message_id, chunk_text, embedding_status
      FROM event_chunks
     WHERE embedding_status = 'failed'
@@ -78,7 +78,7 @@ docker compose down -v
 docker compose up -d postgres
 ```
 
-This drops `diary_pg_data` along with any locally-ingested rows. If you want to keep local data, the smallest non-destructive workaround for the D-025 schema change is the explicit ALTER:
+This drops `memory_rag_pg_data` along with any locally-ingested rows. If you want to keep local data, the smallest non-destructive workaround for the D-025 schema change is the explicit ALTER:
 
 ```sql
 ALTER TABLE event_chunks ADD COLUMN IF NOT EXISTS chunk_text_tsv tsvector
@@ -99,7 +99,7 @@ The boot gate (R-10) refuses to start when `CHAT_BACKEND=openai` and `CHAT_MODEL
 
 `OpenAIError` and `TimeoutError` from the SDK boundary are translated to `ChatProviderUnavailableError` so the existing D-035 grading writes the call as `FallbackMode.PROVIDER_UNAVAILABLE` and the dispatcher emits the retry-hint reply. `answer_text=""`, `token_counts={}`, `latency_ms=0` per D-035's truthful-trace table.
 
-Live calls are not part of `make check`. The optional smoke `tests/test_chat_client_openai.py` is skipped unless `DIARY_RAG_OPENAI_TEST_KEY` is set (same gating pattern as the live embedding smoke and the live Postgres tests).
+Live calls are not part of `make check`. The optional smoke `tests/test_chat_client_openai.py` is skipped unless `MEMORY_RAG_OPENAI_TEST_KEY` is set (same gating pattern as the live embedding smoke and the live Postgres tests).
 
 ### Webhook idempotency (R-2 / D-023)
 Repeated delivery of the same Telegram message-state — same `(external_chat_id, external_message_id, edit_seq)` — does not create duplicate rows. The webhook returns the same functional 200 reply and logs `effective_path=replay` instead of `fresh`. Operationally, `effective_path=replay` is normal; investigate only if the *first* call for a given key never appears with `effective_path=fresh`.
@@ -169,23 +169,23 @@ Fail-closed: when nothing is cached, `/sources` returns `"No selected chunks ava
 Multi-worker caveat: each uvicorn worker / pod holds its own dispatcher singleton, so `/ask` on worker A followed by `/sources` on worker B will fail closed (or return stale chunks). The current contour is single-process local dev; promoting the cache to a durable seam (e.g. `DomainRepository.get_latest_answer_trace_for_family(community_id)` + per-chunk lookups via `get_event_chunk`) is the named follow-up trigger if the deployment shape flips.
 
 ### Retrieval-quality inspection harness (D-038)
-`src/diary_rag/eval/retrieval/` ships a hand-curated harness that measures the D-025 baseline contour against a small fixture corpus + gold-query set. It is **inspection, not a gate** — the CLI exit code is always `0` regardless of the observed metrics.
+`src/memory_rag/eval/retrieval/` ships a hand-curated harness that measures the D-025 baseline contour against a small fixture corpus + gold-query set. It is **inspection, not a gate** — the CLI exit code is always `0` regardless of the observed metrics.
 
 Two modes share one metric shape (aggregate `recall@{5,10,20}`, `mrr@20`, `per_leg_recall@20.{dense,sparse,fused}`; per-query top-`candidate_k` chunk-id lists, diagnostic per-leg first-relevant-rank fields, and an explicit `reciprocal_rank_in_fused` numerator):
 
 - **Mock mode.** Runs under `make check` via `tests/test_retrieval_harness_shape.py`. Shape-only assertions, no quality thresholds. Also smokeable directly:
 
   ```bash
-  uv run python -m diary_rag.eval.retrieval --mode mock
+  uv run python -m memory_rag.eval.retrieval --mode mock
   ```
 
 - **Postgres mode (operator baseline).** Truncates `embedding_records`, `event_chunks`, `notes`, `source_messages` on the connected DSN, then re-ingests `eval/retrieval/corpus.jsonl` through the canonical `DomainService.ingest` path. Point the DSN at a **dedicated eval database** so production data is never touched:
 
   ```bash
-  DIARY_RAG_PG_TEST_DSN=postgresql://... \
+  MEMORY_RAG_PG_TEST_DSN=postgresql://... \
   EMBEDDING_BACKEND=openai \
   OPENAI_API_KEY=... \
-  uv run python -m diary_rag.eval.retrieval --mode postgres --json | tee snapshot.json
+  uv run python -m memory_rag.eval.retrieval --mode postgres --json | tee snapshot.json
   ```
 
   Live OpenAI is used on the **corpus side** at ingest time because D-025's dense leg filters by `model_name` and the cached query embeddings are pinned to `text-embedding-3-large` — mixing models is silently broken (the harness aborts on `model_name` mismatch rather than returning zero hits). Live OpenAI on the corpus side is acceptable here because the operator chose this run deliberately; `make check` never enters this path.
@@ -196,7 +196,7 @@ Two modes share one metric shape (aggregate `recall@{5,10,20}`, `mrr@20`, `per_l
 The cache pins query embeddings to a specific `text-embedding-3-large` @ 3072-dim point-in-time output so the Postgres run is reproducible without contacting OpenAI on the query side. Regenerate is an operator-only ritual:
 
 ```bash
-OPENAI_API_KEY=... uv run python -m diary_rag.eval.retrieval.regenerate_embeddings [--force]
+OPENAI_API_KEY=... uv run python -m memory_rag.eval.retrieval.regenerate_embeddings [--force]
 ```
 
 `--force` is required to overwrite an existing cache because regenerating **invalidates prior baseline snapshots** — the model output drifts. The script writes `model_name` and `dimension` into the file; the Postgres-mode CLI checks these against the configured corpus-side embedding client and aborts on mismatch.

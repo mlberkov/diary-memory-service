@@ -12,7 +12,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from diary_rag.core.domain import (
+from memory_rag.core.domain import (
     PROMPT_VERSION,
     AnswerContext,
     AnswerPrompt,
@@ -20,7 +20,7 @@ from diary_rag.core.domain import (
     EventChunk,
     build_answer_prompt,
 )
-from diary_rag.core.embeddings.models import EmbeddingStatus
+from memory_rag.core.embeddings.models import EmbeddingStatus
 
 
 def _chunk(

@@ -9,12 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from diary_rag.core.domain.models import SourceMessage
-from diary_rag.core.routing import RouteKind
-from diary_rag.storage.mock import MockDomainStore
-from diary_rag.storage.sqlite import SqliteDomainStore
+from memory_rag.core.domain.models import SourceMessage
+from memory_rag.core.routing import RouteKind
+from memory_rag.storage.mock import MockDomainStore
+from memory_rag.storage.sqlite import SqliteDomainStore
 
-PG_DSN = os.environ.get("DIARY_RAG_PG_TEST_DSN")
+PG_DSN = os.environ.get("MEMORY_RAG_PG_TEST_DSN")
 
 
 def _source(
@@ -123,12 +123,12 @@ def test_sqlite_list_recent_drafts_raises_not_implemented(tmp_path: Path) -> Non
 
 pgmark = pytest.mark.skipif(
     PG_DSN is None,
-    reason="DIARY_RAG_PG_TEST_DSN not set; Postgres integration tests skipped.",
+    reason="MEMORY_RAG_PG_TEST_DSN not set; Postgres integration tests skipped.",
 )
 
 
 if PG_DSN is not None:
-    from diary_rag.storage.postgres import PostgresDomainStore
+    from memory_rag.storage.postgres import PostgresDomainStore
 
 
 def _truncate(dsn: str) -> None:

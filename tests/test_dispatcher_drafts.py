@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from diary_rag.adapters.answers import MockChatClient
-from diary_rag.adapters.embeddings import MockEmbeddingClient
-from diary_rag.config import Settings
-from diary_rag.core.domain.models import SourceMessage
-from diary_rag.core.routing import InboundMessage, RouteKind
-from diary_rag.services import Dispatcher, DomainService, ExportService, QueryService
-from diary_rag.storage.mock import MockDomainStore
+from memory_rag.adapters.answers import MockChatClient
+from memory_rag.adapters.embeddings import MockEmbeddingClient
+from memory_rag.config import Settings
+from memory_rag.core.domain.models import SourceMessage
+from memory_rag.core.routing import InboundMessage, RouteKind
+from memory_rag.services import Dispatcher, DomainService, ExportService, QueryService
+from memory_rag.storage.mock import MockDomainStore
 
 
 def _settings(*, default: int = 5, maximum: int = 20) -> Settings:

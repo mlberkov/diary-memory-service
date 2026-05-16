@@ -18,8 +18,8 @@ from typing import Any
 
 import pytest
 
-from diary_rag.app import BootHealthError, create_app
-from diary_rag.config import Settings
+from memory_rag.app import BootHealthError, create_app
+from memory_rag.config import Settings
 
 
 def _settings(**overrides: Any) -> Settings:

@@ -1,7 +1,7 @@
 """Cross-backend round-trip tests for embedding persistence (D-024).
 
 The mock and SQLite backends run unconditionally. The Postgres backend
-runs only when ``DIARY_RAG_PG_TEST_DSN`` is set (matches the existing
+runs only when ``MEMORY_RAG_PG_TEST_DSN`` is set (matches the existing
 ``test_postgres_store.py`` gating). Each backend must:
 
 - Accept a list of ``EmbeddingRecord`` and dedupe by ``(chunk_id, model_name)``.
@@ -19,14 +19,14 @@ from pathlib import Path
 
 import pytest
 
-from diary_rag.core.domain.models import EventChunk, Note, SourceMessage
-from diary_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
-from diary_rag.core.routing import RouteKind
-from diary_rag.storage.mock import MockDomainStore
-from diary_rag.storage.repository import DomainRepository
-from diary_rag.storage.sqlite import SqliteDomainStore
+from memory_rag.core.domain.models import EventChunk, Note, SourceMessage
+from memory_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
+from memory_rag.core.routing import RouteKind
+from memory_rag.storage.mock import MockDomainStore
+from memory_rag.storage.repository import DomainRepository
+from memory_rag.storage.sqlite import SqliteDomainStore
 
-PG_DSN = os.environ.get("DIARY_RAG_PG_TEST_DSN")
+PG_DSN = os.environ.get("MEMORY_RAG_PG_TEST_DSN")
 
 
 def _now() -> datetime:
@@ -96,7 +96,7 @@ def store(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[DomainRepo
     else:
         import psycopg
 
-        from diary_rag.storage.postgres import PostgresDomainStore
+        from memory_rag.storage.postgres import PostgresDomainStore
 
         assert PG_DSN is not None
         with psycopg.connect(PG_DSN, autocommit=True) as conn, conn.cursor() as cur:

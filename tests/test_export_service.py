@@ -8,11 +8,11 @@ from datetime import UTC, datetime
 
 import pytest
 
-from diary_rag.core.domain.models import SourceMessage
-from diary_rag.core.export.models import ExportFormat
-from diary_rag.core.routing import RouteKind
-from diary_rag.services.export_service import ExportService
-from diary_rag.storage.mock import MockDomainStore
+from memory_rag.core.domain.models import SourceMessage
+from memory_rag.core.export.models import ExportFormat
+from memory_rag.core.routing import RouteKind
+from memory_rag.services.export_service import ExportService
+from memory_rag.storage.mock import MockDomainStore
 
 
 def _source(
@@ -173,7 +173,7 @@ def test_export_logs_provenance(caplog: pytest.LogCaptureFixture) -> None:
     _seed_two_families(store)
     service = ExportService(store)
 
-    with caplog.at_level(logging.INFO, logger="diary_rag.services.export_service"):
+    with caplog.at_level(logging.INFO, logger="memory_rag.services.export_service"):
         service.export(
             community_id="fam-A",
             requester_user_id="user-1",

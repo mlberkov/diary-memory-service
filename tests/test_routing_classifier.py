@@ -1,7 +1,7 @@
 """Heuristic classifier unit tests.
 
 Covers each classification rule in
-``src/diary_rag/core/routing/classifier.py`` plus edge cases the
+``src/memory_rag/core/routing/classifier.py`` plus edge cases the
 PRD heuristic does not address explicitly. Under the draft floor
 (D-027 / R-13), any non-empty text that does not match the high-
 confidence NOTE or ASK rules falls through to ``RouteKind.DRAFT``
@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import pytest
 
-from diary_rag.core.routing import RouteKind
-from diary_rag.core.routing.classifier import classify_plain_text
+from memory_rag.core.routing import RouteKind
+from memory_rag.core.routing.classifier import classify_plain_text
 
 
 def test_dated_multi_line_classifies_as_note() -> None:

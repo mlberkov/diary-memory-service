@@ -17,16 +17,16 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from diary_rag.adapters.answers import MockChatClient
-from diary_rag.adapters.embeddings import MockEmbeddingClient
-from diary_rag.adapters.telegram.webhook import get_dispatcher
-from diary_rag.app import create_app
-from diary_rag.config import Settings
-from diary_rag.core.answers import ChatClient, ChatResponse
-from diary_rag.core.domain import FallbackMode
-from diary_rag.core.domain.answer_prompt import AnswerPrompt
-from diary_rag.services import Dispatcher, DomainService, ExportService, QueryService
-from diary_rag.storage.mock import MockDomainStore
+from memory_rag.adapters.answers import MockChatClient
+from memory_rag.adapters.embeddings import MockEmbeddingClient
+from memory_rag.adapters.telegram.webhook import get_dispatcher
+from memory_rag.app import create_app
+from memory_rag.config import Settings
+from memory_rag.core.answers import ChatClient, ChatResponse
+from memory_rag.core.domain import FallbackMode
+from memory_rag.core.domain.answer_prompt import AnswerPrompt
+from memory_rag.services import Dispatcher, DomainService, ExportService, QueryService
+from memory_rag.storage.mock import MockDomainStore
 
 
 def _settings() -> Settings:
@@ -226,7 +226,7 @@ def test_replayed_draft_returns_same_reply_and_does_not_duplicate(
     client, store = _client_with_fresh_store()
     payload = _update("recipe yesterday", update_id=1, message_id=77)
 
-    with caplog.at_level(logging.INFO, logger="diary_rag.adapters.telegram.webhook"):
+    with caplog.at_level(logging.INFO, logger="memory_rag.adapters.telegram.webhook"):
         first = _post(client, payload)
         second = _post(client, payload)
 
@@ -251,7 +251,7 @@ def test_replayed_note_returns_same_reply_and_does_not_duplicate(
         message_id=99,
     )
 
-    with caplog.at_level(logging.INFO, logger="diary_rag.adapters.telegram.webhook"):
+    with caplog.at_level(logging.INFO, logger="memory_rag.adapters.telegram.webhook"):
         first = _post(client, payload)
         second = _post(client, payload)
 
@@ -323,7 +323,7 @@ def test_weak_evidence_marker_surfaces_trailer_and_persists_trace(
 
     _post(client, _update("/note 2026-05-09\nTried a new book", update_id=1))
 
-    with caplog.at_level(logging.INFO, logger="diary_rag.services.query_service"):
+    with caplog.at_level(logging.INFO, logger="memory_rag.services.query_service"):
         resp = _post(client, _update("/ask book", update_id=2, message_id=2))
 
     assert resp.status_code == 200

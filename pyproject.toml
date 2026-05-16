@@ -1,7 +1,7 @@
 [project]
-name = "diary-rag"
+name = "memory-rag"
 version = "0.0.0"
-description = "Diary RAG Service for TheyGrow — Telegram-first diary memory."
+description = "RAG memory service — Telegram-first."
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
 license = { text = "MIT" }
@@ -33,11 +33,11 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/diary_rag"]
+packages = ["src/memory_rag"]
 
 # Force-include non-Python data files needed at runtime.
 [tool.hatch.build.targets.wheel.force-include]
-"src/diary_rag/storage/postgres/schema.sql" = "diary_rag/storage/postgres/schema.sql"
+"src/memory_rag/storage/postgres/schema.sql" = "memory_rag/storage/postgres/schema.sql"
 
 # ---------------- Ruff ----------------
 [tool.ruff]

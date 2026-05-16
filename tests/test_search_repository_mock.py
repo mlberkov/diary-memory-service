@@ -19,11 +19,11 @@ from uuid import uuid4
 
 import pytest
 
-from diary_rag.adapters.embeddings import MockEmbeddingClient
-from diary_rag.core.domain.models import DateRange, EventChunk, Note, SourceMessage
-from diary_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
-from diary_rag.core.routing import RouteKind
-from diary_rag.storage.mock import MockDomainStore
+from memory_rag.adapters.embeddings import MockEmbeddingClient
+from memory_rag.core.domain.models import DateRange, EventChunk, Note, SourceMessage
+from memory_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
+from memory_rag.core.routing import RouteKind
+from memory_rag.storage.mock import MockDomainStore
 
 _NOW = datetime(2026, 5, 11, 12, 0, 0, tzinfo=UTC)
 _DATE = date(2026, 5, 11)

@@ -6,10 +6,10 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from diary_rag.adapters.telegram.webhook import get_dispatcher
-from diary_rag.app import create_app
-from diary_rag.config import Settings
-from diary_rag.core.routing import DispatchResult, InboundMessage, RouteKind
+from memory_rag.adapters.telegram.webhook import get_dispatcher
+from memory_rag.app import create_app
+from memory_rag.config import Settings
+from memory_rag.core.routing import DispatchResult, InboundMessage, RouteKind
 
 
 class RecordingDispatcher:

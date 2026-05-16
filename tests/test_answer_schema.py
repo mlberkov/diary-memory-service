@@ -13,7 +13,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from diary_rag.core.domain import (
+from memory_rag.core.domain import (
     AnswerContext,
     AnswerSchemaMismatchError,
     EventChunk,
@@ -22,7 +22,7 @@ from diary_rag.core.domain import (
     StructuredAnswer,
     parse_structured_answer,
 )
-from diary_rag.core.embeddings.models import EmbeddingStatus
+from memory_rag.core.embeddings.models import EmbeddingStatus
 
 
 def _chunk(chunk_id: str) -> EventChunk:

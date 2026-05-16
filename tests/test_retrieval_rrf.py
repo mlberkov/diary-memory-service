@@ -6,9 +6,9 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from diary_rag.core.domain.models import EventChunk
-from diary_rag.core.embeddings.models import EmbeddingStatus
-from diary_rag.services.retrieval import DEFAULT_RRF_K, reciprocal_rank_fusion
+from memory_rag.core.domain.models import EventChunk
+from memory_rag.core.embeddings.models import EmbeddingStatus
+from memory_rag.services.retrieval import DEFAULT_RRF_K, reciprocal_rank_fusion
 
 
 def _chunk(cid: str) -> EventChunk:

@@ -1,6 +1,6 @@
 """Integration tests for ``PostgresDomainStore`` (ingest contract only).
 
-Skipped unless ``DIARY_RAG_PG_TEST_DSN`` is set, so the offline test
+Skipped unless ``MEMORY_RAG_PG_TEST_DSN`` is set, so the offline test
 flow stays green. Retrieval coverage lives in
 ``tests/test_search_repository_postgres.py`` (Slice 3.3 / D-025).
 """
@@ -13,20 +13,20 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from diary_rag.core.domain.models import EventChunk, Note, SourceMessage
-from diary_rag.core.routing import RouteKind
+from memory_rag.core.domain.models import EventChunk, Note, SourceMessage
+from memory_rag.core.routing import RouteKind
 
-PG_DSN = os.environ.get("DIARY_RAG_PG_TEST_DSN")
+PG_DSN = os.environ.get("MEMORY_RAG_PG_TEST_DSN")
 
 pytestmark = pytest.mark.skipif(
     PG_DSN is None,
-    reason="DIARY_RAG_PG_TEST_DSN not set; Postgres integration tests skipped.",
+    reason="MEMORY_RAG_PG_TEST_DSN not set; Postgres integration tests skipped.",
 )
 
 if PG_DSN is not None:
     import psycopg
 
-    from diary_rag.storage.postgres import PostgresDomainStore
+    from memory_rag.storage.postgres import PostgresDomainStore
 
 
 def _truncate(dsn: str) -> None:

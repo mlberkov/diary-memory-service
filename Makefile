@@ -29,7 +29,7 @@ test: ## Pytest
 check: lint typecheck test ## Full pre-merge gate
 
 run: ## Boot the FastAPI app on 127.0.0.1:8000 (Slice 1.1 smoke)
-	$(UV) run python -m diary_rag
+	$(UV) run python -m memory_rag
 
 tree: ## Show top of repo tree
 	find . -maxdepth 3 \( -path ./.git -o -path ./.venv -o -path ./.ruff_cache -o -path ./.mypy_cache -o -path ./.pytest_cache -o -path ./node_modules \) -prune -o -print | sort

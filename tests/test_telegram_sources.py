@@ -16,17 +16,17 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from diary_rag.adapters.answers import MockChatClient
-from diary_rag.adapters.embeddings import MockEmbeddingClient
-from diary_rag.adapters.telegram.webhook import get_dispatcher, get_telegram_client
-from diary_rag.app import create_app
-from diary_rag.config import Settings
-from diary_rag.core.domain import AnswerResult, Evidence, FallbackMode
-from diary_rag.core.domain.models import AnswerContext, EventChunk
-from diary_rag.core.embeddings import EmbeddingStatus
-from diary_rag.core.routing import InboundMessage
-from diary_rag.services import Dispatcher, DomainService, ExportService, QueryService
-from diary_rag.storage.mock import MockDomainStore
+from memory_rag.adapters.answers import MockChatClient
+from memory_rag.adapters.embeddings import MockEmbeddingClient
+from memory_rag.adapters.telegram.webhook import get_dispatcher, get_telegram_client
+from memory_rag.app import create_app
+from memory_rag.config import Settings
+from memory_rag.core.domain import AnswerResult, Evidence, FallbackMode
+from memory_rag.core.domain.models import AnswerContext, EventChunk
+from memory_rag.core.embeddings import EmbeddingStatus
+from memory_rag.core.routing import InboundMessage
+from memory_rag.services import Dispatcher, DomainService, ExportService, QueryService
+from memory_rag.storage.mock import MockDomainStore
 
 
 class _RecordingTelegramClient:

@@ -22,11 +22,11 @@ from pathlib import Path
 
 import pytest
 
-from diary_rag.adapters.embeddings.mock import MockEmbeddingClient
-from diary_rag.core.domain.models import EventChunk
-from diary_rag.core.embeddings.models import EmbeddingStatus
-from diary_rag.core.routing import InboundMessage, RouteKind
-from diary_rag.eval.retrieval.harness import (
+from memory_rag.adapters.embeddings.mock import MockEmbeddingClient
+from memory_rag.core.domain.models import EventChunk
+from memory_rag.core.embeddings.models import EmbeddingStatus
+from memory_rag.core.routing import InboundMessage, RouteKind
+from memory_rag.eval.retrieval.harness import (
     AggregateMetrics,
     CorpusMessage,
     GoldQuery,
@@ -42,8 +42,8 @@ from diary_rag.eval.retrieval.harness import (
     recall_at_k,
     run_harness,
 )
-from diary_rag.services.domain_service import DomainService
-from diary_rag.storage.mock.store import MockDomainStore
+from memory_rag.services.domain_service import DomainService
+from memory_rag.storage.mock.store import MockDomainStore
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GOLD_PATH = REPO_ROOT / "eval" / "retrieval" / "gold.json"
@@ -244,18 +244,18 @@ def test_postgres_mode_imports_cleanly_without_dsn() -> None:
     # Importing the CLI module must not require a DSN; only --mode postgres
     # at execution time needs it. Use a fresh subprocess so the import is
     # isolated from any DSN already set in this pytest run.
-    env = {k: v for k, v in os.environ.items() if k != "DIARY_RAG_PG_TEST_DSN"}
+    env = {k: v for k, v in os.environ.items() if k != "MEMORY_RAG_PG_TEST_DSN"}
     result = subprocess.run(
-        [sys.executable, "-c", "import diary_rag.eval.retrieval.__main__"],
+        [sys.executable, "-c", "import memory_rag.eval.retrieval.__main__"],
         env=env,
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0, result.stderr
 
-    from diary_rag.eval.retrieval.__main__ import main
+    from memory_rag.eval.retrieval.__main__ import main
 
-    with pytest.raises(RuntimeError, match="DIARY_RAG_PG_TEST_DSN is required"):
+    with pytest.raises(RuntimeError, match="MEMORY_RAG_PG_TEST_DSN is required"):
         main(["--mode", "postgres"])
 
 

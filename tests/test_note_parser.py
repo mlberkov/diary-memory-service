@@ -6,7 +6,7 @@ from datetime import date
 
 import pytest
 
-from diary_rag.core.domain import parse_note
+from memory_rag.core.domain import parse_note
 
 
 def test_parses_iso_date_and_event_lines() -> None:
