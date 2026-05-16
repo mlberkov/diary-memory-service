@@ -4,14 +4,22 @@ Files listed are *targets*. Most do not exist yet. Each row will be split into o
 
 Use-case nouns below (`family`, `child`) describe the first implemented use case; `community` / `subject` are the canonical core vocabulary — see `docs/GLOSSARY.md` and D-041.
 
-## Phase 0 — Operating Setup
+Each phase carries its development stage (D-043; see `docs/product/BuildPlan.md`
+"Development Sequencing"). Execution order follows the stage map, **not** the
+phase numbers: Stage 1 = Phases 0–4, Stage 2 = Phases 6–7 + Phase 8 raw-data
+durability + A-34, Stage 3 = Phase 5 + Phase 8 access/visibility/audit/retention
++ Phase 9. No Stage-3 slice starts until the Stage-2 exit criteria are met. The
+Stage-2 packet groups (`OP-1`..`OP-5`) and their execution order are decomposed
+in `docs/OPERATIONALIZATION-ROADMAP.md` (D-044).
+
+## Phase 0 — Operating Setup *(Stage 1 — Product baseline)*
 | Slice | Files / artifacts |
 | --- | --- |
 | 0.1 canonical docs | `docs/product/PRD.md`, `docs/product/BuildPlan.md`, `docs/product/TechSpec.md`, `docs/decision-log.md`, `AGENTS.md`, `CLAUDE.md` |
 | 0.2 supporting docs | `README.md`, `QUICKSTART.md`, `docs/ARCHITECTURE.md`, `docs/INVARIANTS.md`, `docs/RUNTIME-INVARIANTS.md`, `docs/CHECKLIST.md`, `docs/RUNBOOK.md`, `docs/execution-map.md`, `docs/assumptions.md`, `docs/assumption-audit.md`, `docs/todo.md` |
 | 0.3 scaffold review | `Makefile`, `.env.example`, `.gitignore` |
 
-## Phase 1 — Telegram Shell and Mock Flow
+## Phase 1 — Telegram Shell and Mock Flow *(Stage 1 — Product baseline)*
 | Slice | Files / artifacts |
 | --- | --- |
 | 1.1 language & toolchain | `pyproject.toml` (Py 3.11, D-016), `.python-version`, `uv` lockfile (D-017), Ruff + Mypy + Pytest configs (D-018); `Makefile` `format`/`lint`/`typecheck`/`test`/`check`/`run`; `src/memory_rag/{config,logging,app,__main__}.py`; placeholders `adapters/telegram/`, `core/routing/`, `services/`, `storage/mock/`; FastAPI `/health` smoke; `tests/test_smoke.py`, `test_config.py`, `test_app_health.py` |
@@ -20,7 +28,7 @@ Use-case nouns below (`family`, `child`) describe the first implemented use case
 | 1.4 routing | `core/routing/classifier.py` (deterministic NOTE/ASK/CLARIFY) reusing `core/domain/parser.parse_note`; `RouteKind.CLARIFY`, `RouteSource`, required `InboundMessage.route_source`; webhook calls classifier on UNKNOWN+text; `services/dispatcher.py` adds CLARIFY handler and heuristic markers; `services/query_service.py` adds terminal-punctuation strip; `tests/test_routing_classifier.py`; new heuristic + command-wins-over-heuristic cases in `test_telegram_dispatch.py`; CLARIFY/marker assertions in `test_telegram_reply.py`. Closes A-16/A-17 via D-020. |
 | 1.5 mock end-to-end | webhook smoke: `/note` then `/ask` returns grounded-style reply with date and matched line; heuristic NOTE/ASK/CLARIFY flows added to `tests/test_end_to_end_smoke.py` and the curl recipe in `QUICKSTART.md`. |
 
-## Phase 2 — Durable Backend Core
+## Phase 2 — Durable Backend Core *(Stage 1 — Product baseline)*
 | Slice | Files / artifacts |
 | --- | --- |
 | 2.0 canonical local Postgres backend | `src/memory_rag/storage/postgres/{__init__,store}.py`, `src/memory_rag/storage/postgres/schema.sql`, `docker-compose.yml`, `tests/test_postgres_store.py`; `_build_store` postgres branch in `adapters/telegram/webhook.py`; `Settings.postgres_dsn()` (D-022) |
@@ -31,7 +39,7 @@ Use-case nouns below (`family`, `child`) describe the first implemented use case
 | 2.5 edit/delete strategy | implementation of the decision recorded for TechSpec §12 (assumption A-10) |
 | 2.6 stage status tracking | per-record `parse_status`, `embedding_status`, `index_status` |
 
-## Phase 3 — Embeddings and Hybrid Retrieval
+## Phase 3 — Embeddings and Hybrid Retrieval *(Stage 1 — Product baseline)*
 | Slice | Files / artifacts |
 | --- | --- |
 | 3.1+3.2 embedding adapter + sync indexing | `core/embeddings/{client,models}.py` (`EmbeddingClient` Protocol, `EmbeddingRecord`, `EmbeddingStatus`); `adapters/embeddings/{mock,openai_client,factory}.py`; `event_chunks.embedding_status` column + `embedding_records` table with `vector(3072)`; pgvector image swap in `docker-compose.yml`; boot dimension + pgvector probe (R-10); `DomainService` calls embedding client after `save_event_chunks`; failure → `embedding_status='failed'`; replay short-circuits before embedding. Closes A-5 / A-7 / A-8 via D-024; opens A-35 / A-36 |
@@ -41,7 +49,7 @@ Use-case nouns below (`family`, `child`) describe the first implemented use case
 | 3.6 retrieval-quality inspection harness | `src/memory_rag/eval/retrieval/{harness,__main__,regenerate_embeddings}.py`; `eval/retrieval/{gold.json,corpus.jsonl}` (embeddings cache is operator-produced, not committed); `tests/test_retrieval_harness_shape.py` (mock-mode shape-only check under `make check`); new D-038 entry in `decision-log.md` (baseline snapshot pasted by operator after the Postgres run); RUNBOOK "Retrieval-quality inspection harness (D-038)" subsection; `todo.md` "search-quality fork" item narrowed. Postgres mode is operator-run, env-gated by `MEMORY_RAG_PG_TEST_DSN`, produces the baseline snapshot for the next quality-decision packet to measure against. Closes D-038. **Out of scope:** any retrieval-behavior change; live OpenAI inside `make check`; quality thresholds / gating; the first quality-decision packet (BM25 / reranker / Qdrant / halfvec / multilingual sparse); Slice 3.4 metadata filters; schema/DDL changes; nDCG; D-026 renames. Cross-reference: Phase 7.1's gold-eval-set bracketing is seeded here, narrowed to the D-025 baseline; broader Phase 7 evaluation (groundedness, cost/latency, multi-snapshot tracking) remains its own slice. |
 | 3.7 language-aware sparse FTS | **Decision D-039** (docs-only) selects a dual-config tsvector union as the first quality lever. Implementation: `storage/postgres/schema.sql` generated `chunk_text_tsv` unions `to_tsvector('russian', chunk_text)` and `to_tsvector('english', chunk_text)`; `storage/postgres/store.py` `sparse_candidates` unions `websearch_to_tsquery('russian', $q)` and `websearch_to_tsquery('english', $q)`, ranked by `ts_rank_cd`; mock + sqlite parity preserved (mock deterministic; sqlite still `NotImplementedError`); A-34 destructive local upgrade (generated-column change → `docker compose down -v`); re-run the D-038 harness in Postgres mode against the recorded baseline; TechSpec §9 + RUNBOOK updated when behavior changes. Implements D-039 / resolves A-37. **Sequencing: the implementation lands only after the operator records the D-038 baseline snapshot.** **Out of scope:** BM25, reranker, Qdrant, A-36b halfvec/HNSW, Slice 3.4 metadata filtering, harness corpus/gold changes. |
 
-## Phase 4 — Grounded Answer Pipeline
+## Phase 4 — Grounded Answer Pipeline *(Stage 1 — Product baseline)*
 | Slice | Files / artifacts |
 | --- | --- |
 | 4.1 context assembler | `core/domain/models.py` adds the channel-neutral `AnswerContext` (`query_id`, `query_text`, `ordered_chunks`, `model_name`, `created_at`); `services/context_assembler.py` (pure mapping from `Query` + RRF-merged `FusedHit` list → `AnswerContext`, order preserved from RRF, dedup upstream); `QueryService.answer` invokes the assembler after RRF and attaches the result to `AnswerResult.context` for success / no-evidence / empty-query contours; date grouping and other presentation shapes stay out of the canonical model. `tests/test_context_assembler.py` plus extended `tests/test_query_service.py`. Telegram reply layer unchanged in this slice. |
@@ -51,7 +59,8 @@ Use-case nouns below (`family`, `child`) describe the first implemented use case
 | 4.4 answer-text reply + on-demand `/sources` | `services/dispatcher.py` (rewrite `_format_answer_reply` to render `AnswerResult.answer_text` + unchanged trailers; add `_REPLY_SOURCES_NONE` + `_render_source_block`; private `_latest_sources` cache; `_update_latest_sources` + `_dispatch_sources`; remove `_format_evidence_lines`); `core/routing/models.py` (`RouteKind.SOURCES`; `DispatchResult.source_blocks`); `adapters/telegram/commands.py` (`/sources` token); `adapters/telegram/webhook.py` (SOURCES outbound branch via `pack_drafts_into_messages` + `send_message`); `tests/test_dispatcher_sources.py` + `tests/test_telegram_sources.py`; in-place flips of evidence-bullet assertions in `tests/test_dispatcher_retrieval_fallback.py`, `tests/test_end_to_end_smoke.py`, `tests/test_telegram_reply.py`, `tests/test_telegram_commands.py`. Closes D-036. **Out of scope:** rendering the LLM-emitted `StructuredAnswer.cited_chunk_ids`; fine-grained / per-quote attribution; cross-restart durability of the latest-sources cache; `/sources N` argument. |
 | 4.5 OpenAI chat client adapter + boot gate | `adapters/answers/openai_client.py` adds `OpenAIChatClient` (canonical `gpt-4.1`, `response_format={"type":"json_object"}`, `temperature=0`, single attempt; `openai.OpenAIError` / `TimeoutError` → `ChatProviderUnavailableError`); `adapters/answers/factory.py` adds the `openai` branch; `adapters/answers/__init__.py` re-exports `OpenAIChatClient`; `config.py` widens `chat_backend: Literal["mock","openai"]` and records `chat_model` is load-bearing for openai; `app.py` adds `_CANONICAL_OPENAI_CHAT_MODEL = "gpt-4.1"`, extends `_verify_chat_contour` (mismatch / missing key abort), and the `app.created` log line gains `chat_model=…`; `.env.example` ships canonical `CHAT_MODEL=gpt-4.1`; `tests/test_boot_chat_gate.py` covers canonical-success / wrong-model / missing-key / mock-ignores cases (all offline); `tests/test_chat_client_openai.py` is the optional live smoke gated by `MEMORY_RAG_OPENAI_TEST_KEY` (not part of `make check`). Closes D-037. Closes A-9. **Out of scope:** retries / backoff / circuit breakers (Phase 6); dead-letter / repair (Phase 6); rate-limit / cost / hashing (Phase 6 / 7); streaming / multi-turn / tool-use; Anthropic or any second provider; provider observability expansion; `confidence_band` schema work; live OpenAI calls inside `make check`; D-026 renames; migration tooling. |
 
-## Phase 5 — Optional AI Quality Boosters
+## Phase 5 — Optional AI Quality Boosters *(Stage 3 — Quality / Expansion)*
+Stage 3 — every slice below is gated on the Stage-2 exit criteria (D-043).
 | Slice | Files / artifacts |
 | --- | --- |
 | 5.1 feature-flag system | flag registry, per-request resolution, log of effective flags (R-12) |
@@ -59,28 +68,44 @@ Use-case nouns below (`family`, `child`) describe the first implemented use case
 | 5.3 reranking | reranker behind flag |
 | 5.4 answer modes | timeline mode, analytical synthesis mode |
 
-## Phase 6 — Provider Hardening
+## Phase 6 — Provider Hardening *(Stage 2 — Operationalization)*
+Stage 2 — runs after Stage 1 and before any Stage-3 slice (D-043). Decomposed as
+**OP-2** (provider hardening) in `docs/OPERATIONALIZATION-ROADMAP.md` (D-044);
+A-35 failed-embedding reconciliation is the separate **OP-3** packet, which
+consumes the 6.1 retry and 6.2 dead-letter primitives below.
 | Slice | Files / artifacts |
 | --- | --- |
-| 6.1 timeouts & retries | bounded retry policy, classified errors (R-9) |
-| 6.2 dead-letter | failed indexing jobs survive and are inspectable |
-| 6.3 rate-limit handling | backoff and observability |
+| 6.1 timeouts & retries | bounded retry policy, classified errors (R-9) — OP-2 |
+| 6.2 dead-letter | failed indexing jobs survive and are inspectable — OP-2 |
+| 6.3 rate-limit handling | backoff and observability — OP-2 |
+| 6.4 failed-embedding reconciliation | retry `embedding_status='failed'` with bounded backoff + dead-letter (A-35) — OP-3, after 6.1/6.2 |
 
-## Phase 7 — Evaluation and Observability
+## Phase 7 — Evaluation and Observability *(Stage 2 — Operationalization)*
+Stage 2 — runs after Stage 1 and before any Stage-3 slice (D-043). Decomposed as
+**OP-5** (evaluation & observability) in `docs/OPERATIONALIZATION-ROADMAP.md`
+(D-044); OP-5 closes Stage 2.
 | Slice | Files / artifacts |
 | --- | --- |
-| 7.1 gold eval set | curated questions + expected evidence chunks |
-| 7.2 retrieval & groundedness metrics | hit-rate, empty-rate, groundedness check |
-| 7.3 cost & latency | token + latency aggregation |
+| 7.1 gold eval set | curated questions + expected evidence chunks — OP-5 |
+| 7.2 retrieval & groundedness metrics | hit-rate, empty-rate, groundedness check — OP-5 |
+| 7.3 cost & latency | token + latency aggregation — OP-5 |
 
-## Phase 8 — Privacy and Shared-Diary Controls
+## Phase 8 — Privacy and Shared-Diary Controls *(spans stages — see note)*
+Phase 8 spans two stages (D-043). The raw-data durability/backup contour
+(daily backup window, stronger-than-nightly recovery — D-027, A-40) is **Stage 2
+only**, decomposed as **OP-4** in `docs/OPERATIONALIZATION-ROADMAP.md` (D-044) and
+mapped to slice row 8.0 below. The remaining slices — access control, visibility,
+export/delete, audit, retention — are **Stage 3**, are gated on the Stage-2 exit
+criteria, and are **not** decomposed by D-044.
 | Slice | Files / artifacts |
 | --- | --- |
-| 8.1 community-scoped access | enforced at every read (I-7, R-3) |
-| 8.2 visibility model | per-note scopes (assumption A-15) |
-| 8.3 export/delete flow | tombstones + audit log + retention policy |
+| 8.0 raw-data durability & backup | daily backup window (`03:00–05:00` target) + stronger-than-nightly recovery for raw `SourceMessage` (D-027, A-40) — **Stage 2**, OP-4 |
+| 8.1 community-scoped access | enforced at every read (I-7, R-3) — Stage 3 |
+| 8.2 visibility model | per-note scopes (assumption A-15) — Stage 3 |
+| 8.3 export/delete flow | tombstones + audit log + retention policy — Stage 3 |
 
-## Phase 9 — TheyGrow Integration Seam
+## Phase 9 — TheyGrow Integration Seam *(Stage 3 — Quality / Expansion)*
+Stage 3 — every slice below is gated on the Stage-2 exit criteria (D-043).
 | Slice | Files / artifacts |
 | --- | --- |
 | 9.1 internal API/SDK | non-Telegram client surface (assumption A-21) |

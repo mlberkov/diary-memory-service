@@ -2,6 +2,8 @@
 
 Top of list = pick next. Each item maps to a row in `docs/execution-map.md`. When a slice is done, remove it and add the next downstream slice.
 
+Development-sequencing gate (D-043): no Stage-3 item — Phase 5 quality boosters, the Phase 8 access/visibility/audit/retention slices, or Phase 9 host seams — may be picked until the Stage-2 exit criteria are met. Stage-2 operationalization items (provider hardening, schema-migration tooling, raw-data durability/backup, evaluation/observability) come first. See `docs/product/BuildPlan.md` "Development Sequencing". The Stage-2 items are decomposed and ordered as packet groups `OP-1`..`OP-5` in `docs/OPERATIONALIZATION-ROADMAP.md` (D-044) — pick the next Stage-2 packet from there.
+
 ## Slice 3.7 — Language-aware sparse FTS (dual-config tsvector union, D-039)
 - Owner: agent
 - Map: execution-map 3.7
@@ -17,11 +19,13 @@ Top of list = pick next. Each item maps to a row in `docs/execution-map.md`. Whe
 - Concrete: add `child_id` filtering and `visibility_scope` filtering onto the seam, **one per packet — do not bundle**. Child filtering needs a `Query.child_scope` expression story first. Visibility filtering is blocked on **A-15** (visibility-scope enumerated values are undefined) and cannot land until A-15 is resolved.
 - Follow-up: inbound `/ask` date syntax / natural-language date parsing (a Telegram-side packet that parses a message into a `DateRange` and passes it to `QueryService.answer(..., date_range=)`).
 
-## Schema evolution before non-local deployment
+## OP-1 — Schema evolution before non-local deployment (Stage 2 — operationalization, A-34)
+- Stage-2 packet group **OP-1** (D-044; see `docs/OPERATIONALIZATION-ROADMAP.md`). Resolving A-34 is part of the Stage-2 exit criteria, so it precedes any Stage-3 quality/expansion packet — and OP-1 leads Stage 2, because OP-2/OP-3/OP-4 all depend on non-destructive migrations.
 - No migration tool is wired yet (A-34). Local Postgres schema upgrades are destructive: pull a packet that changes columns and you must `docker compose down -v` to reset `diary_pg_data` before the bootstrap DDL applies. This is acceptable for the single-dev contour but must be replaced (Alembic or equivalent) before the first non-local deployment. D-024 added the pgvector image, `embedding_records`, and the `embedding_status` column; D-025 added the generated `chunk_text_tsv` column + GIN index — both required a destructive upgrade or an explicit `ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...` step. Consider a dedicated packet once the next production-shaped slice is on the horizon.
 
-## Reconciliation for failed embeddings (Phase 6 candidate)
-- A-35 leaves failed embeddings sticky: a chunk with `embedding_status='failed'` stays that way until manual intervention. Once Phase 6 (provider hardening) is on the horizon, ship a reconciliation job that retries `failed` chunks with bounded backoff and a dead-letter strategy, plus the corresponding observability (logs / metrics on retry success/failure).
+## OP-3 — Reconciliation for failed embeddings (Stage 2 — operationalization, A-35)
+- Stage-2 packet group **OP-3** (D-044; see `docs/OPERATIONALIZATION-ROADMAP.md`). Runs after OP-1 (schema-migration tooling) and OP-2 (provider hardening), because the reconciliation job consumes OP-2's bounded-backoff retry and dead-letter primitives.
+- A-35 leaves failed embeddings sticky: a chunk with `embedding_status='failed'` stays that way until manual intervention. Ship a reconciliation job that retries `failed` chunks with bounded backoff and a dead-letter strategy, plus the corresponding observability (logs / metrics on retry success/failure).
 
 ---
 

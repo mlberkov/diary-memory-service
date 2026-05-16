@@ -7,7 +7,7 @@
 ## Canonical loop
 
 1. **Read.** Open the canonical docs in the order set by `CLAUDE.md`. Skim recent decision-log entries.
-2. **Pick.** Take the top item in `docs/todo.md`. Confirm it maps to a row in `docs/execution-map.md`.
+2. **Pick.** Take the top item in `docs/todo.md`. Confirm it maps to a row in `docs/execution-map.md`. Honor the development-sequencing gate (D-043): do not pick a Stage-3 item until the Stage-2 exit criteria are met — see `docs/product/BuildPlan.md` "Development Sequencing".
 3. **Plan.** State the slice's goal, the files it will touch, the invariants involved, the test surface, and the fallback paths. Surface every assumption.
 4. **Align docs.** If the slice implies new behavior not in the canonical docs, surface the mismatch and propose the smallest fix *before* coding.
 5. **Implement.** Smallest viable end-to-end slice. Mock before real. Pure functions over services where possible.
