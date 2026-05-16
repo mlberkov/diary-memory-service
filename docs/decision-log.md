@@ -967,3 +967,42 @@ D-026 and D-041 deferred the itemized roadmap with no recorded scope, migration 
 - `docs/assumptions.md` and `docs/assumption-audit.md` are not edited: the rename scope and migration strategy are settled contract decisions recorded here, not open assumptions; A-34 stays as-is.
 - `docs/GLOSSARY.md`, `docs/INVARIANTS.md`, `docs/RUNTIME-INVARIANTS.md`, `docs/execution-map.md`, `docs/todo.md`, PRD / BuildPlan / TechSpec are **not** touched by this packet.
 - Out of scope (deferred to the future implementation milestone): the actual rename of any identifier in code, schema, migrations, tests, configs, or scripts; resolution of A-34 (migration tooling); the INVARIANTS / RUNTIME-INVARIANTS enforcement-wording updates and the GLOSSARY "Identifiers" section update (performed inside the final docs-alignment packet of that milestone); adoption of `subject_id` for child scoping (handled by the deferred D-040 child-filter packet when it lands); any `docs/execution-map.md` / `docs/todo.md` rows for the renaming packets.
+
+## D-043 — Three-stage development sequencing: operationalization gate between product baseline and quality/expansion
+
+### Decision
+The canonical build docs let work pass directly from a complete product baseline into quality/expansion work: `docs/product/BuildPlan.md` numbers Phase 5 (Optional AI Quality Boosters) ahead of Phase 6 (Provider Hardening), and the schema-migration gap (A-34), raw-data durability/backup (D-027), and evaluation/observability sit with no rule placing them before expansion. The only sequencing expressed today is fine-grained and local (the D-038 / D-039 baseline-vs-quality discipline inside Phase 3).
+
+This decision adopts an explicit three-stage development sequencing model and records it as a contract. It is **docs-only**: no code, schema, migration, or test change. The model is an *overlay* — it does not renumber the existing Phase 0–9 structure.
+
+D-043 fixes, at contract level, **only**:
+
+- **The three stages.**
+  1. **Stage 1 — Product baseline.** The end-to-end note → retrieve → grounded-answer product works.
+  2. **Stage 2 — Operationalization / real infrastructure binding.** External provider integrations are production-safe, schema evolution is non-destructive, raw data is durable and recoverable, and system quality is measurable.
+  3. **Stage 3 — Quality improvement / expansion.** Optional AI quality boosters, the privacy/visibility controls, and host-integration seams.
+- **The stage → phase map.** Phases keep their existing numbers; the map — not the numbers — gives execution order.
+  - Stage 1 = Phases 0–4.
+  - Stage 2 = Phase 6 (provider hardening) + Phase 7 (evaluation & observability) + the raw-data durability/backup slices of Phase 8 + resolution of A-34 (schema-migration tooling).
+  - Stage 3 = Phase 5 (optional AI quality boosters) + the access-control / visibility / audit / retention slices of Phase 8 + Phase 9 (host integration seams).
+
+  Phase 8 deliberately spans Stage 2 and Stage 3; the slice-level split is recorded in `docs/execution-map.md`.
+- **The operationalization gate.** No Stage-3 packet may start until Stage-2 exit criteria are met. This is the rule the previous docs lacked.
+- **Per-stage exit criteria.**
+  - *Stage 1 → 2:* Phase 4 Definition of Done holds — questions are answered from retrieved memory, answers degrade gracefully on weak evidence, no answer is produced without retrieval output.
+  - *Stage 2 → 3:* provider failures do not corrupt durable state and retries/fallbacks are bounded and observable (Phase 6 DoD); schema upgrades are non-destructive (A-34 resolved with migration tooling); raw `SourceMessage` data has a backup window and a stronger-than-nightly recovery primitive (Phase 8 durability DoD, D-027); retrieval and answer quality are measurable and regressions are visible (Phase 7 DoD).
+- **Phase numbers are documentation identifiers, not execution order.** Where a number and the stage map disagree — Phase 5 precedes Phases 6–8 numerically but follows them in execution — the stage map is the order of record.
+- **Relationship to the existing baseline-vs-quality discipline.** The three-stage model is a coarse outer layer. It does **not** replace, rename, or supersede the fine-grained D-038 / D-039 baseline-vs-quality discipline (one quality lever per packet, measured against a recorded baseline). That discipline continues to govern packet-level work *within* a stage — including retrieval-tuning packets inside Phase 3, which remain Stage 1. "Stage 3 quality" names the Optional AI Quality Boosters phase plus the expansion phases; it does not reclassify Phase 3 retrieval work.
+
+### Why
+With no explicit gate, a baseline-complete system invites quality/expansion packets while provider integrations are still single-attempt, schema upgrades are still destructive (A-34), raw data has no backup contour, and quality is unmeasurable. Quality boosters layered on unhardened infrastructure produce work that is hard to operate and hard to evaluate. Naming an operationalization stage and gating expansion behind it makes the prerequisite ordering explicit instead of leaving it implied by phase numbers that happen to run the wrong way. Recording it as an overlay — rather than renumbering Phases 0–9 — keeps every existing decision-log, execution-map, and code reference to a phase number stable; the cost is the one-time statement that numbers are doc IDs and the stage map is the order of record. Evaluation/observability is placed in Stage 2 because operationalizing without measurability is not operationalization — Stage 3 decisions need a baseline to measure against.
+
+### Consequence
+- New D-043 entry. No earlier decision is edited in place.
+- `docs/product/BuildPlan.md` gains a "Development Sequencing" section carrying the three-stage definitions, the stage → phase map, the operationalization gate, and the exit criteria; each `## Phase N` header gains a stage tag.
+- `docs/execution-map.md` mirrors the stage tags on its phase headers, states that execution order follows the stage map rather than the phase numbers, annotates the Phase 8 slice-level Stage 2/3 split, and marks Stage-3 slices with the gate.
+- `docs/todo.md` "pick next" discipline gains the gate; the "Schema evolution before non-local deployment" (A-34) and "Reconciliation for failed embeddings" items are reframed as Stage-2 operationalization items.
+- `docs/RUNBOOK.md` canonical loop references the gate when picking the next item.
+- `docs/product/TechSpec.md`, `docs/INVARIANTS.md`, and `docs/RUNTIME-INVARIANTS.md` are **not** touched: TechSpec describes runtime behavior and deployment shapes, not build order; the two invariants files record what the running system enforces, and development-stage sequencing is a process policy, not a system invariant.
+- No code, schema, migration, test, or dependency change. A-34 stays open; this decision does not resolve it, only places its resolution in Stage 2.
+- Out of scope (deferred): decomposing Stage 2 into concrete operationalization packets (migration tooling, provider-hardening slices, backup/recovery, eval expansion); embedding the gate into `AGENTS.md`'s pick-next / interaction contract; stage-status pointers in `README.md` / `QUICKSTART.md`.
