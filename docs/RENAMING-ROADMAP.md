@@ -2,9 +2,14 @@
 
 ## Purpose & status
 
-This document is the detailed design artifact for the future renaming of the
+This document is the detailed design artifact for the renaming of the
 diary-shaped internal identifiers to the canonical `community` / `subject`
 vocabulary.
+
+**Status: executed.** The renaming milestone has been carried out by packets
+R-1..R-5 (§4). The diary-shaped identifiers in code, schema, tests, and docs
+now use the canonical vocabulary; the legacy → live mapping is recorded in
+`docs/GLOSSARY.md`. This document is retained as the design record.
 
 - **D-026** separated the use case from the core and promised an "explicit
   renaming packet" without naming a target.
@@ -15,14 +20,14 @@ vocabulary.
   the definition of "rename complete", and points here for the detailed
   sequencing. See also `docs/GLOSSARY.md` for the canonical vocabulary.
 
-This roadmap is **docs-only**. It renames nothing. The actual rename is a
-separate future implementation milestone.
+The D-042 decision packet that introduced this roadmap renamed nothing; the
+rename was carried out by the separate R-1..R-5 implementation milestone.
 
-The packet sequence in §4 is the **current recommended roadmap** for that
-milestone — not an immutable packet contract. Implementation-time planning may
-refine the packet boundaries, provided it preserves the scope, migration
-strategy, prerequisites, and completion bar fixed by D-042 (or amends D-042
-with a new decision).
+The packet sequence in §4 was the recommended roadmap for that milestone. It
+was executed as R-1 (`diary` container → `domain`), R-2 (`entry` → `note`),
+R-3 (`family` → `community`), R-4 (package + config), and R-5 (invariants and
+canonical-docs alignment), preserving the scope, migration strategy,
+prerequisites, and completion bar fixed by D-042.
 
 ---
 

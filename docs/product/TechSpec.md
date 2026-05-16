@@ -50,7 +50,7 @@ LangGraph is not recommended at MVP stage because the problem is still a relativ
 1. receive Telegram message,
 2. classify route,
 3. persist raw source message,
-4. parse date if entry,
+4. parse date if note,
 5. split into event chunks,
 6. persist normalized records,
 7. generate embeddings,
@@ -77,16 +77,16 @@ Inbound messages enter one of three lifecycle states — **draft**, **note**, or
 - **No command** → defaults to **draft**. The raw text is persisted as a `SourceMessage` with `detected_route='draft'`. No path silently discards an inbound message. Drafts are not note-candidates and have no promotion path (D-030).
 
 ### Current command surface
-The Telegram adapter exposes `/note`, `/ask`, `/drafts`, and `/export` (D-031). The no-command-→-draft default is in place (D-028). The explicit `/draft` command was removed in D-030; rows previously persisted with `detected_route='draft'` remain valid. Internal symbols (`RouteKind.ENTRY`, persisted `detected_route='entry'`, the Postgres CHECK constraint) keep their historical names until their own renaming packets under D-026.
+The Telegram adapter exposes `/note`, `/ask`, `/drafts`, and `/export` (D-031). The no-command-→-draft default is in place (D-028). The explicit `/draft` command was removed in D-030; rows previously persisted with `detected_route='draft'` remain valid. The note-lifecycle routing enum value is `RouteKind.NOTE`, persisted as `detected_route='note'` and admitted by the Postgres CHECK constraint (the D-042 roadmap renamed these from `RouteKind.ENTRY` / `detected_route='entry'`).
 
 ### Convenience routing
-Heuristics MAY suggest a stronger route (note or ask) for plain text, but MUST NOT override the draft floor. As of D-028, the classifier keeps the high-confidence ENTRY (`first_line_iso_date_with_events`) and ASK (`question_mark_terminator`, `interrogative_or_imperative_first_token`) rules and routes everything else to `RouteKind.DRAFT` (reason `draft_floor_no_signal`). CLARIFY remains a valid response kind but no plain-text path emits it; it survives in the dispatcher for explicit-command active-conflict cases.
+Heuristics MAY suggest a stronger route (note or ask) for plain text, but MUST NOT override the draft floor. As of D-028, the classifier keeps the high-confidence NOTE (`first_line_iso_date_with_events`) and ASK (`question_mark_terminator`, `interrogative_or_imperative_first_token`) rules and routes everything else to `RouteKind.DRAFT` (reason `draft_floor_no_signal`). CLARIFY remains a valid response kind but no plain-text path emits it; it survives in the dispatcher for explicit-command active-conflict cases.
 
 ### Safety rule
 The safety floor for ambiguous input is **preserve as draft**, not **clarify and drop** (D-027 / D-028). Absence of an explicit command never causes silent data loss. CLARIFY remains a valid response shape when a heuristic would actively conflict with intent (D-020), but raw persistence is unconditional.
 
 ### Lifecycle representation
-`SourceMessage.detected_route` carries the lifecycle state (D-028). The `core.routing.lifecycle_for` helper maps routes to the canonical lifecycle vocabulary — `ENTRY → "note"`, `ASK → "query"`, `DRAFT → "draft"`, everything else → `"other"` — so the persisted `detected_route` value doubles as the lifecycle marker without a parallel column. Renaming `ENTRY` → `NOTE` is its own naming-alignment packet (D-026).
+`SourceMessage.detected_route` carries the lifecycle state (D-028). The `core.routing.lifecycle_for` helper maps routes to the canonical lifecycle vocabulary — `NOTE → "note"`, `ASK → "query"`, `DRAFT → "draft"`, everything else → `"other"` — so the persisted `detected_route` value doubles as the lifecycle marker without a parallel column.
 
 ## 5. Data Model
 
@@ -96,7 +96,7 @@ The safety floor for ambiguous input is **preserve as draft**, not **clarify and
 - `Child`
 - `TelegramChat`
 - `SourceMessage`
-- `DiaryEntry`
+- `Note`
 - `EventChunk`
 - `EmbeddingRecord`
 - `Query`
@@ -104,7 +104,7 @@ The safety floor for ambiguous input is **preserve as draft**, not **clarify and
 - `AnswerTrace`
 - `FeedbackEvent`
 
-> `Family` and `Child` are the first-use-case entity names for the canonical core concepts `community` and `subject` (D-041; see `docs/GLOSSARY.md`). The entity names themselves are revisited in the renaming packet (D-026); this spec keeps the current names.
+> `Family` and `Child` are the first-use-case entity names for the canonical core concepts `community` and `subject` (D-041; see `docs/GLOSSARY.md`). The realized scope identifier in code and schema is `community_id`; child scoping is not yet in code and, when the D-040 child-filter packet introduces it, is born directly as `subject_id`.
 
 ### SourceMessage
 Fields:
@@ -113,7 +113,7 @@ Fields:
 - external_user_id
 - external_message_id
 - edit_seq
-- family_id
+- community_id
 - author_user_id
 - raw_text
 - detected_route
@@ -132,27 +132,27 @@ external_message_id, edit_seq)` is the idempotency key enforced by Runtime
 invariant R-2 (D-023): for Telegram, `edit_seq` is `0` for an original
 delivery and the `edit_date` epoch seconds for an edited state.
 
-### DiaryEntry
+### Note
 Fields:
-- diary_entry_id
-- family_id
+- note_id
+- community_id
 - child_id
-- entry_date
+- note_date
 - source_message_id
 - author_user_id
-- entry_text
+- note_text
 - visibility_scope
 - created_at
 
 ### EventChunk
 Fields:
 - chunk_id
-- diary_entry_id
+- note_id
 - source_message_id
-- family_id
+- community_id
 - child_id
 - author_user_id
-- entry_date
+- note_date
 - event_index
 - chunk_text
 - normalized_text
@@ -165,7 +165,7 @@ Fields:
 Fields:
 - query_id
 - source_message_id
-- family_id
+- community_id
 - author_user_id
 - child_scope
 - query_text
@@ -212,7 +212,7 @@ Chunking rule:
 
 Additional storage recommendation:
 - preserve raw source message,
-- preserve logical diary entry,
+- preserve the logical note,
 - preserve event-level chunks.
 
 This creates replayability and provenance.
@@ -220,13 +220,13 @@ This creates replayability and provenance.
 ## 7. Metadata Contract
 
 Minimum metadata per chunk:
-- family_id
+- community_id
 - child_id
 - author_user_id
 - source_message_id
-- diary_entry_id
+- note_id
 - event_index
-- entry_date
+- note_date
 - created_at
 - visibility_scope
 - parse_version
@@ -246,7 +246,7 @@ No provider failure may destroy original user input.
 Raw `SourceMessage` is the highest-tier durability surface. Derived state (embeddings, indexes, retrieval traces, answer traces) is reproducible from raw under the active parser/embedding versions; raw is not reproducible from anything else.
 
 Operational policy requires:
-- a daily backup window (target: `03:00–05:00` local time) covering at minimum `source_messages` plus enough relational scaffolding to restore the `SourceMessage → DiaryEntry → EventChunk` lineage,
+- a daily backup window (target: `03:00–05:00` local time) covering at minimum `source_messages` plus enough relational scaffolding to restore the `SourceMessage → Note → EventChunk` lineage,
 - a stronger-than-nightly recovery primitive (continuous WAL archiving, point-in-time recovery, streaming replicas, or a managed-cloud equivalent — selected per deployment shape; mechanism bracketed as A-40),
 - retention windows and restore drills that treat raw as the highest tier.
 
@@ -259,12 +259,12 @@ The user must be able to export their raw `SourceMessage` data on demand in eith
 Hybrid retrieval is required. Enforced as of D-025 as a **baseline** contour; quality optimizations (BM25, rerankers, external search systems) are explicit follow-ups, not part of the base contract.
 
 ### Retrieval abstraction
-The retrieval backend is the `SearchRepository` Protocol (`src/diary_rag/storage/search_repository.py`), with two independent legs:
+The retrieval backend is the `SearchRepository` Protocol (`src/memory_rag/storage/search_repository.py`), with two independent legs:
 
-- `dense_candidates(family_id, query_embedding, model_name, limit, *, date_range=None) -> list[EventChunk]`
-- `sparse_candidates(family_id, query_text, limit, *, date_range=None) -> list[EventChunk]`
+- `dense_candidates(community_id, query_embedding, model_name, limit, *, date_range=None) -> list[EventChunk]`
+- `sparse_candidates(community_id, query_text, limit, *, date_range=None) -> list[EventChunk]`
 
-The three concrete stores (mock, sqlite, postgres) each satisfy both `DiaryRepository` (ingest) and `SearchRepository` (retrieval); the union is named `HybridDiaryStore`. SQLite raises `NotImplementedError` from the retrieval methods because it is opt-in for ingest only; Postgres is the canonical retrieval backend.
+The three concrete stores (mock, sqlite, postgres) each satisfy both `DomainRepository` (ingest) and `SearchRepository` (retrieval); the union is named `HybridDomainStore`. SQLite raises `NotImplementedError` from the retrieval methods because it is opt-in for ingest only; Postgres is the canonical retrieval backend.
 
 ### Retrieval v1 flow
 1. normalize query (strip whitespace + trailing punctuation),
@@ -272,18 +272,18 @@ The three concrete stores (mock, sqlite, postgres) each satisfy both `DiaryRepos
 3. run dense + sparse legs against `SearchRepository`,
 4. fuse the two ranked lists with **service-layer Reciprocal Rank Fusion** (`k=60`),
 5. truncate to `retrieval_top_k` (Settings; default 5),
-6. wrap each chunk as `Evidence(chunk_id, entry_date, chunk_text)`,
-7. log `retrieval.hybrid family_id=… model=… dense_n=… sparse_n=… merged_n=…`.
+6. wrap each chunk as `Evidence(chunk_id, note_date, chunk_text)`,
+7. log `retrieval.hybrid community_id=… model=… dense_n=… sparse_n=… merged_n=…`.
 
-The optional **date-range filter** has landed (D-040, Slice 3.4): both legs accept a keyword-only `date_range` carrying an inclusive `entry_date` lower/upper bound (either side optional). It defaults to `None` — no constraint — so the D-025 retrieval shape and the RRF inputs are unchanged when unused. The remaining visibility/child metadata filters, dedup, and retrieval-trace persistence belong to Phase 3.4 / 3.5; they are not in the D-025 baseline. Visibility filtering waits on A-15.
+The optional **date-range filter** has landed (D-040, Slice 3.4): both legs accept a keyword-only `date_range` carrying an inclusive `note_date` lower/upper bound (either side optional). It defaults to `None` — no constraint — so the D-025 retrieval shape and the RRF inputs are unchanged when unused. The remaining visibility/subject metadata filters, dedup, and retrieval-trace persistence belong to Phase 3.4 / 3.5; they are not in the D-025 baseline. Visibility filtering waits on A-15.
 
 ### Metadata filtering
-- `DateRange(start, end)` is a channel-neutral frozen value object (`core/diary/models.py`); both bounds are `date | None` and inclusive. A both-`None` range is treated as no constraint; `start > end` is rejected at construction.
-- Postgres adds a conditional `entry_date >= / <=` predicate to both leg SQL queries; the mock backend applies the identical deterministic comparison, so mock and Postgres stay at parity. SQLite still raises `NotImplementedError`.
+- `DateRange(start, end)` is a channel-neutral frozen value object (`core/domain/models.py`); both bounds are `date | None` and inclusive. A both-`None` range is treated as no constraint; `start > end` is rejected at construction.
+- Postgres adds a conditional `note_date >= / <=` predicate to both leg SQL queries; the mock backend applies the identical deterministic comparison, so mock and Postgres stay at parity. SQLite still raises `NotImplementedError`.
 - `QueryService.answer` accepts a per-call `date_range` and threads it to both legs. There is no inbound `/ask` date syntax yet — that is a separate packet.
 
 ### Dense leg (Postgres)
-- Exact family-scoped sequential scan over the canonical `vector(3072)` column.
+- Exact community-scoped sequential scan over the canonical `vector(3072)` column.
 - `ORDER BY embedding <=> %s::vector` (cosine distance), joined to `event_chunks` on `chunk_id`, filtered to `embedding_status='ready'` and the active `model_name`.
 - No HNSW / IVFFlat — pgvector caps those at 2000 dim, so the canonical column cannot use them. Halfvec / HNSW is **A-36b**, deferred to the next quality-decision packet.
 

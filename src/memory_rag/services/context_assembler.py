@@ -9,7 +9,7 @@ Pure: no retrieval calls, no persistence, no providers. Order is the
 order of ``merged`` (RRF rank with the deterministic tie-break already
 applied in :func:`memory_rag.services.retrieval.reciprocal_rank_fusion`).
 RRF merges by ``chunk_id`` upstream, so the assembler does no further
-dedup. Family scoping is enforced upstream (R-3); the assembler does
+dedup. Community scoping is enforced upstream (R-3); the assembler does
 not re-scope.
 
 Date grouping and other presentation shapes are intentionally NOT

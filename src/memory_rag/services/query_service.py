@@ -1,6 +1,6 @@
 """Channel-neutral query service — baseline hybrid retrieval (D-025).
 
-Embeds the query, runs the dense leg (vector similarity, family-scoped,
+Embeds the query, runs the dense leg (vector similarity, community-scoped,
 ``embedding_status='ready'`` only) and the sparse leg (PostgreSQL FTS
 baseline, ``simple`` dictionary) against ``SearchRepository``, fuses the
 two ranked lists with Reciprocal Rank Fusion at the service layer, and

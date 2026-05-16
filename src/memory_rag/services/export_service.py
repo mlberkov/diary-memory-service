@@ -5,7 +5,7 @@ Reads the requester's full ``SourceMessage`` set for a scope through
 configured serializer. Synchronous and single-shot — no streaming, no
 async, no audit row.
 
-Family scoping is mandatory (I-7); the family argument matches what
+Community scoping is mandatory (I-7); the community argument matches what
 ``DomainService.ingest`` uses as the per-chat surrogate (the inbound
 ``external_chat_id``).
 """

@@ -9,7 +9,7 @@ first; the protocol does not surface backend-native scores because the
 fusion code uses ranks, not calibrated scores.
 
 Postgres (D-022) is the only canonical retrieval backend. The mock
-implementation is deterministic and family-scoped so unit tests can
+implementation is deterministic and community-scoped so unit tests can
 exercise the hybrid path end-to-end without a database. SQLite is opt-in
 for ingest only (D-022); both retrieval methods raise
 ``NotImplementedError`` there, which ``Dispatcher`` converts to
@@ -41,7 +41,7 @@ class SearchRepository(Protocol):
     ) -> list[EventChunk]:
         """Return up to ``limit`` chunks ranked by vector similarity.
 
-        Family-scoped (I-7, R-3). Only chunks with
+        Community-scoped (I-7, R-3). Only chunks with
         ``embedding_status == 'ready'`` participate. The ``model_name``
         filter is what ties the query vector to the persisted vectors:
         a chunk indexed under a different model is not a candidate for
@@ -63,7 +63,7 @@ class SearchRepository(Protocol):
     ) -> list[EventChunk]:
         """Return up to ``limit`` chunks ranked by PostgreSQL FTS baseline.
 
-        Family-scoped (I-7, R-3). Tokenization is whatever the backend
+        Community-scoped (I-7, R-3). Tokenization is whatever the backend
         configures — for Postgres, ``to_tsvector('simple', ...)``;
         ``websearch_to_tsquery('simple', ...)`` parses the query.
 

@@ -3,7 +3,7 @@
 > **Milestone 1 complete.** Telegram webhook + ingest, durable PostgreSQL backend behind `DomainRepository` (D-022),
 > idempotent ingest on `(external_chat_id, external_message_id, edit_seq)` (D-023), sync chunk embedding
 > indexing on pgvector with `text-embedding-3-large` @ 3072 dim (D-024), and **baseline hybrid retrieval**
-> (`SearchRepository` with exact dense family-scoped scan + Postgres FTS `tsvector('simple')` + service-layer
+> (`SearchRepository` with exact dense community-scoped scan + Postgres FTS `tsvector('simple')` + service-layer
 > RRF, D-025) are all wired. BM25, rerankers, and external vector/search systems (Qdrant et al.) are
 > explicitly deferred to the next quality-decision packet. See `docs/todo.md` for what's next.
 
@@ -84,7 +84,7 @@ curl -X POST http://127.0.0.1:8000/telegram/webhook \
 The mock store lives in process memory: state survives across requests within one `make run` and resets on restart.
 
 ```bash
-# 1. Ingest a multi-line dated entry
+# 1. Ingest a multi-line dated note
 curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
@@ -115,7 +115,7 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
 
 #### Heuristic plain-text routing (`/note` / `/ask` optional)
 
-Plain text without a slash command is classified by `core.routing.classifier`: a dated body becomes an entry, a question becomes an ask, anything else gets a clarification reply. Heuristic-routed replies carry an explicit marker so the user can see what happened (D-006, R-6, R-11).
+Plain text without a slash command is classified by `core.routing.classifier`: a dated body becomes a note, a question becomes an ask, anything else gets a clarification reply. Heuristic-routed replies carry an explicit marker so the user can see what happened (D-006, R-6, R-11).
 
 ```bash
 # 5. Dated plain text — heuristic NOTE
@@ -160,7 +160,7 @@ export POSTGRES_PASSWORD=postgres
 
 make run                      # uvicorn boots; first call bootstraps schema
 
-# 2. Ingest a multi-line dated entry
+# 2. Ingest a multi-line dated note
 curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
@@ -174,7 +174,7 @@ docker compose exec -T postgres psql -U postgres -d memory_rag -c \
      (SELECT count(*) FROM notes)     AS notes,
      (SELECT count(*) FROM event_chunks)      AS chunks,
      (SELECT count(*) FROM embedding_records) AS embeddings;"
-# → sources=1 entries=1 chunks=2 embeddings=2
+# → sources=1 notes=1 chunks=2 embeddings=2
 
 # 3a. Verify embedding contour (D-024): status flipped to 'ready',
 #     model_name and vector dimension are correct.
@@ -228,7 +228,7 @@ python -c "import sqlite3; c=sqlite3.connect('./data/memory_rag.db'); \
   print('sources:', c.execute('select count(*) from source_messages').fetchone()[0]); \
   print('notes:', c.execute('select count(*) from notes').fetchone()[0]); \
   print('chunks:',  c.execute('select count(*) from event_chunks').fetchone()[0])"
-# → sources: 1 / entries: 1 / chunks: 2
+# → sources: 1 / notes: 1 / chunks: 2
 
 # 3. Stop uvicorn (Ctrl+C), then `make run` again with the same env
 #    (a fresh process re-opens the same ./data/memory_rag.db).

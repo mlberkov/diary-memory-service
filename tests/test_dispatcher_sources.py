@@ -8,7 +8,7 @@ exercise the lifecycle invariants the owner committed to in D-036:
 - Non-empty ``answer.context.ordered_chunks`` → overwrite.
 - Empty (empty-query, empty-retrieval, retrieval-unavailable) → clear.
 - Only ``/ask`` touches the cache; other routes leave it intact.
-- The cache is per-family.
+- The cache is per-community.
 
 These tests use a stub ``QueryService`` so the dispatcher's behaviour
 is exercised independently of retrieval / chat / repository wiring.

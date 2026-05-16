@@ -2,7 +2,7 @@
 
 The export contract delivers the raw ``SourceMessage`` set for a scope as
 either JSON or TXT, with an inline provenance envelope/header. Derived
-state (entries, chunks, embeddings) is not part of the contract — raw is
+state (notes, chunks, embeddings) is not part of the contract — raw is
 sufficient to reconstruct the rest (I-2, I-3, I-15).
 """
 

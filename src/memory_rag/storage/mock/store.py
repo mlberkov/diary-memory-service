@@ -1,6 +1,6 @@
 """In-memory mock store for the diary domain.
 
-Holds raw source messages, parsed diary entries, per-event chunks, and
+Holds raw source messages, parsed notes, per-event chunks, and
 per-chunk embedding records in process-local dicts.
 
 ``get_or_create_source_message`` enforces R-2 (D-023) by keying on the
@@ -17,7 +17,7 @@ Slice 3.3 (D-025): baseline hybrid retrieval (``dense_candidates`` +
 ``sparse_candidates``) is implemented in process-local terms so unit
 tests can exercise the hybrid path without a database. Dense ranks by
 cosine distance over the deterministic mock embeddings; sparse ranks by
-lowercased whitespace token-overlap count. Both legs are family-scoped
+lowercased whitespace token-overlap count. Both legs are community-scoped
 and restricted to chunks in ``ready`` state.
 
 Not thread-safe. State lives only as long as the process.

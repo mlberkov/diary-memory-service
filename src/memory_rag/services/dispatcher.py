@@ -12,8 +12,8 @@ chunk, embed, or index. ``DRAFT`` is set by the no-command default for
 plain text, so no plain-text message is silently discarded.
 
 ``DRAFTS`` (D-030) recalls the most-recent full raw drafts for the
-family. The dispatcher parses the optional ``N`` argument, clamps it
-to ``drafts_max_limit``, asks the diary service for the rows, and
+community. The dispatcher parses the optional ``N`` argument, clamps it
+to ``drafts_max_limit``, asks the domain service for the rows, and
 returns a header plus the drafts payload. The adapter renders the
 combined response as one transport message by default, splitting only
 when the transport size cap forces it.
@@ -181,7 +181,7 @@ def _format_drafts_header(*, returned: int, requested: int, explicit: bool, max_
 class Dispatcher:
     """Maps an :class:`InboundMessage` to a :class:`DispatchResult`.
 
-    Holds a small per-family in-memory cache of the chunks retrieval
+    Holds a small per-community in-memory cache of the chunks retrieval
     selected for the chat's most recent ``/ask`` turn (Slice 4.4 /
     D-036). The cache backs ``/sources``: every ``/ask`` dispatch
     overwrites it with ``answer.context.ordered_chunks`` when non-empty
@@ -196,12 +196,12 @@ class Dispatcher:
 
     def __init__(
         self,
-        diary: DomainService,
+        domain: DomainService,
         query: QueryService,
         export: ExportService,
         settings: Settings,
     ) -> None:
-        self._diary = diary
+        self._domain = domain
         self._query = query
         self._export = export
         self._settings = settings
@@ -216,7 +216,7 @@ class Dispatcher:
         if route is RouteKind.HELP:
             return DispatchResult(reply_text=_REPLY_HELP, route=route)
         if route is RouteKind.NOTE:
-            ingest = self._diary.ingest(message)
+            ingest = self._domain.ingest(message)
             reply = _format_ingest_reply(ingest)
             if is_heuristic:
                 reply = _append_marker(reply, _HEURISTIC_MARKER_NOTE)
@@ -230,7 +230,7 @@ class Dispatcher:
                 },
             )
         if route is RouteKind.DRAFT:
-            ingest = self._diary.ingest(message)
+            ingest = self._domain.ingest(message)
             reply = _format_draft_reply(ingest)
             return DispatchResult(
                 reply_text=reply,
@@ -322,7 +322,7 @@ class Dispatcher:
         max_limit = self._settings.drafts_max_limit
         effective_limit = min(requested, max_limit)
         community_id = message.external_chat_id
-        drafts = self._diary.list_recent_drafts(community_id, limit=effective_limit)
+        drafts = self._domain.list_recent_drafts(community_id, limit=effective_limit)
         returned = len(drafts)
 
         if returned == 0:
@@ -395,7 +395,7 @@ class Dispatcher:
         )
 
     def _update_latest_sources(self, community_id: str, answer: AnswerResult) -> None:
-        """Cache the chunks retrieval selected for the family's last /ask (D-036).
+        """Cache the chunks retrieval selected for the community's last /ask (D-036).
 
         Every ``/ask`` dispatch writes the cache (no skip path). Non-empty
         ``answer.context.ordered_chunks`` overwrites any prior value; empty

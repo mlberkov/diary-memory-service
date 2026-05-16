@@ -57,20 +57,20 @@ class DomainRepository(Protocol):
     def list_source_messages(
         self, community_id: str, *, limit: int | None = None
     ) -> list[SourceMessage]:
-        """List raw source messages for a family in deterministic order.
+        """List raw source messages for a community in deterministic order.
 
         Order: ``(created_at ASC, source_message_id ASC)``. Includes every
-        persisted route (notes and drafts alike). Family scoping is
+        persisted route (notes and drafts alike). Community scoping is
         mandatory (I-7). ``limit`` caps the result; ``None`` means no
         cap. Backends without raw-export parity (SQLite is opt-in
         ingest-only) raise ``NotImplementedError`` (D-029).
         """
 
     def list_recent_drafts(self, community_id: str, *, limit: int) -> list[SourceMessage]:
-        """Return the most recent draft source messages for a family.
+        """Return the most recent draft source messages for a community.
 
         Filter: ``detected_route == RouteKind.DRAFT``. Order:
-        ``(created_at DESC, source_message_id DESC)``. Family scoping is
+        ``(created_at DESC, source_message_id DESC)``. Community scoping is
         mandatory (I-7); ``limit`` must be ``>= 1``. Backends without
         durable parity (SQLite is opt-in ingest-only) raise
         ``NotImplementedError``.

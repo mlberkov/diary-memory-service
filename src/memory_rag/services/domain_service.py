@@ -3,7 +3,7 @@
 Persists the raw inbound message first (Invariant I-3, runtime R-1),
 then — for note-lifecycle messages (``RouteKind.NOTE``) — parses the
 date-led payload and creates one ``Note`` plus one ``EventChunk``
-per event line (I-5). Authorship and family scope are carried through
+per event line (I-5). Authorship and community scope are carried through
 (I-6, I-7).
 
 Draft floor (D-027 / R-13): when the inbound route is
@@ -54,7 +54,7 @@ log = get_logger(__name__)
 
 
 def _community_id_for(message: InboundMessage) -> str:
-    """Per-chat surrogate until explicit family bootstrap exists (A-14)."""
+    """Per-chat surrogate until explicit community bootstrap exists (A-14)."""
     return message.external_chat_id
 
 
@@ -202,9 +202,9 @@ class DomainService:
         )
 
     def list_recent_drafts(self, community_id: str, *, limit: int) -> list[SourceMessage]:
-        """Return the most recent ``RouteKind.DRAFT`` source messages for a family.
+        """Return the most recent ``RouteKind.DRAFT`` source messages for a community.
 
-        Family-scoped, ordered most-recent-first, capped at ``limit``.
+        Community-scoped, ordered most-recent-first, capped at ``limit``.
         Read-only; no side effects. The dispatcher validates ``limit``;
         the assert below is defensive.
         """

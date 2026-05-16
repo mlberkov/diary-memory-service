@@ -2,19 +2,19 @@
 
 These must hold while the service is running. Violations are alerts, not warnings.
 
-For the canonical `community` / `subject` vocabulary see `docs/GLOSSARY.md` and D-041. This file deliberately still names the current code identifiers (`family_id`, `detected_route`, …) — its wording matches what code enforces today, not the target vocabulary.
+For the canonical `community` / `subject` vocabulary see `docs/GLOSSARY.md` and D-041. This file names the live code identifiers (`community_id`, `detected_route`, …) — its wording matches what code enforces today.
 
 ## R-1. Raw-before-enrichment ordering
 Within a single inbound-message handler, the `SourceMessage` row is committed before any parse, chunk, embed, or index call is initiated.
 
 ## R-2. Idempotent ingest
-Replaying the same channel message-state produces no new persisted state. The idempotency key is the triple `(external_chat_id, external_message_id, edit_seq)` (D-023); for Telegram, `edit_seq` is `0` for an original delivery and the `edit_date` epoch seconds for an edited state. Each backend enforces the key via DB-native conflict handling on `source_messages`; `DiaryService.ingest` short-circuits parse and chunking on replay and returns the same functional `IngestResult`. Webhook retries are safe and observable: the log line records `effective_path=fresh|replay`.
+Replaying the same channel message-state produces no new persisted state. The idempotency key is the triple `(external_chat_id, external_message_id, edit_seq)` (D-023); for Telegram, `edit_seq` is `0` for an original delivery and the `edit_date` epoch seconds for an edited state. Each backend enforces the key via DB-native conflict handling on `source_messages`; `DomainService.ingest` short-circuits parse and chunking on replay and returns the same functional `IngestResult`. Webhook retries are safe and observable: the log line records `effective_path=fresh|replay`.
 
-## R-3. Family scoping on every read
-Every retrieval call carries a non-null `family_id`. The retriever rejects calls without it. There is no admin path that bypasses scoping in MVP.
+## R-3. Community scoping on every read
+Every retrieval call carries a non-null `community_id`. The retriever rejects calls without it. There is no admin path that bypasses scoping in MVP.
 
 ## R-4. Active-state filter on retrieval
-Retrieval returns only chunks of non-tombstoned entries by default. Bypass requires an explicit, logged debug path.
+Retrieval returns only chunks of non-tombstoned notes by default. Bypass requires an explicit, logged debug path.
 
 The dense leg additionally requires `embedding_status='ready'` (D-025): chunks with `pending` or `failed` status do not participate in dense ranking. The sparse leg ranks any chunk whose text yields tokens regardless of `embedding_status` — sparse is text-only and does not depend on a successful embedding. Every retrieval call logs `dense_n`, `sparse_n`, `merged_n` so an operator can confirm both legs ran.
 
@@ -33,8 +33,8 @@ Surface-level signaling is enforced as of Slice 4.3b (D-035) and tightened in Sl
 ## R-7. Provider call observability
 Every provider call (embedding, chat, search backend) is logged with: provider, model, input hash, latency, token counts (when available), and outcome class.
 
-## R-8. No cross-family data in prompts
-Prompt assembly never mixes chunks from more than one `family_id`. This is asserted in code, not just in policy.
+## R-8. No cross-community data in prompts
+Prompt assembly never mixes chunks from more than one `community_id`. This is asserted in code, not just in policy.
 
 ## R-9. Bounded provider behavior
 Provider calls have explicit timeouts and bounded retries. There is no unbounded wait or unbounded retry loop in any handler.

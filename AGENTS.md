@@ -73,7 +73,7 @@ Core service rule:
 8. Optional AI enrichments must be feature-flagged.
 9. No silent fallback may pretend that retrieval succeeded.
 10. Shared diary mode must preserve authorship.
-11. Host-specific types, provider SDKs, raw SQL, and use-case vocabulary (`family`, `child`, `parent`, "diary" as a type name) must not appear in newly added core code; new core code adopts the canonical `community` / `subject` vocabulary (D-041; see `docs/GLOSSARY.md`). Existing names persist until an explicit renaming packet (D-026).
+11. Host-specific types, provider SDKs, raw SQL, and use-case vocabulary (`family`, `child`, `parent`, "diary" as a type name) must not appear in newly added core code; core code uses the canonical `community` / `subject` vocabulary (D-041; see `docs/GLOSSARY.md`). The D-042 renaming roadmap has aligned the previously-deferred legacy identifiers with that vocabulary (D-026).
 
 ## Working Rules for Agents
 

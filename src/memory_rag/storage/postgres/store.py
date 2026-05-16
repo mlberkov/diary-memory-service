@@ -22,7 +22,7 @@ go through native binding. ``embedding_status`` on ``event_chunks`` is
 the per-chunk observable state (``pending`` / ``ready`` / ``failed``).
 
 Slice 3.3 (D-025): baseline hybrid retrieval. The dense leg is an exact
-family-scoped sequential scan ordered by ``embedding <=> query`` (cosine
+community-scoped sequential scan ordered by ``embedding <=> query`` (cosine
 distance) over the canonical ``vector(3072)`` column, joined to
 ``event_chunks`` on ``chunk_id`` and filtered to
 ``embedding_status='ready'`` and the active ``model_name``. The sparse

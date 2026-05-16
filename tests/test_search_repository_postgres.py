@@ -4,9 +4,9 @@ Skipped unless ``MEMORY_RAG_PG_TEST_DSN`` is set, mirroring
 ``test_postgres_store.py``. Exercises:
 
 - sparse via the generated tsvector column and ``websearch_to_tsquery('simple', ...)``,
-- dense via exact family-scoped scan over ``vector(3072)`` filtered to
+- dense via exact community-scoped scan over ``vector(3072)`` filtered to
   ``embedding_status='ready'`` and the active ``model_name``,
-- family scoping (I-7) on both legs,
+- community scoping (I-7) on both legs,
 - the dense-versus-substring proof: a paraphrased query reaches a chunk
   whose exact tokens are not in the query, via the dense leg.
 """

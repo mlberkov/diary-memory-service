@@ -10,7 +10,7 @@
 -- Phase 3.1+3.2 (D-024): pgvector is the dense-vector seam. ``vector(3072)``
 -- matches the production embedding contour (``text-embedding-3-large``,
 -- 3072 dim). No HNSW / IVFFlat index on the vector column — pgvector caps
--- those at 2000 dim; for Slice 3.3 the dense leg is an exact family-scoped
+-- those at 2000 dim; for Slice 3.3 the dense leg is an exact community-scoped
 -- sequential scan against the canonical vector(3072) column. A halfvec /
 -- HNSW migration belongs to a later quality-decision packet (A-36b).
 --
