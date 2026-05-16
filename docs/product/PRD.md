@@ -30,7 +30,7 @@ Core principles (D-026, D-027, D-041):
 - **community** — the outer scope that owns a note corpus and bounds retrieval and authorship. A community has one or more participants: a one-person community is the individual-memory (solo) use case, a multi-person community is the shared/group use case.
 - **subject** — a sub-entity within a community that a note can be about.
 
-In the first implemented use case a `family` is one community and a `child` is one subject. Use-case nouns (`family`, `child`, `parent`) remain in use-case-facing prose; internal identifiers keep their historical names until their own renaming packet (D-026, D-041).
+In the first implemented use case a `family` is one community and a `child` is one subject. Use-case nouns (`family`, `child`, `parent`) remain in use-case-facing prose; core code and schema use the canonical `community` / `subject` identifiers (D-026, D-041; see `docs/GLOSSARY.md`).
 
 ## 2. Problem
 
@@ -102,14 +102,14 @@ Heuristics MAY suggest a stronger route (note or ask) for plain text, but MUST N
 
 ### Naming note
 
-The Telegram command surface is `/note`, `/ask`, `/drafts`, `/export` (D-031). The no-command-→-draft default is in place (D-028) and the explicit `/draft` command was removed (D-030). Internal symbols (`RouteKind.ENTRY`, `detected_route='entry'`, `DiaryEntry`, `parse_diary_entry`, the `diary_rag` package, `family_id`) keep their historical names until their own renaming packets (D-026).
+The Telegram command surface is `/note`, `/ask`, `/drafts`, `/export` (D-031). The no-command-→-draft default is in place (D-028) and the explicit `/draft` command was removed (D-030). The D-042 renaming roadmap aligned the internal symbols with the canonical vocabulary — `RouteKind.NOTE`, `detected_route='note'`, `Note`, `parse_note`, the `memory_rag` package, and `community_id` (see `docs/GLOSSARY.md`).
 
 ## 6. Functional Scope
 
 ### In scope for MVP
 - Telegram text input,
 - explicit `/note`, `/ask`, and `/drafts` commands (the explicit `/draft` command was removed in D-030 — the no-command default carries the draft floor),
-- heuristic auto-routing by date presence on top of the draft floor: high-confidence ENTRY/ASK signals route as before; everything else persists as a draft (D-028),
+- heuristic auto-routing by date presence on top of the draft floor: high-confidence NOTE/ASK signals route as before; everything else persists as a draft (D-028),
 - date parsing,
 - line-by-line event splitting,
 - one event per chunk,

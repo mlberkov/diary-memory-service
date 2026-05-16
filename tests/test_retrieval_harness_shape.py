@@ -22,11 +22,11 @@ from pathlib import Path
 
 import pytest
 
-from diary_rag.adapters.embeddings.mock import MockEmbeddingClient
-from diary_rag.core.diary.models import EventChunk
-from diary_rag.core.embeddings.models import EmbeddingStatus
-from diary_rag.core.routing import InboundMessage, RouteKind
-from diary_rag.eval.retrieval.harness import (
+from memory_rag.adapters.embeddings.mock import MockEmbeddingClient
+from memory_rag.core.domain.models import EventChunk
+from memory_rag.core.embeddings.models import EmbeddingStatus
+from memory_rag.core.routing import InboundMessage, RouteKind
+from memory_rag.eval.retrieval.harness import (
     AggregateMetrics,
     CorpusMessage,
     GoldQuery,
@@ -42,8 +42,8 @@ from diary_rag.eval.retrieval.harness import (
     recall_at_k,
     run_harness,
 )
-from diary_rag.services.diary_service import DiaryService
-from diary_rag.storage.mock.store import MockDiaryStore
+from memory_rag.services.domain_service import DomainService
+from memory_rag.storage.mock.store import MockDomainStore
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GOLD_PATH = REPO_ROOT / "eval" / "retrieval" / "gold.json"
@@ -51,7 +51,7 @@ CORPUS_PATH = REPO_ROOT / "eval" / "retrieval" / "corpus.jsonl"
 
 
 def _build_chunks_for_source(
-    store: MockDiaryStore,
+    store: MockDomainStore,
 ) -> Callable[[str], list[EventChunk]]:
     def chunks_for_source(source_message_id: str) -> list[EventChunk]:
         return [
@@ -67,7 +67,7 @@ def _build_chunks_for_source(
 def _run_mock_end_to_end() -> HarnessReport:
     gold = load_gold(GOLD_PATH)
     corpus = load_corpus(CORPUS_PATH)
-    store = MockDiaryStore()
+    store = MockDomainStore()
     embedding_client = MockEmbeddingClient()
     chunks_for_source = _build_chunks_for_source(store)
     handles = ingest_fixture_corpus(store, chunks_for_source, embedding_client, corpus)
@@ -116,7 +116,7 @@ def test_per_query_shape_includes_diagnostic_rank_fields() -> None:
     for row in report.per_query:
         assert isinstance(row, PerQueryResult)
         assert isinstance(row.query, str)
-        assert isinstance(row.family_id, str) and row.family_id
+        assert isinstance(row.community_id, str) and row.community_id
         assert isinstance(row.expected_chunk_ids, tuple)
         assert isinstance(row.dense_top_k_ids, tuple)
         assert isinstance(row.sparse_top_k_ids, tuple)
@@ -177,12 +177,12 @@ def test_first_relevant_rank_pure() -> None:
 
 def test_ingest_fixture_corpus_resolves_handles() -> None:
     """``event_index`` is the 0-based EventChunk ordinal within the source message."""
-    store = MockDiaryStore()
+    store = MockDomainStore()
     embedding_client = MockEmbeddingClient()
     corpus = (
         CorpusMessage(
             external_message_id="t-1",
-            family_id="fam-x",
+            community_id="fam-x",
             author_user_id="u-1",
             raw_text="2026-05-15\n- first event line\n- second event line",
         ),
@@ -195,7 +195,7 @@ def test_ingest_fixture_corpus_resolves_handles() -> None:
 
 
 def test_mock_corpus_embeddings_have_honest_provenance() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     embedding_client = MockEmbeddingClient()
     corpus = load_corpus(CORPUS_PATH)
     chunks_for_source = _build_chunks_for_source(store)
@@ -206,12 +206,12 @@ def test_mock_corpus_embeddings_have_honest_provenance() -> None:
 
 
 def test_run_harness_raises_when_handle_unknown() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     embedding_client = MockEmbeddingClient()
     corpus = (
         CorpusMessage(
             external_message_id="t-1",
-            family_id="fam-x",
+            community_id="fam-x",
             author_user_id="u-1",
             raw_text="2026-05-15\n- single event",
         ),
@@ -219,7 +219,7 @@ def test_run_harness_raises_when_handle_unknown() -> None:
     chunks_for_source = _build_chunks_for_source(store)
     handles = ingest_fixture_corpus(store, chunks_for_source, embedding_client, corpus)
     gold = GoldSet(
-        queries=(GoldQuery(family_id="fam-x", query="anything", expected_handles=("t-9#7",)),)
+        queries=(GoldQuery(community_id="fam-x", query="anything", expected_handles=("t-9#7",)),)
     )
 
     def lookup(query: str) -> list[float]:
@@ -244,39 +244,39 @@ def test_postgres_mode_imports_cleanly_without_dsn() -> None:
     # Importing the CLI module must not require a DSN; only --mode postgres
     # at execution time needs it. Use a fresh subprocess so the import is
     # isolated from any DSN already set in this pytest run.
-    env = {k: v for k, v in os.environ.items() if k != "DIARY_RAG_PG_TEST_DSN"}
+    env = {k: v for k, v in os.environ.items() if k != "MEMORY_RAG_PG_TEST_DSN"}
     result = subprocess.run(
-        [sys.executable, "-c", "import diary_rag.eval.retrieval.__main__"],
+        [sys.executable, "-c", "import memory_rag.eval.retrieval.__main__"],
         env=env,
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0, result.stderr
 
-    from diary_rag.eval.retrieval.__main__ import main
+    from memory_rag.eval.retrieval.__main__ import main
 
-    with pytest.raises(RuntimeError, match="DIARY_RAG_PG_TEST_DSN is required"):
+    with pytest.raises(RuntimeError, match="MEMORY_RAG_PG_TEST_DSN is required"):
         main(["--mode", "postgres"])
 
 
 # -------------------------------------------------------------- smoke: ingest
 
 
-def test_diary_service_drives_corpus_ingestion() -> None:
-    """Sanity: ``DiaryService.ingest`` succeeds on every fixture corpus message."""
-    store = MockDiaryStore()
+def test_domain_service_drives_corpus_ingestion() -> None:
+    """Sanity: ``DomainService.ingest`` succeeds on every fixture corpus message."""
+    store = MockDomainStore()
     embedding_client = MockEmbeddingClient()
-    service = DiaryService(store, embedding_client=embedding_client)
+    service = DomainService(store, embedding_client=embedding_client)
     received_at = datetime.now(tz=UTC)
     corpus = load_corpus(CORPUS_PATH)
     for cm in corpus:
         inbound = InboundMessage(
             external_message_id=cm.external_message_id,
-            external_chat_id=cm.family_id,
+            external_chat_id=cm.community_id,
             external_user_id=cm.author_user_id,
             text=cm.raw_text,
             payload=cm.raw_text,
-            route=RouteKind.ENTRY,
+            route=RouteKind.NOTE,
             received_at=received_at,
             route_source="command",
         )

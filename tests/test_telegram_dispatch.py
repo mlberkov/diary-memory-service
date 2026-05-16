@@ -6,10 +6,10 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from diary_rag.adapters.telegram.webhook import get_dispatcher
-from diary_rag.app import create_app
-from diary_rag.config import Settings
-from diary_rag.core.routing import DispatchResult, InboundMessage, RouteKind
+from memory_rag.adapters.telegram.webhook import get_dispatcher
+from memory_rag.app import create_app
+from memory_rag.config import Settings
+from memory_rag.core.routing import DispatchResult, InboundMessage, RouteKind
 
 
 class RecordingDispatcher:
@@ -66,12 +66,12 @@ def test_dispatch_called_with_route_start_for_start_command() -> None:
     assert inbound.payload == ""
 
 
-def test_dispatch_called_with_route_entry_and_payload() -> None:
+def test_dispatch_called_with_route_note_and_payload() -> None:
     client, fake = _client_with_fake()
     response = _post(client, _message_update("/note 2026-05-09\nFoo"))
     assert response.status_code == 200
     assert len(fake.calls) == 1
-    assert fake.calls[0].route is RouteKind.ENTRY
+    assert fake.calls[0].route is RouteKind.NOTE
     assert fake.calls[0].payload == "2026-05-09\nFoo"
 
 
@@ -83,11 +83,11 @@ def test_dispatch_called_with_route_ask_for_question_command() -> None:
     assert fake.calls[0].payload == "what did we do?"
 
 
-def test_dispatch_called_with_route_entry_for_dated_plain_text() -> None:
+def test_dispatch_called_with_route_note_for_dated_plain_text() -> None:
     client, fake = _client_with_fake()
     response = _post(client, _message_update("2026-05-10\nLearned a new recipe"))
     assert response.status_code == 200
-    assert fake.calls[0].route is RouteKind.ENTRY
+    assert fake.calls[0].route is RouteKind.NOTE
     assert fake.calls[0].route_source == "heuristic"
     assert fake.calls[0].payload == "2026-05-10\nLearned a new recipe"
 
@@ -123,7 +123,7 @@ def test_dispatch_old_draft_command_is_treated_as_unknown() -> None:
     response = _post(client, _message_update("/draft groceries: milk, bread"))
     assert response.status_code == 200
     # ``/draft`` is no longer a recognised command token; with a non-empty body
-    # that doesn't look like an entry or question, the classifier routes to DRAFT
+    # that doesn't look like a note or question, the classifier routes to DRAFT
     # under the no-command-→-draft floor.
     assert fake.calls[0].route is RouteKind.DRAFT
     assert fake.calls[0].route_source == "heuristic"
@@ -134,7 +134,7 @@ def test_command_routing_wins_over_heuristic_when_command_present() -> None:
     client, fake = _client_with_fake()
     response = _post(client, _message_update("/note what is this?"))
     assert response.status_code == 200
-    assert fake.calls[0].route is RouteKind.ENTRY
+    assert fake.calls[0].route is RouteKind.NOTE
     assert fake.calls[0].route_source == "command"
     assert fake.calls[0].payload == "what is this?"
 

@@ -13,7 +13,7 @@
 - [ ] No invariant broken; new invariants added to `docs/INVARIANTS.md` or `docs/RUNTIME-INVARIANTS.md` if introduced.
 - [ ] No new assumption left undocumented; resolved assumptions promoted to `docs/decision-log.md` (next D-### id).
 - [ ] No Telegram-specific code outside the Telegram adapter (I-1).
-- [ ] No retrieval call without `family_id` (R-3).
+- [ ] No retrieval call without `community_id` (R-3).
 - [ ] No enrichment path that runs before raw persistence commits (I-3, R-1).
 - [ ] No provider call outside the adapter wrapper (I-11, R-7).
 - [ ] Optional AI enhancements remain feature-flagged and inspectable (I-10, R-6, R-12).

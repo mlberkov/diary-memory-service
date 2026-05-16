@@ -74,7 +74,7 @@ Validate the UX and routing model without real providers.
 - end-to-end smoke run.
 
 ### Definition of Done
-- one entry flow works,
+- one note flow works,
 - one query flow works,
 - logs show the full lifecycle,
 - no real external AI provider required yet.
@@ -95,7 +95,7 @@ Replace mocks with durable persistence and replayable ingestion.
 ### Definition of Done
 - raw source message is saved first,
 - parse/chunk steps are replayable,
-- data model covers source → entry → chunk lineage.
+- data model covers source → note → chunk lineage.
 
 ## Phase 3 — Embeddings and Hybrid Retrieval
 
@@ -114,7 +114,7 @@ Make diary memory searchable.
 ### Definition of Done
 - new chunks become searchable,
 - hybrid retrieval works on real data,
-- filtering by family/author/date scope works,
+- filtering by community/author/date scope works,
 - retrieval traces are inspectable.
 
 ## Phase 4 — Grounded Answer Pipeline
@@ -198,7 +198,7 @@ Measure whether the system is actually improving.
 Add product trust baseline: scope safety, raw data durability, and user-visible export.
 
 ### Build
-- family-scoped access control,
+- community-scoped access control,
 - authorship preservation,
 - visibility model,
 - raw export on demand in JSON or TXT (D-027),
@@ -207,7 +207,7 @@ Add product trust baseline: scope safety, raw data durability, and user-visible 
 - daily backup window (`03:00–05:00` target) and stronger-than-nightly recovery for raw data (D-027) — mechanism per deployment shape.
 
 ### Definition of Done
-- cross-family leakage is prevented,
+- cross-community leakage is prevented,
 - access behavior is explicit,
 - sensitive operations are traceable,
 - users can export their raw data on demand in either format,

@@ -2,7 +2,7 @@
 
 Mock backend exercises both retrieval legs: sparse matches via token
 overlap, dense matches via deterministic cosine over the mock embeddings
-(only identical text qualifies — see ``MockDiaryStore`` for why). RRF
+(only identical text qualifies — see ``MockDomainStore`` for why). RRF
 fuses the two ranked lists in the service layer.
 """
 
@@ -13,14 +13,14 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from diary_rag.adapters.answers import MockChatClient
-from diary_rag.adapters.embeddings import MockEmbeddingClient
-from diary_rag.core.answers import ChatProviderUnavailableError, ChatResponse
-from diary_rag.core.diary import DateRange, FallbackMode, RetrievalLeg
-from diary_rag.core.diary.answer_prompt import AnswerPrompt
-from diary_rag.core.routing import InboundMessage, RouteKind
-from diary_rag.services import DiaryService, QueryService
-from diary_rag.storage.mock import MockDiaryStore
+from memory_rag.adapters.answers import MockChatClient
+from memory_rag.adapters.embeddings import MockEmbeddingClient
+from memory_rag.core.answers import ChatProviderUnavailableError, ChatResponse
+from memory_rag.core.domain import DateRange, FallbackMode, RetrievalLeg
+from memory_rag.core.domain.answer_prompt import AnswerPrompt
+from memory_rag.core.routing import InboundMessage, RouteKind
+from memory_rag.services import DomainService, QueryService
+from memory_rag.storage.mock import MockDomainStore
 
 
 def _ask(query: str, *, chat: str = "42", user: str = "7") -> InboundMessage:
@@ -36,7 +36,7 @@ def _ask(query: str, *, chat: str = "42", user: str = "7") -> InboundMessage:
     )
 
 
-def _entry(
+def _note(
     payload: str, *, chat: str = "42", user: str = "7", msg_id: str = "100"
 ) -> InboundMessage:
     return InboundMessage(
@@ -44,25 +44,25 @@ def _entry(
         external_chat_id=chat,
         external_user_id=user,
         text=f"/note {payload}",
-        route=RouteKind.ENTRY,
+        route=RouteKind.NOTE,
         received_at=datetime.now(tz=UTC),
         route_source="command",
         payload=payload,
     )
 
 
-def _wire(store: MockDiaryStore, *, top_k: int = 5) -> QueryService:
+def _wire(store: MockDomainStore, *, top_k: int = 5) -> QueryService:
     return QueryService(store, store, MockEmbeddingClient(), MockChatClient(), top_k=top_k)
 
 
-def _ingest(store: MockDiaryStore, payload: str, *, chat: str = "42", msg_id: str = "100") -> None:
-    DiaryService(store, embedding_client=MockEmbeddingClient()).ingest(
-        _entry(payload, chat=chat, msg_id=msg_id)
+def _ingest(store: MockDomainStore, payload: str, *, chat: str = "42", msg_id: str = "100") -> None:
+    DomainService(store, embedding_client=MockEmbeddingClient()).ingest(
+        _note(payload, chat=chat, msg_id=msg_id)
     )
 
 
 def test_empty_store_returns_no_evidence() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     query = _wire(store)
 
     result = query.answer(_ask("anything"))
@@ -73,7 +73,7 @@ def test_empty_store_returns_no_evidence() -> None:
 
 
 def test_sparse_leg_recovers_keyword_match() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _ingest(store, "2026-05-09\nMorning routine\nTried a new book\nAnother book chapter")
     query = _wire(store)
 
@@ -87,7 +87,7 @@ def test_sparse_leg_recovers_keyword_match() -> None:
 
 
 def test_dense_leg_returns_identical_text_match() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _ingest(store, "2026-05-09\nWalked the dog")
     query = _wire(store)
 
@@ -98,7 +98,7 @@ def test_dense_leg_returns_identical_text_match() -> None:
 
 
 def test_unrelated_query_returns_no_evidence() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _ingest(store, "2026-05-09\nMorning routine")
     query = _wire(store)
 
@@ -109,7 +109,7 @@ def test_unrelated_query_returns_no_evidence() -> None:
 
 
 def test_cross_chat_isolation() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _ingest(store, "2026-05-09\nFamily A book", chat="42")
     _ingest(store, "2026-05-09\nFamily B novel", chat="99")
     query = _wire(store)
@@ -122,7 +122,7 @@ def test_cross_chat_isolation() -> None:
 
 
 def test_top_k_caps_evidence_count() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _ingest(store, "2026-05-09\nbook one\nbook two\nbook three\nbook four")
     query = _wire(store, top_k=2)
 
@@ -131,8 +131,8 @@ def test_top_k_caps_evidence_count() -> None:
     assert len(result.evidence) == 2
 
 
-def test_missing_family_id_raises() -> None:
-    store = MockDiaryStore()
+def test_missing_community_id_raises() -> None:
+    store = MockDomainStore()
     query = _wire(store)
 
     with pytest.raises(ValueError, match="external_chat_id"):
@@ -152,7 +152,7 @@ def test_missing_family_id_raises() -> None:
 
 
 def test_blank_query_returns_no_evidence() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _ingest(store, "2026-05-09\nMorning routine")
     query = _wire(store)
 
@@ -163,7 +163,7 @@ def test_blank_query_returns_no_evidence() -> None:
 
 def test_terminal_punctuation_does_not_block_match() -> None:
     """``recipe?`` normalizes to ``recipe`` before sparse tokenization."""
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _ingest(store, "2026-05-10\nLearned a new recipe")
     query = _wire(store)
 
@@ -174,7 +174,7 @@ def test_terminal_punctuation_does_not_block_match() -> None:
 
 
 def test_successful_retrieval_persists_query_and_hits() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _ingest(store, "2026-05-09\nMorning routine\nTried a new book")
     query = _wire(store)
 
@@ -184,7 +184,7 @@ def test_successful_retrieval_persists_query_and_hits() -> None:
     assert store.len_queries() == 1
     # Persisted Query mirrors the AnswerResult.
     persisted = next(iter(store._queries.values()))
-    assert persisted.family_id == "42"
+    assert persisted.community_id == "42"
     assert persisted.query_text == "book"
     assert persisted.fallback is FallbackMode.NONE
     assert persisted.model_name == MockEmbeddingClient().model_name
@@ -202,7 +202,7 @@ def test_successful_retrieval_persists_query_and_hits() -> None:
 
 
 def test_no_evidence_persists_query_with_zero_hits() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _ingest(store, "2026-05-09\nMorning routine")
     query = _wire(store)
 
@@ -218,7 +218,7 @@ def test_no_evidence_persists_query_with_zero_hits() -> None:
 
 
 def test_empty_query_persists_query_with_zero_hits() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _ingest(store, "2026-05-09\nMorning routine")
     query = _wire(store)
 
@@ -234,7 +234,7 @@ def test_empty_query_persists_query_with_zero_hits() -> None:
 
 def test_successful_retrieval_attaches_answer_context() -> None:
     """Slice 4.1: every successful retrieval carries an assembled context."""
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _ingest(store, "2026-05-09\nMorning routine\nTried a new book")
     query = _wire(store)
 
@@ -254,7 +254,7 @@ def test_successful_retrieval_attaches_answer_context() -> None:
 
 
 def test_no_evidence_attaches_empty_answer_context() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _ingest(store, "2026-05-09\nMorning routine")
     query = _wire(store)
 
@@ -267,7 +267,7 @@ def test_no_evidence_attaches_empty_answer_context() -> None:
 
 
 def test_empty_query_attaches_empty_answer_context() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     query = _wire(store)
 
     result = query.answer(_ask("   "))
@@ -279,7 +279,7 @@ def test_empty_query_attaches_empty_answer_context() -> None:
 
 
 def test_invalid_constructor_arguments() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     client = MockEmbeddingClient()
     chat = MockChatClient()
 
@@ -291,7 +291,7 @@ def test_invalid_constructor_arguments() -> None:
 
 def test_successful_answer_persists_answer_trace_with_chat_output() -> None:
     """Slice 4.3a: success persists an ``AnswerTrace`` with the LLM output."""
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _ingest(store, "2026-05-09\nMorning routine\nTried a new book")
     query = _wire(store)
 
@@ -318,7 +318,7 @@ def test_successful_answer_persists_answer_trace_with_chat_output() -> None:
 
 def test_no_evidence_persists_answer_trace_with_empty_context() -> None:
     """Slice 4.3a: no-evidence persists a trace with no chat call."""
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _ingest(store, "2026-05-09\nMorning routine")
     query = _wire(store)
 
@@ -340,7 +340,7 @@ def test_no_evidence_persists_answer_trace_with_empty_context() -> None:
 
 def test_empty_query_persists_answer_trace_with_empty_context() -> None:
     """Slice 4.3a: empty-query persists a trace with no chat call."""
-    store = MockDiaryStore()
+    store = MockDomainStore()
     query = _wire(store)
 
     result = query.answer(_ask("   "))
@@ -363,7 +363,7 @@ def test_empty_query_persists_answer_trace_with_empty_context() -> None:
 
 def test_answer_honors_date_range() -> None:
     """A per-call ``date_range`` narrows both legs to in-range chunks."""
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _ingest(store, "2026-05-09\nRead a book in May", msg_id="100")
     _ingest(store, "2026-06-15\nRead a book in June", msg_id="101")
     query = _wire(store)
@@ -376,7 +376,7 @@ def test_answer_honors_date_range() -> None:
 
 def test_answer_without_date_range_is_unchanged() -> None:
     """Omitting ``date_range`` retrieves across all dates (pre-3.4 shape)."""
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _ingest(store, "2026-05-09\nRead a book in May", msg_id="100")
     _ingest(store, "2026-06-15\nRead a book in June", msg_id="101")
     query = _wire(store)
@@ -457,7 +457,7 @@ class _MalformedChatClient:
         )
 
 
-def _wire_with_chat(store: MockDiaryStore, chat: object, *, top_k: int = 5) -> QueryService:
+def _wire_with_chat(store: MockDomainStore, chat: object, *, top_k: int = 5) -> QueryService:
     return QueryService(
         store,
         store,
@@ -471,7 +471,7 @@ def test_weak_evidence_marker_grades_query_and_trace(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """``uncertainty="uncertain"`` → ``FallbackMode.WEAK_EVIDENCE`` on Query + trace."""
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _ingest(store, "2026-05-09\nMorning routine\nTried a new book")
     query = _wire_with_chat(store, _MarkerChatClient("uncertain"))
 
@@ -496,7 +496,7 @@ def test_weak_evidence_marker_grades_query_and_trace(
 
 
 def test_ambiguous_marker_grades_query_and_trace() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _ingest(store, "2026-05-09\nMorning routine\nTried a new book")
     query = _wire_with_chat(store, _MarkerChatClient("ambiguous"))
 
@@ -524,7 +524,7 @@ def test_llm_no_evidence_marker_preserves_llm_text_and_context_ids() -> None:
     ``AnswerResult.evidence`` list stays non-empty so the Dispatcher
     can disambiguate at the reply surface (Decision 8, D-035).
     """
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _ingest(store, "2026-05-09\nMorning routine\nTried a new book")
     query = _wire_with_chat(
         store,
@@ -549,7 +549,7 @@ def test_llm_no_evidence_marker_preserves_llm_text_and_context_ids() -> None:
 
 
 def test_provider_unavailable_grades_query_and_trace() -> None:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _ingest(store, "2026-05-09\nMorning routine\nTried a new book")
     query = _wire_with_chat(store, _UnavailableChatClient())
 
@@ -573,7 +573,7 @@ def test_provider_unavailable_grades_query_and_trace() -> None:
 
 def test_parse_failure_grades_query_and_trace_with_raw_text() -> None:
     """PARSE_FAILURE preserves ``response.raw_text`` as trace.answer_text (forensics)."""
-    store = MockDiaryStore()
+    store = MockDomainStore()
     _ingest(store, "2026-05-09\nMorning routine\nTried a new book")
     query = _wire_with_chat(store, _MalformedChatClient())
 

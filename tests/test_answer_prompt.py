@@ -12,32 +12,32 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from diary_rag.core.diary import (
+from memory_rag.core.domain import (
     PROMPT_VERSION,
     AnswerContext,
     AnswerPrompt,
-    CrossFamilyContextError,
+    CrossCommunityContextError,
     EventChunk,
     build_answer_prompt,
 )
-from diary_rag.core.embeddings.models import EmbeddingStatus
+from memory_rag.core.embeddings.models import EmbeddingStatus
 
 
 def _chunk(
     chunk_id: str,
     *,
-    family_id: str = "fam-A",
+    community_id: str = "fam-A",
     text: str = "event text",
     event_index: int = 0,
-    entry_date: date = date(2026, 5, 9),
+    note_date: date = date(2026, 5, 9),
 ) -> EventChunk:
     return EventChunk(
         chunk_id=chunk_id,
-        diary_entry_id=f"entry-{chunk_id}",
+        note_id=f"note-{chunk_id}",
         source_message_id=f"src-{chunk_id}",
-        family_id=family_id,
+        community_id=community_id,
         author_user_id="user-1",
-        entry_date=entry_date,
+        note_date=note_date,
         event_index=event_index,
         chunk_text=text,
         created_at=datetime(2026, 5, 9, 8, 0, tzinfo=UTC),
@@ -88,7 +88,7 @@ def test_every_chunk_appears_in_user_text_and_cited_ids_in_order() -> None:
     for chunk in chunks:
         assert f"chunk_id={chunk.chunk_id}" in prompt.user_text
         assert chunk.chunk_text in prompt.user_text
-        assert chunk.entry_date.isoformat() in prompt.user_text
+        assert chunk.note_date.isoformat() in prompt.user_text
 
 
 def test_prompt_includes_query_text_in_user_section() -> None:
@@ -101,12 +101,12 @@ def test_prompt_includes_query_text_in_user_section() -> None:
 
 def test_cross_family_context_raises() -> None:
     chunks = (
-        _chunk("c-0", family_id="fam-A"),
-        _chunk("c-1", family_id="fam-B"),
+        _chunk("c-0", community_id="fam-A"),
+        _chunk("c-1", community_id="fam-B"),
     )
     context = _context(*chunks)
 
-    with pytest.raises(CrossFamilyContextError) as excinfo:
+    with pytest.raises(CrossCommunityContextError) as excinfo:
         build_answer_prompt(context)
 
     assert "fam-A" in str(excinfo.value)

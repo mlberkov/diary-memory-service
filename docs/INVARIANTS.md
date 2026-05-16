@@ -4,7 +4,7 @@ These hold at all times. Code that breaks any of them must not be merged. Changi
 
 Derived from `AGENTS.md` §Non-Negotiable Product Rules and `docs/product/TechSpec.md` §14.
 
-For the canonical `community` / `subject` vocabulary see `docs/GLOSSARY.md` and D-041. This file deliberately still names the current code identifiers (`family_id`, `DiaryEntry`, …) — its wording matches what code enforces today, not the target vocabulary.
+For the canonical `community` / `subject` vocabulary see `docs/GLOSSARY.md` and D-041. This file names the live code identifiers (`community_id`, `Note`, …) — its wording matches what code enforces today.
 
 ## I-1. Channel boundary
 Telegram is a channel, not the system of record. No Telegram-specific type or assumption may appear outside the channel adapter layer.
@@ -16,26 +16,26 @@ PostgreSQL is the durable system of record. Embeddings, indexes, and provider re
 Every inbound diary message is persisted as a `SourceMessage` before any enrichment (parsing, chunking, embedding, indexing). No enrichment step may run if raw persistence has not committed.
 
 ## I-4. Lineage preserved
-Every `EventChunk` references its `DiaryEntry` and `SourceMessage`. Lineage from chunk → entry → source → channel message is never lost.
+Every `EventChunk` references its `Note` and `SourceMessage`. Lineage from chunk → note → source → channel message is never lost.
 
 ## I-5. Event-per-chunk
 Each diary event line becomes exactly one `EventChunk`. Multiple events do not share a chunk; one event does not split across chunks.
 
 ## I-6. Authorship
-`author_user_id` is mandatory at `SourceMessage`, `DiaryEntry`, and `EventChunk`. Shared diary mode never erases authorship.
+`author_user_id` is mandatory at `SourceMessage`, `Note`, and `EventChunk`. Shared diary mode never erases authorship.
 
-## I-7. Family scoping
-Every persisted record outside `SourceMessage` carries `family_id`. No retrieval may cross families.
+## I-7. Community scoping
+Every persisted record outside `SourceMessage` carries `community_id`. No retrieval may cross communities.
 
 ## I-8. Hybrid retrieval
-The retrieval contract supports both dense and sparse signals. A retrieval backend that cannot deliver hybrid retrieval is not acceptable. Enforced as of D-025: `SearchRepository.dense_candidates` (exact family-scoped scan over `vector(3072)`) and `sparse_candidates` (Postgres FTS `tsvector('simple')`) are independently produced and fused by service-layer Reciprocal Rank Fusion.
+The retrieval contract supports both dense and sparse signals. A retrieval backend that cannot deliver hybrid retrieval is not acceptable. Enforced as of D-025: `SearchRepository.dense_candidates` (exact community-scoped scan over `vector(3072)`) and `sparse_candidates` (Postgres FTS `tsvector('simple')`) are independently produced and fused by service-layer Reciprocal Rank Fusion.
 
 ## I-9. Grounded answers
 Every answer references the chunks used as evidence (`AnswerTrace.context_chunk_ids`). An answer with no retrieved evidence must use an explicit `fallback_mode`, not a fabricated response.
 
 Retrieval-side trace persistence is enforced as of Slice 3.5 (D-032): every `/ask` call writes a `Query` row plus zero-or-more `RetrievalHit` rows carrying `leg ∈ {dense, sparse, merged}` so the chunks each leg saw and the chunks that survived RRF are inspectable via plain SQL.
 
-Citation grounding is enforced in code as of Slice 4.2 (D-033): `parse_structured_answer` (in `src/diary_rag/core/diary/answer_schema.py`) requires `StructuredAnswer.cited_chunk_ids` to be a subset of the `chunk_id`s in the `AnswerContext` that built the prompt; fabricated citations raise `FabricatedCitationError`. Empty `cited_chunk_ids` is permitted only when `uncertainty == "no_evidence"`; `"uncertain"` and `"ambiguous"` therefore require non-empty citations (Slice 4.3b, D-035).
+Citation grounding is enforced in code as of Slice 4.2 (D-033): `parse_structured_answer` (in `src/memory_rag/core/domain/answer_schema.py`) requires `StructuredAnswer.cited_chunk_ids` to be a subset of the `chunk_id`s in the `AnswerContext` that built the prompt; fabricated citations raise `FabricatedCitationError`. Empty `cited_chunk_ids` is permitted only when `uncertainty == "no_evidence"`; `"uncertain"` and `"ambiguous"` therefore require non-empty citations (Slice 4.3b, D-035).
 
 Answer-side trace persistence is enforced on every `/ask` reply as of Slice 4.3b (D-035): one `AnswerTrace` row is written per call (FK to `queries.query_id`, UNIQUE on `query_id`) recording `prompt_version`, `context_chunk_ids`, `answer_text`, `model_name`, `token_counts`, `latency_ms`, and `fallback_mode`. `Query.fallback` and `AnswerTrace.fallback_mode` are written from one decision per call so they always agree. Slice 4.3a (D-034) landed the seam on the success and no-evidence/empty-query contours; Slice 4.3b extended it to weak-evidence, ambiguous, the LLM-marker `no_evidence` sub-branch, provider-unavailable, and parse-failure. Live provider integration remains deferred to Phase 6.
 

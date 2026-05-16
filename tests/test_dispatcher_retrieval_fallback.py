@@ -22,10 +22,10 @@ from typing import Literal
 
 import pytest
 
-from diary_rag.config import Settings
-from diary_rag.core.diary import AnswerResult, Evidence, FallbackMode
-from diary_rag.core.routing import InboundMessage, RouteKind
-from diary_rag.services.dispatcher import Dispatcher
+from memory_rag.config import Settings
+from memory_rag.core.domain import AnswerResult, Evidence, FallbackMode
+from memory_rag.core.routing import InboundMessage, RouteKind
+from memory_rag.services.dispatcher import Dispatcher
 
 
 class _RaisingQueryService:
@@ -43,7 +43,7 @@ class _FixedAnswerQueryService:
         return self._result
 
 
-class _UnusedDiaryService:
+class _UnusedDomainService:
     def ingest(self, message: InboundMessage) -> object:  # pragma: no cover - not called
         raise AssertionError("ingest should not be called on an /ask path")
 
@@ -72,7 +72,7 @@ def _ask(
 
 def _build_dispatcher(answer: AnswerResult) -> Dispatcher:
     return Dispatcher(
-        _UnusedDiaryService(),  # type: ignore[arg-type]
+        _UnusedDomainService(),  # type: ignore[arg-type]
         _FixedAnswerQueryService(answer),  # type: ignore[arg-type]
         _UnusedExportService(),  # type: ignore[arg-type]
         Settings(_env_file=None),  # type: ignore[call-arg]
@@ -80,20 +80,20 @@ def _build_dispatcher(answer: AnswerResult) -> Dispatcher:
 
 
 def _evidence(text: str = "Walked the dog") -> list[Evidence]:
-    return [Evidence(chunk_id="c1", entry_date=date(2026, 5, 9), chunk_text=text)]
+    return [Evidence(chunk_id="c1", note_date=date(2026, 5, 9), chunk_text=text)]
 
 
 def test_not_implemented_error_translates_to_no_evidence(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     dispatcher = Dispatcher(
-        _UnusedDiaryService(),  # type: ignore[arg-type]
+        _UnusedDomainService(),  # type: ignore[arg-type]
         _RaisingQueryService(),  # type: ignore[arg-type]
         _UnusedExportService(),  # type: ignore[arg-type]
         Settings(_env_file=None),  # type: ignore[call-arg]
     )
 
-    with caplog.at_level(logging.WARNING, logger="diary_rag.services.dispatcher"):
+    with caplog.at_level(logging.WARNING, logger="memory_rag.services.dispatcher"):
         result = dispatcher.dispatch(_ask("book"))
 
     assert result.route is RouteKind.ASK

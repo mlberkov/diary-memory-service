@@ -6,8 +6,8 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from diary_rag.app import create_app
-from diary_rag.config import Settings
+from memory_rag.app import create_app
+from memory_rag.config import Settings
 
 
 def _settings(secret: str = "test-secret") -> Settings:

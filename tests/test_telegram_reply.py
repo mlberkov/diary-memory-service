@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from diary_rag.adapters.answers import MockChatClient
-from diary_rag.adapters.embeddings import MockEmbeddingClient
-from diary_rag.adapters.telegram.reply import build_send_message_payload
-from diary_rag.config import Settings
-from diary_rag.core.routing import InboundMessage, RouteKind, RouteSource
-from diary_rag.services import DiaryService, Dispatcher, ExportService, QueryService
-from diary_rag.storage.mock import MockDiaryStore
+from memory_rag.adapters.answers import MockChatClient
+from memory_rag.adapters.embeddings import MockEmbeddingClient
+from memory_rag.adapters.telegram.reply import build_send_message_payload
+from memory_rag.config import Settings
+from memory_rag.core.routing import InboundMessage, RouteKind, RouteSource
+from memory_rag.services import Dispatcher, DomainService, ExportService, QueryService
+from memory_rag.storage.mock import MockDomainStore
 
 
 def _inbound(
@@ -37,11 +37,11 @@ def _settings() -> Settings:
 
 
 def _dispatcher() -> Dispatcher:
-    store = MockDiaryStore()
+    store = MockDomainStore()
     embed = MockEmbeddingClient()
     chat = MockChatClient()
     return Dispatcher(
-        DiaryService(store, embedding_client=embed),
+        DomainService(store, embedding_client=embed),
         QueryService(store, store, embed, chat),
         ExportService(store),
         _settings(),
@@ -143,10 +143,10 @@ def test_dispatcher_clarify_reply_explains_both_commands() -> None:
     assert result.metadata["route_source"] == "heuristic"
 
 
-def test_dispatcher_appends_heuristic_marker_to_entry_reply() -> None:
+def test_dispatcher_appends_heuristic_marker_to_note_reply() -> None:
     result = _dispatcher().dispatch(
         _inbound(
-            RouteKind.ENTRY,
+            RouteKind.NOTE,
             text="2026-05-10\nLearned a new recipe",
             payload="2026-05-10\nLearned a new recipe",
             route_source="heuristic",
@@ -160,7 +160,7 @@ def test_dispatcher_appends_heuristic_marker_to_ask_reply() -> None:
     dispatcher = _dispatcher()
     dispatcher.dispatch(
         _inbound(
-            RouteKind.ENTRY,
+            RouteKind.NOTE,
             text="2026-05-10\nLearned a new recipe",
             payload="2026-05-10\nLearned a new recipe",
         )
@@ -177,10 +177,10 @@ def test_dispatcher_appends_heuristic_marker_to_ask_reply() -> None:
     assert result.metadata["route_source"] == "heuristic"
 
 
-def test_command_routed_entry_reply_has_no_heuristic_marker() -> None:
+def test_command_routed_note_reply_has_no_heuristic_marker() -> None:
     result = _dispatcher().dispatch(
         _inbound(
-            RouteKind.ENTRY,
+            RouteKind.NOTE,
             text="/note 2026-05-10\nA",
             payload="2026-05-10\nA",
         )

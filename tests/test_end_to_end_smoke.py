@@ -1,6 +1,6 @@
 """End-to-end webhook smoke: /note then /ask via TestClient.
 
-Each test wires a fresh ``MockDiaryStore`` + ``Dispatcher`` into the
+Each test wires a fresh ``MockDomainStore`` + ``Dispatcher`` into the
 FastAPI app via ``app.dependency_overrides`` so per-test state is
 isolated from the module-level singleton in ``webhook.py``. The
 ``QueryService`` runs the baseline hybrid path (D-025): on the mock
@@ -17,16 +17,16 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from diary_rag.adapters.answers import MockChatClient
-from diary_rag.adapters.embeddings import MockEmbeddingClient
-from diary_rag.adapters.telegram.webhook import get_dispatcher
-from diary_rag.app import create_app
-from diary_rag.config import Settings
-from diary_rag.core.answers import ChatClient, ChatResponse
-from diary_rag.core.diary import FallbackMode
-from diary_rag.core.diary.answer_prompt import AnswerPrompt
-from diary_rag.services import DiaryService, Dispatcher, ExportService, QueryService
-from diary_rag.storage.mock import MockDiaryStore
+from memory_rag.adapters.answers import MockChatClient
+from memory_rag.adapters.embeddings import MockEmbeddingClient
+from memory_rag.adapters.telegram.webhook import get_dispatcher
+from memory_rag.app import create_app
+from memory_rag.config import Settings
+from memory_rag.core.answers import ChatClient, ChatResponse
+from memory_rag.core.domain import FallbackMode
+from memory_rag.core.domain.answer_prompt import AnswerPrompt
+from memory_rag.services import Dispatcher, DomainService, ExportService, QueryService
+from memory_rag.storage.mock import MockDomainStore
 
 
 def _settings() -> Settings:
@@ -35,13 +35,13 @@ def _settings() -> Settings:
 
 def _client_with_fresh_store(
     *, chat_client: ChatClient | None = None
-) -> tuple[TestClient, MockDiaryStore]:
-    store = MockDiaryStore()
+) -> tuple[TestClient, MockDomainStore]:
+    store = MockDomainStore()
     embed = MockEmbeddingClient()
     chat: ChatClient = chat_client if chat_client is not None else MockChatClient()
     settings = _settings()
     dispatcher = Dispatcher(
-        DiaryService(store, embedding_client=embed),
+        DomainService(store, embedding_client=embed),
         QueryService(store, store, embed, chat),
         ExportService(store),
         settings,
@@ -82,15 +82,15 @@ def _update(
     }
 
 
-def test_entry_then_ask_returns_grounded_reply_with_date() -> None:
+def test_note_then_ask_returns_grounded_reply_with_date() -> None:
     client, store = _client_with_fresh_store()
 
-    entry_resp = _post(
+    note_resp = _post(
         client,
         _update("/note 2026-05-09\nHad a calm morning\nTried a new book", update_id=1),
     )
-    assert entry_resp.status_code == 200
-    assert entry_resp.json()["text"] == "Saved 2 events for 2026-05-09."
+    assert note_resp.status_code == 200
+    assert note_resp.json()["text"] == "Saved 2 events for 2026-05-09."
     assert store.len_chunks() == 2
 
     ask_resp = _post(client, _update("/ask book", update_id=2, message_id=2))
@@ -139,7 +139,7 @@ def test_ask_with_no_match_returns_no_evidence_fallback() -> None:
     assert trace.answer_text == ""
 
 
-def test_entry_with_invalid_first_line_returns_invalid_input_and_persists_source() -> None:
+def test_note_with_invalid_first_line_returns_invalid_input_and_persists_source() -> None:
     client, store = _client_with_fresh_store()
 
     resp = _post(client, _update("/note not-a-date\nfoo", update_id=1))
@@ -149,11 +149,11 @@ def test_entry_with_invalid_first_line_returns_invalid_input_and_persists_source
         "Mock /note needs an ISO date (YYYY-MM-DD) on the first line. Got: 'not-a-date'."
     )
     assert store.len_sources() == 1
-    assert store.len_entries() == 0
+    assert store.len_notes() == 0
     assert store.len_chunks() == 0
 
 
-def test_ask_before_any_entry_returns_no_evidence() -> None:
+def test_ask_before_any_note_returns_no_evidence() -> None:
     client, _ = _client_with_fresh_store()
 
     resp = _post(client, _update("/ask anything", update_id=1))
@@ -162,7 +162,7 @@ def test_ask_before_any_entry_returns_no_evidence() -> None:
     assert resp.json()["text"] == "No memories matched 'anything'."
 
 
-def test_dated_plain_text_is_ingested_as_entry_via_heuristic() -> None:
+def test_dated_plain_text_is_ingested_as_note_via_heuristic() -> None:
     client, store = _client_with_fresh_store()
 
     resp = _post(client, _update("2026-05-10\nLearned a new recipe\nWalked 5km", update_id=1))
@@ -200,7 +200,7 @@ def test_ambiguous_plain_text_persists_as_draft_under_no_command_default() -> No
     assert body["text"].startswith("Stored as draft")
     assert "/note" in body["text"]
     assert store.len_sources() == 1
-    assert store.len_entries() == 0
+    assert store.len_notes() == 0
     assert store.len_chunks() == 0
 
 
@@ -215,7 +215,7 @@ def test_no_command_plain_text_persists_as_draft_and_skips_enrichment() -> None:
     body = resp.json()
     assert body["text"].startswith("Stored as draft")
     assert store.len_sources() == 1
-    assert store.len_entries() == 0
+    assert store.len_notes() == 0
     assert store.len_chunks() == 0
     assert store.len_embeddings() == 0
 
@@ -226,7 +226,7 @@ def test_replayed_draft_returns_same_reply_and_does_not_duplicate(
     client, store = _client_with_fresh_store()
     payload = _update("recipe yesterday", update_id=1, message_id=77)
 
-    with caplog.at_level(logging.INFO, logger="diary_rag.adapters.telegram.webhook"):
+    with caplog.at_level(logging.INFO, logger="memory_rag.adapters.telegram.webhook"):
         first = _post(client, payload)
         second = _post(client, payload)
 
@@ -241,7 +241,7 @@ def test_replayed_draft_returns_same_reply_and_does_not_duplicate(
     assert any("lifecycle=draft" in line and "effective_path=replay" in line for line in paths)
 
 
-def test_replayed_entry_returns_same_reply_and_does_not_duplicate(
+def test_replayed_note_returns_same_reply_and_does_not_duplicate(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     client, store = _client_with_fresh_store()
@@ -251,7 +251,7 @@ def test_replayed_entry_returns_same_reply_and_does_not_duplicate(
         message_id=99,
     )
 
-    with caplog.at_level(logging.INFO, logger="diary_rag.adapters.telegram.webhook"):
+    with caplog.at_level(logging.INFO, logger="memory_rag.adapters.telegram.webhook"):
         first = _post(client, payload)
         second = _post(client, payload)
 
@@ -260,7 +260,7 @@ def test_replayed_entry_returns_same_reply_and_does_not_duplicate(
     assert first.json() == second.json()
     assert second.json()["text"] == "Saved 2 events for 2026-05-09."
     assert store.len_sources() == 1
-    assert store.len_entries() == 1
+    assert store.len_notes() == 1
     assert store.len_chunks() == 2
 
     paths = [line for line in caplog.text.splitlines() if "telegram.webhook" in line]
@@ -288,7 +288,7 @@ def test_edited_message_is_distinct_state_from_original() -> None:
     assert first.status_code == 200
     assert edited.status_code == 200
     assert store.len_sources() == 2
-    assert store.len_entries() == 2
+    assert store.len_notes() == 2
     assert store.len_chunks() == 5
 
 
@@ -323,7 +323,7 @@ def test_weak_evidence_marker_surfaces_trailer_and_persists_trace(
 
     _post(client, _update("/note 2026-05-09\nTried a new book", update_id=1))
 
-    with caplog.at_level(logging.INFO, logger="diary_rag.services.query_service"):
+    with caplog.at_level(logging.INFO, logger="memory_rag.services.query_service"):
         resp = _post(client, _update("/ask book", update_id=2, message_id=2))
 
     assert resp.status_code == 200

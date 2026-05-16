@@ -1,10 +1,10 @@
 """Heuristic classifier unit tests.
 
 Covers each classification rule in
-``src/diary_rag/core/routing/classifier.py`` plus edge cases the
+``src/memory_rag/core/routing/classifier.py`` plus edge cases the
 PRD heuristic does not address explicitly. Under the draft floor
 (D-027 / R-13), any non-empty text that does not match the high-
-confidence ENTRY or ASK rules falls through to ``RouteKind.DRAFT``
+confidence NOTE or ASK rules falls through to ``RouteKind.DRAFT``
 so the dispatcher persists the raw text rather than discarding it.
 ``CLARIFY`` remains the empty/whitespace branch (defensive — the
 webhook short-circuits empty text before reaching the classifier).
@@ -14,20 +14,20 @@ from __future__ import annotations
 
 import pytest
 
-from diary_rag.core.routing import RouteKind
-from diary_rag.core.routing.classifier import classify_plain_text
+from memory_rag.core.routing import RouteKind
+from memory_rag.core.routing.classifier import classify_plain_text
 
 
-def test_dated_multi_line_classifies_as_entry() -> None:
+def test_dated_multi_line_classifies_as_note() -> None:
     result = classify_plain_text("2026-05-10\nLearned a new recipe\nWalked 5km")
-    assert result.route is RouteKind.ENTRY
+    assert result.route is RouteKind.NOTE
     assert result.confidence == "high"
     assert result.reason == "first_line_iso_date_with_events"
 
 
-def test_dated_with_leading_blank_lines_classifies_as_entry() -> None:
+def test_dated_with_leading_blank_lines_classifies_as_note() -> None:
     result = classify_plain_text("\n\n2026-05-10\nMorning routine")
-    assert result.route is RouteKind.ENTRY
+    assert result.route is RouteKind.NOTE
     assert result.confidence == "high"
 
 
@@ -97,7 +97,7 @@ def test_empty_or_whitespace_classifies_as_clarify(text: str) -> None:
     assert result.reason == "empty_after_strip"
 
 
-def test_payload_preserves_original_text_for_dated_entry() -> None:
+def test_payload_preserves_original_text_for_dated_note() -> None:
     text = "2026-05-10\nLearned a new recipe"
     result = classify_plain_text(text)
     assert result.payload == text

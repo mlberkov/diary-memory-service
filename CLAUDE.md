@@ -58,7 +58,7 @@ You must preserve these architectural rules:
 7. Every answer must be grounded in retrieved evidence.
 8. Shared diary mode must preserve authorship.
 9. Optional AI enrichments are feature-flagged.
-10. Host-specific types, provider SDKs, raw SQL, and use-case vocabulary (`family`, `child`, `parent`, "diary" as a type name) must not appear in newly added core code; new core code adopts the canonical `community` / `subject` vocabulary (D-041; see `docs/GLOSSARY.md`). Existing names persist until an explicit renaming packet (D-026).
+10. Host-specific types, provider SDKs, raw SQL, and use-case vocabulary (`family`, `child`, `parent`, "diary" as a type name) must not appear in newly added core code; core code uses the canonical `community` / `subject` vocabulary (D-041; see `docs/GLOSSARY.md`). The D-042 renaming roadmap has aligned the previously-deferred legacy identifiers with that vocabulary (D-026).
 
 ## Implementation Style
 
@@ -121,7 +121,7 @@ Do not add to core code:
 - use-case vocabulary (`family`, `child`, `parent`, "diary" as a type name) in newly added types or function names,
 - assumptions that the runtime is HTTP-shaped, Telegram-shaped, single-tenant, internet-connected, or English-only.
 
-Each of these belongs behind its adapter seam (event source, control surface, storage, provider, tenant mapping). Use-case-specific scope is carried as opaque identifiers, not encoded in core types; the canonical core terms are `community` and `subject` (D-041; see `docs/GLOSSARY.md`). Existing names (`family_id`, `DiaryRepository`, `DiaryEntry`, the `diary_rag` package) persist until an explicit renaming packet.
+Each of these belongs behind its adapter seam (event source, control surface, storage, provider, tenant mapping). Use-case-specific scope is carried as opaque identifiers, not encoded in core types; the canonical core terms are `community` and `subject` (D-041; see `docs/GLOSSARY.md`). The D-042 renaming roadmap renamed the legacy identifiers to that vocabulary (`community_id`, `DomainRepository`, `Note`, the `memory_rag` package).
 
 ## Documentation Rule
 

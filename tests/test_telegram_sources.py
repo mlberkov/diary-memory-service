@@ -16,17 +16,17 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from diary_rag.adapters.answers import MockChatClient
-from diary_rag.adapters.embeddings import MockEmbeddingClient
-from diary_rag.adapters.telegram.webhook import get_dispatcher, get_telegram_client
-from diary_rag.app import create_app
-from diary_rag.config import Settings
-from diary_rag.core.diary import AnswerResult, Evidence, FallbackMode
-from diary_rag.core.diary.models import AnswerContext, EventChunk
-from diary_rag.core.embeddings import EmbeddingStatus
-from diary_rag.core.routing import InboundMessage
-from diary_rag.services import DiaryService, Dispatcher, ExportService, QueryService
-from diary_rag.storage.mock import MockDiaryStore
+from memory_rag.adapters.answers import MockChatClient
+from memory_rag.adapters.embeddings import MockEmbeddingClient
+from memory_rag.adapters.telegram.webhook import get_dispatcher, get_telegram_client
+from memory_rag.app import create_app
+from memory_rag.config import Settings
+from memory_rag.core.domain import AnswerResult, Evidence, FallbackMode
+from memory_rag.core.domain.models import AnswerContext, EventChunk
+from memory_rag.core.embeddings import EmbeddingStatus
+from memory_rag.core.routing import InboundMessage
+from memory_rag.services import Dispatcher, DomainService, ExportService, QueryService
+from memory_rag.storage.mock import MockDomainStore
 
 
 class _RecordingTelegramClient:
@@ -68,11 +68,11 @@ def _update(text: str, *, update_id: int = 1, message_id: int = 1) -> dict[str, 
 def _chunk(chunk_id: str, text: str) -> EventChunk:
     return EventChunk(
         chunk_id=chunk_id,
-        diary_entry_id=f"e-{chunk_id}",
+        note_id=f"e-{chunk_id}",
         source_message_id=f"s-{chunk_id}",
-        family_id="42",
+        community_id="42",
         author_user_id="7",
-        entry_date=date(2026, 5, 9),
+        note_date=date(2026, 5, 9),
         event_index=0,
         chunk_text=text,
         created_at=datetime.now(tz=UTC),
@@ -93,7 +93,7 @@ class _FixedAnswerQueryService:
             created_at=datetime.now(tz=UTC),
         )
         evidence = [
-            Evidence(chunk_id=c.chunk_id, entry_date=c.entry_date, chunk_text=c.chunk_text)
+            Evidence(chunk_id=c.chunk_id, note_date=c.note_date, chunk_text=c.chunk_text)
             for c in self._chunks
         ]
         return AnswerResult(
@@ -109,7 +109,7 @@ def _build_client(
     chunks: tuple[EventChunk, ...] | None = None,
 ) -> tuple[TestClient, _RecordingTelegramClient]:
     settings = _settings()
-    store = MockDiaryStore()
+    store = MockDomainStore()
     embed = MockEmbeddingClient()
     chat = MockChatClient()
     if chunks is None:
@@ -117,7 +117,7 @@ def _build_client(
     else:
         query_service = _FixedAnswerQueryService(chunks)
     dispatcher = Dispatcher(
-        DiaryService(store, embedding_client=embed),
+        DomainService(store, embedding_client=embed),
         query_service,
         ExportService(store),
         settings,

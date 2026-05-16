@@ -1,7 +1,7 @@
 """Optional live OpenAI smoke for :class:`OpenAIEmbeddingClient` (D-024).
 
 This test is **not part of the standard packet gate**. It hits the real
-OpenAI API and is skipped unless ``DIARY_RAG_OPENAI_TEST_KEY`` is set,
+OpenAI API and is skipped unless ``MEMORY_RAG_OPENAI_TEST_KEY`` is set,
 which matches the gating pattern used for ``test_postgres_store.py``.
 
 When enabled it verifies that ``text-embedding-3-large`` with
@@ -15,13 +15,13 @@ import os
 
 import pytest
 
-from diary_rag.adapters.embeddings.openai_client import OpenAIEmbeddingClient
+from memory_rag.adapters.embeddings.openai_client import OpenAIEmbeddingClient
 
-OPENAI_TEST_KEY = os.environ.get("DIARY_RAG_OPENAI_TEST_KEY")
+OPENAI_TEST_KEY = os.environ.get("MEMORY_RAG_OPENAI_TEST_KEY")
 
 pytestmark = pytest.mark.skipif(
     OPENAI_TEST_KEY is None,
-    reason="DIARY_RAG_OPENAI_TEST_KEY not set; live OpenAI smoke skipped.",
+    reason="MEMORY_RAG_OPENAI_TEST_KEY not set; live OpenAI smoke skipped.",
 )
 
 

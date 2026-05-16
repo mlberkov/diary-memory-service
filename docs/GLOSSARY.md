@@ -24,9 +24,24 @@ Use-case nouns (`family`, `child`, `parent`) stay in use-case-facing prose. They
 
 ## Identifiers
 
-Existing internal identifiers keep their historical names until their own renaming packet (D-026; the ordered, non-destructive roadmap is the next packet of the D-041 milestone). These include `family_id`, `child_id`, `DiaryEntry`, `entry_date` / `entry_text`, `parse_diary_entry`, `DiaryRepository`, the `diary_rag` package, and `RouteKind.ENTRY` / `detected_route='entry'`.
+The D-042 renaming roadmap (`docs/RENAMING-ROADMAP.md`) renamed the diary-shaped internal identifiers to the canonical vocabulary. The legacy names below are historical; code, schema, and tests now use the live names:
 
-`docs/INVARIANTS.md` and `docs/RUNTIME-INVARIANTS.md` therefore still describe these current identifier names: their wording matches what code enforces today, not the target vocabulary. Naming the canonical terms here does not rename anything in code or schema.
+| Legacy identifier | Live identifier |
+| --- | --- |
+| `family_id` | `community_id` |
+| `DiaryEntry` | `Note` |
+| `entry_date` / `entry_text` | `note_date` / `note_text` |
+| `diary_entry_id` | `note_id` |
+| `ParsedEntry` / `parse_diary_entry` | `ParsedNote` / `parse_note` |
+| `diary_entries` table | `notes` table |
+| `RouteKind.ENTRY` / `detected_route='entry'` | `RouteKind.NOTE` / `detected_route='note'` |
+| `DiaryRepository` | `DomainRepository` |
+| `DiaryService` | `DomainService` |
+| `*DiaryStore` / `HybridDiaryStore` | `*DomainStore` / `HybridDomainStore` |
+| `core/diary/` module | `core/domain/` module |
+| `diary_rag` package | `memory_rag` package |
+
+`child_id` was never present in code; child scoping, when introduced, is born directly as `subject_id` (D-040). `docs/INVARIANTS.md` and `docs/RUNTIME-INVARIANTS.md` describe the live identifier names — their wording matches what code enforces today. Naming the canonical terms here does not rename anything in code or schema.
 
 ## See also
 

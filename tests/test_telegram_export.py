@@ -9,16 +9,16 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from diary_rag.adapters.answers import MockChatClient
-from diary_rag.adapters.embeddings import MockEmbeddingClient
-from diary_rag.adapters.telegram.client import TelegramClient
-from diary_rag.adapters.telegram.commands import parse_command
-from diary_rag.adapters.telegram.webhook import get_dispatcher, get_telegram_client
-from diary_rag.app import create_app
-from diary_rag.config import Settings
-from diary_rag.core.routing import RouteKind
-from diary_rag.services import DiaryService, Dispatcher, ExportService, QueryService
-from diary_rag.storage.mock import MockDiaryStore
+from memory_rag.adapters.answers import MockChatClient
+from memory_rag.adapters.embeddings import MockEmbeddingClient
+from memory_rag.adapters.telegram.client import TelegramClient
+from memory_rag.adapters.telegram.commands import parse_command
+from memory_rag.adapters.telegram.webhook import get_dispatcher, get_telegram_client
+from memory_rag.app import create_app
+from memory_rag.config import Settings
+from memory_rag.core.routing import RouteKind
+from memory_rag.services import Dispatcher, DomainService, ExportService, QueryService
+from memory_rag.storage.mock import MockDomainStore
 
 
 class RecordingTelegramClient:
@@ -62,13 +62,13 @@ def _settings() -> Settings:
 
 def _client_with(
     telegram_client: TelegramClient | None = None,
-) -> tuple[TestClient, MockDiaryStore, TelegramClient]:
-    store = MockDiaryStore()
+) -> tuple[TestClient, MockDomainStore, TelegramClient]:
+    store = MockDomainStore()
     embed = MockEmbeddingClient()
     chat = MockChatClient()
     settings = _settings()
     dispatcher = Dispatcher(
-        DiaryService(store, embedding_client=embed),
+        DomainService(store, embedding_client=embed),
         QueryService(store, store, embed, chat),
         ExportService(store),
         settings,
@@ -102,27 +102,27 @@ def _update(text: str) -> dict[str, Any]:
     }
 
 
-def _seed_one(store: MockDiaryStore) -> None:
+def _seed_one(store: MockDomainStore) -> None:
     _post_or_seed(store)
 
 
-def _post_or_seed(store: MockDiaryStore) -> None:
+def _post_or_seed(store: MockDomainStore) -> None:
     """Seed one note row directly through the store so /export has content."""
     from datetime import UTC, datetime
 
-    from diary_rag.core.diary.models import SourceMessage
+    from memory_rag.core.domain.models import SourceMessage
 
     store.save_source_message(
         SourceMessage(
             source_message_id="seed-1",
-            family_id="42",
+            community_id="42",
             author_user_id="7",
             external_chat_id="42",
             external_user_id="7",
             external_message_id="100",
             edit_seq=0,
             raw_text="seeded content",
-            detected_route=RouteKind.ENTRY,
+            detected_route=RouteKind.NOTE,
             created_at=datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC),
         )
     )
@@ -218,7 +218,7 @@ def test_export_delivery_failure_returns_send_message_error(
 ) -> None:
     client, store, _telegram_client = _client_with(telegram_client=FailingTelegramClient())
     _seed_one(store)
-    with caplog.at_level(logging.WARNING, logger="diary_rag.adapters.telegram.webhook"):
+    with caplog.at_level(logging.WARNING, logger="memory_rag.adapters.telegram.webhook"):
         response = _post(client, _update("/export json"))
     assert response.status_code == 200
     body = response.json()

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from diary_rag.adapters.embeddings import MockEmbeddingClient
+from memory_rag.adapters.embeddings import MockEmbeddingClient
 
 
 def test_mock_client_reports_mock_model_name() -> None:

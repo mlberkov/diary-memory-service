@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from diary_rag.adapters.telegram.drafts_packing import pack_drafts_into_messages
+from memory_rag.adapters.telegram.drafts_packing import pack_drafts_into_messages
 
 
 def test_header_alone_returns_single_message() -> None:

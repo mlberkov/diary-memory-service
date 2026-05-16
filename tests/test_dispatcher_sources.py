@@ -8,7 +8,7 @@ exercise the lifecycle invariants the owner committed to in D-036:
 - Non-empty ``answer.context.ordered_chunks`` → overwrite.
 - Empty (empty-query, empty-retrieval, retrieval-unavailable) → clear.
 - Only ``/ask`` touches the cache; other routes leave it intact.
-- The cache is per-family.
+- The cache is per-community.
 
 These tests use a stub ``QueryService`` so the dispatcher's behaviour
 is exercised independently of retrieval / chat / repository wiring.
@@ -19,22 +19,22 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from typing import Literal
 
-from diary_rag.config import Settings
-from diary_rag.core.diary import AnswerResult, Evidence, FallbackMode
-from diary_rag.core.diary.models import AnswerContext, EventChunk
-from diary_rag.core.embeddings import EmbeddingStatus
-from diary_rag.core.routing import InboundMessage, RouteKind
-from diary_rag.services.dispatcher import Dispatcher
+from memory_rag.config import Settings
+from memory_rag.core.domain import AnswerResult, Evidence, FallbackMode
+from memory_rag.core.domain.models import AnswerContext, EventChunk
+from memory_rag.core.embeddings import EmbeddingStatus
+from memory_rag.core.routing import InboundMessage, RouteKind
+from memory_rag.services.dispatcher import Dispatcher
 
 
-def _chunk(chunk_id: str, text: str, *, family_id: str = "fam-A") -> EventChunk:
+def _chunk(chunk_id: str, text: str, *, community_id: str = "fam-A") -> EventChunk:
     return EventChunk(
         chunk_id=chunk_id,
-        diary_entry_id=f"entry-{chunk_id}",
+        note_id=f"note-{chunk_id}",
         source_message_id=f"src-{chunk_id}",
-        family_id=family_id,
+        community_id=community_id,
         author_user_id="user-1",
-        entry_date=date(2026, 5, 9),
+        note_date=date(2026, 5, 9),
         event_index=0,
         chunk_text=text,
         created_at=datetime.now(tz=UTC),
@@ -60,7 +60,7 @@ def _answer(
     answer_text: str | None = None,
 ) -> AnswerResult:
     evidence = [
-        Evidence(chunk_id=c.chunk_id, entry_date=c.entry_date, chunk_text=c.chunk_text)
+        Evidence(chunk_id=c.chunk_id, note_date=c.note_date, chunk_text=c.chunk_text)
         for c in chunks
     ]
     context: AnswerContext | None
@@ -89,7 +89,7 @@ class _ScriptedQueryService:
         return self._answers.pop(0)
 
 
-class _UnusedDiaryService:
+class _UnusedDomainService:
     def ingest(self, message: InboundMessage) -> object:  # pragma: no cover
         raise AssertionError("ingest should not be called on /ask or /sources")
 
@@ -101,7 +101,7 @@ class _UnusedExportService:
 
 def _dispatcher(answers: list[AnswerResult]) -> Dispatcher:
     return Dispatcher(
-        _UnusedDiaryService(),  # type: ignore[arg-type]
+        _UnusedDomainService(),  # type: ignore[arg-type]
         _ScriptedQueryService(answers),  # type: ignore[arg-type]
         _UnusedExportService(),  # type: ignore[arg-type]
         Settings(_env_file=None),  # type: ignore[call-arg]
@@ -297,7 +297,7 @@ def test_parse_failure_ask_overwrites_cache_with_retrieved_chunks() -> None:
 
 def test_two_family_caches_are_independent() -> None:
     a_chunks = (_chunk("a-1", "Family A note"),)
-    b_chunks = (_chunk("b-1", "Family B note", family_id="fam-B"),)
+    b_chunks = (_chunk("b-1", "Family B note", community_id="fam-B"),)
     dispatcher = _dispatcher(
         [
             _answer(fallback=FallbackMode.NONE, query_text="A?", chunks=a_chunks),

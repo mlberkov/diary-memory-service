@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from diary_rag.adapters.telegram.models import TelegramUpdate
+from memory_rag.adapters.telegram.models import TelegramUpdate
 
 
 def test_telegram_update_parses_minimal_message_update() -> None:
