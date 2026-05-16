@@ -33,7 +33,7 @@ When an item is decided, move it to `docs/decision-log.md` (next D-### id) and r
 | A-28 | Mock `/note` accepts ISO-only `YYYY-MM-DD` on first line | Demos misclassify locale dates / relative dates as invalid | Replaced by A-12 decision (Phase 2.3) | agent | Phase 2.3 |
 | ~~A-29~~ | ~~Mock retrieval is case-insensitive substring match~~ | — | — | — | Closed → D-025 (baseline hybrid retrieval lands) |
 | ~~A-30~~ | ~~Mock state is process-local and non-idempotent~~ | — | — | — | Closed → D-023 |
-| A-34 | No migration tool; local schema upgrades are destructive | Production schema evolution unsafe; dev volume drops feel like data loss | Document destructive upgrade in RUNBOOK; revisit before non-local deploy | agent | before prod |
+| ~~A-34~~ | ~~No migration tool; local schema upgrades are destructive~~ | — | — | — | Closed → D-046 (OP-1.2 — non-destructive schema-changing upgrade `0002` demonstrated over populated data; OP-1 complete) |
 | A-36b | 3072-dim ANN index strategy deferred | Latency at scale once corpus grows past exact-scan budget | Next quality-decision packet: halfvec(3072)+HNSW vs other | agent | next quality-decision packet |
 | ~~A-37~~ | ~~Sparse FTS dictionary `simple` (no stemming)~~ | — | — | — | Closed → D-039 (dual-config `russian` + `english` tsvector union; no detection) |
 | A-38 | Draft lifecycle semantics (retention, expiry, promotion mechanic, lifecycle field on `SourceMessage`) | Drafts leak forever or expire silently; promotion path is ambiguous | Spec + small prototype alongside draft routing implementation | human + agent | draft routing implementation packet |

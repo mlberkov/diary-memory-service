@@ -70,24 +70,41 @@ docker compose exec -T postgres psql -U postgres -d memory_rag -c \
 
 There is no auto-retry (A-35). Replay (R-2) does not re-embed. A future Phase-6 reconciliation packet will add bounded retries and a dead-letter strategy.
 
-#### Destructive local schema upgrades
-There is no migration tool yet (A-34). `schema.sql` is bootstrapped via `CREATE TABLE / CREATE INDEX IF NOT EXISTS`, which does **not** apply changes to columns or constraints on tables that already exist in a stale volume. When pulling a packet that adds or alters columns or constraints (e.g. D-023's `external_message_id`, `edit_seq`, and the `UNIQUE` idempotency constraint; D-024's pgvector image swap + `embedding_records` table + `event_chunks.embedding_status` column; D-025's generated `event_chunks.chunk_text_tsv` column + GIN index; R-2's `entry`→`note` rename — the `notes` table + its columns, `event_chunks.note_id`, and the `detected_route` CHECK now listing `'note'`), reset the local Postgres volume:
+#### Schema migrations (OP-1 / D-045, D-046)
+The Postgres schema is versioned. The migration history under `src/memory_rag/storage/postgres/migrations/` is the single canonical schema source — there is no `schema.sql`. Migrations are run by `yoyo-migrations` (raw-SQL migration files; psycopg v3 backend).
 
-```
-docker compose down -v
-docker compose up -d postgres
+`PostgresDomainStore` applies all pending migrations to head when it is constructed, so a normal `docker compose up -d postgres` + service boot brings a fresh database up to the current schema with no extra step. To run migrations by hand:
+
+```bash
+python -m memory_rag.storage.postgres.migrations_runner apply
 ```
 
-This drops `memory_rag_pg_data` along with any locally-ingested rows. If you want to keep local data, the smallest non-destructive workaround for the D-025 schema change is the explicit ALTER:
+This is idempotent: a database already at head is left untouched.
+
+**Adopting a pre-existing local volume.** A `memory_rag_pg_data` volume created before OP-1.1 already carries the baseline schema but has no migration-version table. Bring it into the versioned world once, without a destructive reset, by stamping the baseline as already applied:
+
+```bash
+python -m memory_rag.storage.postgres.migrations_runner stamp
+```
+
+`stamp` marks only the baseline migration as applied — it runs no DDL and touches no data. This is the only supported adoption path; run it once per old volume, then `apply` (or a normal service boot) handles every later migration. A destructive `docker compose down -v` is no longer required to take a schema change.
+
+**Adding a migration.** Add a new file `migrations/NNNN.<slug>.sql` (next ordinal, raw SQL); it is picked up automatically by `apply` and by the bootstrap. Keep upgrades non-destructive — additive DDL, no data read/rewrite/drop.
+
+Worked example — `0002.index-embedding-status.sql` (D-046), the first schema-changing upgrade on top of the baseline:
 
 ```sql
-ALTER TABLE event_chunks ADD COLUMN IF NOT EXISTS chunk_text_tsv tsvector
-  GENERATED ALWAYS AS (to_tsvector('simple', chunk_text)) STORED;
-CREATE INDEX IF NOT EXISTS idx_event_chunks_chunk_text_tsv
-  ON event_chunks USING GIN (chunk_text_tsv);
+CREATE INDEX IF NOT EXISTS idx_event_chunks_embedding_status
+    ON event_chunks(embedding_status);
 ```
 
-Production schema evolution must be solved before any non-local deployment.
+Running the upgrade over a populated database needs no reset — `apply` (or a normal service boot) applies only the pending `0002` migration; existing rows are untouched:
+
+```bash
+python -m memory_rag.storage.postgres.migrations_runner apply
+```
+
+Use plain `CREATE INDEX` (not `CONCURRENTLY`): yoyo wraps each migration in a transaction, and `CONCURRENTLY` cannot run inside one.
 
 ### Chat backend (D-037)
 Slice 4.5 ships with a dual contour:

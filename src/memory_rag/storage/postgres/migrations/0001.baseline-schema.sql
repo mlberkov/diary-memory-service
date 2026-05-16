@@ -1,48 +1,34 @@
--- Canonical Postgres schema for the durable diary backend.
--- Mirrors the SQLite seam (same tables, same lineage) using native Postgres
--- types: TIMESTAMPTZ for created_at, DATE for note_date. The detected_route
--- CHECK lists every value in core.routing.RouteKind.
+-- OP-1.1 / D-045 — baseline migration.
 --
--- The UNIQUE constraint on (external_chat_id, external_message_id, edit_seq)
--- enforces the R-2 idempotency contract (D-023): repeated delivery of the
--- same channel message-state cannot create a second source row.
+-- This is the first versioned migration. It captures, verbatim, the Postgres
+-- schema that was previously bootstrapped by executing the now-retired
+-- ``schema.sql`` directly. It introduces NO schema changes: a database created
+-- by the old raw-schema bootstrap and a database created by applying this
+-- migration are identical.
 --
--- Phase 3.1+3.2 (D-024): pgvector is the dense-vector seam. ``vector(3072)``
--- matches the production embedding contour (``text-embedding-3-large``,
--- 3072 dim). No HNSW / IVFFlat index on the vector column — pgvector caps
--- those at 2000 dim; for Slice 3.3 the dense leg is an exact community-scoped
--- sequential scan against the canonical vector(3072) column. A halfvec /
--- HNSW migration belongs to a later quality-decision packet (A-36b).
+-- The ``CREATE ... IF NOT EXISTS`` clauses are kept verbatim from the retired
+-- ``schema.sql`` so this migration faithfully reproduces the prior bootstrap
+-- behaviour. They are NOT an adoption mechanism: a pre-existing local volume
+-- created from the old raw-schema bootstrap is brought into the versioned
+-- world by the documented one-time ``stamp`` step (see RUNBOOK.md), which is
+-- the only supported adoption path.
 --
--- Slice 3.3 (D-025): baseline hybrid retrieval. ``event_chunks`` carries a
--- generated stored ``chunk_text_tsv`` column built from
--- ``to_tsvector('simple', chunk_text)`` plus a GIN index so the sparse
--- (FTS) leg can run with ``websearch_to_tsquery('simple', query)``. The
--- ``simple`` dictionary avoids a language commitment because diary
--- content may mix English and Russian.
---
--- Draft floor (D-027): ``detected_route`` includes ``'draft'`` so a
--- ``SourceMessage`` persisted under the no-silent-loss floor (raw-only,
--- no parse/chunk/embed) is durable and inspectable by plain SQL. The
--- column doubles as the lifecycle marker per A-38; adding a dedicated
--- lifecycle column is a separate packet.
---
--- Slice 3.5: retrieval-trace persistence adds the ``queries`` and
--- ``retrieval_hits`` tables; ``QueryService.answer`` writes one query row
--- per ``/ask`` plus per-leg + merged hit rows so an operator can inspect
--- what each leg saw and what survived RRF via plain SQL.
---
--- Slice 4.3a (D-034): answer-side trace persistence adds the
--- ``answer_traces`` table; ``QueryService.answer`` writes one trace row
--- per /ask reply on the success and no-evidence/empty-query contours.
--- Weak-evidence / ambiguous / provider-unavailable grading is deferred
--- to Slice 4.3.
---
--- Bootstrapped by PostgresDomainStore at __init__; safe to re-run on a fresh
--- database. Note: there is no migration tool yet
--- (D-022/D-023/D-024/D-025/Slice-3.5/D-034), so existing local volumes
--- that pre-date these tables must be reset (drop the named volume)
--- before this DDL applies cleanly. See RUNBOOK.md.
+-- Schema notes carried over from the retired schema.sql:
+--  * Mirrors the SQLite seam (same tables, same lineage) using native Postgres
+--    types: TIMESTAMPTZ for created_at, DATE for note_date. The detected_route
+--    CHECK lists every value in core.routing.RouteKind.
+--  * UNIQUE (external_chat_id, external_message_id, edit_seq) enforces the R-2
+--    idempotency contract (D-023).
+--  * pgvector ``vector(3072)`` matches the production embedding contour
+--    (``text-embedding-3-large``, 3072 dim). No HNSW / IVFFlat index — pgvector
+--    caps those at 2000 dim; the dense leg is an exact community-scoped scan
+--    (D-024, D-025; A-36b defers a halfvec / HNSW migration).
+--  * ``event_chunks.chunk_text_tsv`` is a generated stored column over
+--    ``to_tsvector('simple', chunk_text)`` with a GIN index for the sparse
+--    (FTS) leg (D-025).
+--  * ``queries`` + ``retrieval_hits`` carry retrieval-trace persistence
+--    (Slice 3.5); ``answer_traces`` carries answer-side trace persistence
+--    (Slice 4.3a, D-034); the fallback CHECK sets were widened by D-035.
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -120,16 +106,6 @@ CREATE INDEX IF NOT EXISTS idx_embedding_records_source_message_id
 CREATE INDEX IF NOT EXISTS idx_embedding_records_community_id
     ON embedding_records(community_id);
 
--- Slice 3.5: retrieval-trace persistence.
--- One queries row per /ask call; zero-or-more retrieval_hits rows per
--- call carrying leg in {dense, sparse, merged}, 1-based rank, and the
--- RRF-contribution score (1/(K+rank) on per-leg rows; fused score on
--- merged rows). Slice 4.3a (D-034) added answer_traces below.
--- Slice 4.3b (D-035) widened queries.fallback to carry the answer-side
--- modes graded in QueryService.answer (weak_evidence / ambiguous /
--- provider_unavailable / parse_failure) so Query.fallback and the
--- paired AnswerTrace.fallback_mode are aligned by construction.
-
 CREATE TABLE IF NOT EXISTS queries (
     query_id     TEXT PRIMARY KEY,
     community_id    TEXT NOT NULL,
@@ -158,14 +134,6 @@ CREATE TABLE IF NOT EXISTS retrieval_hits (
 );
 
 CREATE INDEX IF NOT EXISTS idx_retrieval_hits_query_id ON retrieval_hits(query_id);
-
--- Slice 4.3a (D-034): answer-side trace persistence. One row per /ask
--- reply. UNIQUE on query_id pins the one-trace-per-query shape.
--- fallback_mode mirrors FallbackMode and uses the same CHECK set as
--- queries.fallback. token_counts is provider-attributed and free-form
--- (JSONB so future backends can store richer shapes without a schema
--- change). Slice 4.3b (D-035) widened the CHECK set to include the
--- four new answer-side modes.
 
 CREATE TABLE IF NOT EXISTS answer_traces (
     answer_trace_id   TEXT PRIMARY KEY,
