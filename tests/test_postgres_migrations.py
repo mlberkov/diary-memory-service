@@ -33,6 +33,12 @@ DOMAIN_TABLES = (
     "answer_traces",
 )
 
+#: Id of the OP-1.2 / D-046 upgrade migration (filename stem).
+UPGRADE_MIGRATION_ID = "0002.index-embedding-status"
+
+#: Index added by the OP-1.2 upgrade migration on ``event_chunks``.
+EMBEDDING_STATUS_INDEX = "idx_event_chunks_embedding_status"
+
 PG_DSN = os.environ.get("MEMORY_RAG_PG_TEST_DSN")
 
 pgmark = pytest.mark.skipif(
@@ -51,16 +57,19 @@ if PG_DSN is not None:
 # --------------------------------------------------------------------------
 
 
-def test_baseline_migration_discoverable() -> None:
-    """The migration set is exactly the OP-1.1 baseline."""
-    assert migration_ids() == [BASELINE_MIGRATION_ID]
+def test_migrations_discoverable() -> None:
+    """The migration set is the baseline plus the OP-1.2 upgrade, in order."""
+    assert migration_ids() == [BASELINE_MIGRATION_ID, UPGRADE_MIGRATION_ID]
 
 
 def test_migrations_dir_is_packaged() -> None:
-    """The packaged migrations directory resolves to a real .sql file."""
+    """The packaged migrations directory resolves to the real .sql files."""
     with migrations_dir() as path:
         sql_files = sorted(p.name for p in path.glob("*.sql"))
-    assert sql_files == ["0001.baseline-schema.sql"]
+    assert sql_files == [
+        "0001.baseline-schema.sql",
+        "0002.index-embedding-status.sql",
+    ]
 
 
 # --------------------------------------------------------------------------
@@ -139,11 +148,79 @@ def _insert_source_row(dsn: str, source_message_id: str) -> None:
 
 
 def _count_source_rows(dsn: str) -> int:
+    return _count_rows(dsn, "source_messages")
+
+
+def _count_rows(dsn: str, table: str) -> int:
     with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
-        cur.execute("SELECT count(*) FROM source_messages")
+        cur.execute(f"SELECT count(*) FROM {table}")
         row = cur.fetchone()
     assert row is not None
     return int(row[0])
+
+
+def _index_exists(dsn: str, index_name: str) -> bool:
+    with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute("SELECT to_regclass(%s)", (index_name,))
+        row = cur.fetchone()
+    return row is not None and row[0] is not None
+
+
+def _apply_only_baseline(dsn: str) -> None:
+    """Apply only the 0001 baseline through yoyo, leaving 0002 pending.
+
+    Stages a genuine prior schema version so a later ``apply_migrations`` runs
+    the 0002 upgrade as a real non-destructive upgrade over populated data."""
+    from yoyo import get_backend, read_migrations
+
+    backend = get_backend(mr._yoyo_uri(dsn))
+    with migrations_dir() as path:
+        migrations = read_migrations(str(path))
+        baseline = migrations.filter(lambda m: m.id == BASELINE_MIGRATION_ID)
+        with backend.lock():
+            backend.apply_migrations(backend.to_apply(baseline))
+
+
+def _insert_note_row(dsn: str, note_id: str, source_message_id: str) -> None:
+    with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO notes "
+            "(note_id, source_message_id, community_id, author_user_id, "
+            " note_date, note_text, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (
+                note_id,
+                source_message_id,
+                "fam-A",
+                "u1",
+                datetime(2026, 5, 17).date(),
+                "Walked the dog",
+                datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC),
+            ),
+        )
+
+
+def _insert_chunk_row(dsn: str, chunk_id: str, note_id: str, source_message_id: str) -> None:
+    """Insert an event_chunk; ``chunk_text_tsv`` is generated and omitted."""
+    with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO event_chunks "
+            "(chunk_id, note_id, source_message_id, community_id, author_user_id, "
+            " note_date, event_index, chunk_text, created_at, embedding_status) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (
+                chunk_id,
+                note_id,
+                source_message_id,
+                "fam-A",
+                "u1",
+                datetime(2026, 5, 17).date(),
+                0,
+                "Walked the dog",
+                datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC),
+                "failed",
+            ),
+        )
 
 
 @pytest.fixture
@@ -154,14 +231,16 @@ def clean_db() -> Iterator[str]:
 
 
 @pgmark
-def test_fresh_bootstrap_applies_baseline(clean_db: str) -> None:
-    """A fresh database is brought to head: all tables + the vector extension."""
+def test_fresh_bootstrap_applies_migrations_to_head(clean_db: str) -> None:
+    """A fresh database is brought to head: all tables, the vector extension,
+    and the OP-1.2 upgrade index."""
     apply_migrations(clean_db)
 
     for table in DOMAIN_TABLES:
         assert _table_exists(clean_db, table), f"missing table {table}"
     assert _vector_extension_present(clean_db)
-    assert _yoyo_row_count(clean_db) == 1
+    assert _index_exists(clean_db, EMBEDDING_STATUS_INDEX)
+    assert _yoyo_row_count(clean_db) == 2
     assert not _baseline_is_pending(clean_db)
 
 
@@ -171,27 +250,56 @@ def test_apply_is_idempotent(clean_db: str) -> None:
     apply_migrations(clean_db)
     apply_migrations(clean_db)
 
-    assert _yoyo_row_count(clean_db) == 1
+    assert _yoyo_row_count(clean_db) == 2
     assert not _baseline_is_pending(clean_db)
 
 
 @pgmark
-def test_adoption_stamp_path(clean_db: str) -> None:
+def test_upgrade_0002_preserves_data(clean_db: str) -> None:
+    """Applying 0002 over a populated 0001 database is a non-destructive
+    upgrade: the new index appears and every pre-existing row survives."""
+    # Stage a prior schema version (0001 only) with realistic data.
+    _apply_only_baseline(clean_db)
+    _insert_source_row(clean_db, "src-1")
+    _insert_note_row(clean_db, "note-1", "src-1")
+    _insert_chunk_row(clean_db, "chunk-1", "note-1", "src-1")
+    assert not _index_exists(clean_db, EMBEDDING_STATUS_INDEX)
+    assert _yoyo_row_count(clean_db) == 1
+
+    # The real upgrade: 0002 applies on top of the populated database.
+    apply_migrations(clean_db)
+
+    assert _index_exists(clean_db, EMBEDDING_STATUS_INDEX)
+    assert _yoyo_row_count(clean_db) == 2
+    assert _count_rows(clean_db, "source_messages") == 1
+    assert _count_rows(clean_db, "notes") == 1
+    assert _count_rows(clean_db, "event_chunks") == 1
+
+
+@pgmark
+def test_adoption_stamp_path_then_upgrade(clean_db: str) -> None:
     """A pre-existing volume (baseline schema, no yoyo state) is adopted by
-    ``stamp_baseline`` without a destructive reset and without re-running DDL."""
+    ``stamp_baseline`` without a destructive reset, and the 0002 upgrade then
+    applies non-destructively over its populated data."""
     # Simulate the old raw-schema bootstrap and some locally-ingested data.
     _apply_baseline_ddl_raw(clean_db)
     _insert_source_row(clean_db, "pre-existing-row")
+    _insert_note_row(clean_db, "pre-existing-note", "pre-existing-row")
+    _insert_chunk_row(clean_db, "pre-existing-chunk", "pre-existing-note", "pre-existing-row")
     assert _baseline_is_pending(clean_db)
 
     stamp_baseline(clean_db)
     assert not _baseline_is_pending(clean_db)
     assert _yoyo_row_count(clean_db) == 1
 
-    # apply_migrations now skips the already-present baseline; data survives.
+    # apply_migrations skips the stamped baseline and applies only 0002;
+    # the index appears and all pre-existing data survives.
     apply_migrations(clean_db)
-    assert _yoyo_row_count(clean_db) == 1
-    assert _count_source_rows(clean_db) == 1
+    assert _yoyo_row_count(clean_db) == 2
+    assert _index_exists(clean_db, EMBEDDING_STATUS_INDEX)
+    assert _count_rows(clean_db, "source_messages") == 1
+    assert _count_rows(clean_db, "notes") == 1
+    assert _count_rows(clean_db, "event_chunks") == 1
 
 
 @pgmark
@@ -201,7 +309,8 @@ def test_store_constructor_bootstraps_via_migrations(clean_db: str) -> None:
     try:
         for table in DOMAIN_TABLES:
             assert _table_exists(clean_db, table), f"missing table {table}"
-        assert _yoyo_row_count(clean_db) == 1
+        assert _index_exists(clean_db, EMBEDDING_STATUS_INDEX)
+        assert _yoyo_row_count(clean_db) == 2
         assert not _baseline_is_pending(clean_db)
     finally:
         store.close()

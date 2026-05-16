@@ -68,14 +68,16 @@ Stage 3 — every slice below is gated on the Stage-2 exit criteria (D-043).
 | 5.3 reranking | reranker behind flag |
 | 5.4 answer modes | timeline mode, analytical synthesis mode |
 
-## OP-1 — Schema-migration tooling *(Stage 2 — Operationalization)*
+## OP-1 — Schema-migration tooling *(Stage 2 — Operationalization; complete)*
 Stage 2 — runs after Stage 1 and before any Stage-3 slice (D-043). Packet group
 **OP-1** in `docs/OPERATIONALIZATION-ROADMAP.md` (D-044); OP-1 leads Stage 2
-because OP-2/OP-3/OP-4 all depend on non-destructive migrations.
+because OP-2/OP-3/OP-4 all depend on non-destructive migrations. OP-1 is
+complete: OP-1.1 landed the tooling foundation and OP-1.2 landed and validated
+the first non-destructive schema-changing upgrade migration; A-34 is resolved.
 | Slice | Files / artifacts |
 | --- | --- |
 | OP-1.1 migration tooling foundation | `yoyo-migrations` dependency; `src/memory_rag/storage/postgres/migrations/0001.baseline-schema.sql` (baseline migration capturing the retired `schema.sql` verbatim); `src/memory_rag/storage/postgres/migrations_runner.py` (`apply_migrations` / `stamp_baseline` / CLI); `PostgresDomainStore.__init__` rewired to apply migrations to head; `schema.sql` deleted; `pyproject.toml` wheel `force-include`; `tests/test_postgres_migrations.py`. Foundation only — does **not** close OP-1 or resolve A-34 (no schema-changing upgrade migration yet). Closes D-045. |
-| OP-1.x non-destructive upgrade | a later packet introduces and validates a real schema-changing upgrade migration — completes OP-1 and resolves A-34 |
+| OP-1.2 non-destructive upgrade | `src/memory_rag/storage/postgres/migrations/0002.index-embedding-status.sql` (first schema-changing upgrade — `CREATE INDEX IF NOT EXISTS idx_event_chunks_embedding_status ON event_chunks(embedding_status)`, additive and non-destructive); `tests/test_postgres_migrations.py` extended (discovery covers 0001 + 0002; gated tests prove the 0001→0002 upgrade over populated data, the stamp-adopted-volume upgrade, and store-constructor bootstrap to 0002). Completes OP-1 and resolves A-34. Closes D-046. |
 
 ## Phase 6 — Provider Hardening *(Stage 2 — Operationalization)*
 Stage 2 — runs after Stage 1 and before any Stage-3 slice (D-043). Decomposed as

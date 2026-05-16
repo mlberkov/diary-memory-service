@@ -70,7 +70,7 @@ docker compose exec -T postgres psql -U postgres -d memory_rag -c \
 
 There is no auto-retry (A-35). Replay (R-2) does not re-embed. A future Phase-6 reconciliation packet will add bounded retries and a dead-letter strategy.
 
-#### Schema migrations (OP-1.1 / D-045)
+#### Schema migrations (OP-1 / D-045, D-046)
 The Postgres schema is versioned. The migration history under `src/memory_rag/storage/postgres/migrations/` is the single canonical schema source — there is no `schema.sql`. Migrations are run by `yoyo-migrations` (raw-SQL migration files; psycopg v3 backend).
 
 `PostgresDomainStore` applies all pending migrations to head when it is constructed, so a normal `docker compose up -d postgres` + service boot brings a fresh database up to the current schema with no extra step. To run migrations by hand:
@@ -89,7 +89,22 @@ python -m memory_rag.storage.postgres.migrations_runner stamp
 
 `stamp` marks only the baseline migration as applied — it runs no DDL and touches no data. This is the only supported adoption path; run it once per old volume, then `apply` (or a normal service boot) handles every later migration. A destructive `docker compose down -v` is no longer required to take a schema change.
 
-**Adding a migration.** Add a new file `migrations/NNNN.<slug>.sql` (next ordinal, raw SQL); it is picked up automatically by `apply` and by the bootstrap.
+**Adding a migration.** Add a new file `migrations/NNNN.<slug>.sql` (next ordinal, raw SQL); it is picked up automatically by `apply` and by the bootstrap. Keep upgrades non-destructive — additive DDL, no data read/rewrite/drop.
+
+Worked example — `0002.index-embedding-status.sql` (D-046), the first schema-changing upgrade on top of the baseline:
+
+```sql
+CREATE INDEX IF NOT EXISTS idx_event_chunks_embedding_status
+    ON event_chunks(embedding_status);
+```
+
+Running the upgrade over a populated database needs no reset — `apply` (or a normal service boot) applies only the pending `0002` migration; existing rows are untouched:
+
+```bash
+python -m memory_rag.storage.postgres.migrations_runner apply
+```
+
+Use plain `CREATE INDEX` (not `CONCURRENTLY`): yoyo wraps each migration in a transaction, and `CONCURRENTLY` cannot run inside one.
 
 ### Chat backend (D-037)
 Slice 4.5 ships with a dual contour:
