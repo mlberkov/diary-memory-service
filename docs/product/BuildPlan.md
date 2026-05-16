@@ -44,7 +44,9 @@ before Phases 6–8 but executes after them — the stage map is the order of re
 
 **Operationalization gate:** no Stage-3 packet may start until the Stage-2 exit
 criteria are met. Phase 8 deliberately spans Stage 2 and Stage 3; the slice-level
-split is recorded in `docs/execution-map.md`.
+split is recorded in `docs/execution-map.md`. The Stage-2 work is decomposed into
+ordered packet groups `OP-1`..`OP-5` in `docs/OPERATIONALIZATION-ROADMAP.md`
+(D-044).
 
 **Exit criteria.**
 - *Stage 1 → 2:* the Phase 4 Definition of Done holds.

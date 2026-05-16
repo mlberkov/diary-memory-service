@@ -8,7 +8,9 @@ Each phase carries its development stage (D-043; see `docs/product/BuildPlan.md`
 "Development Sequencing"). Execution order follows the stage map, **not** the
 phase numbers: Stage 1 = Phases 0–4, Stage 2 = Phases 6–7 + Phase 8 raw-data
 durability + A-34, Stage 3 = Phase 5 + Phase 8 access/visibility/audit/retention
-+ Phase 9. No Stage-3 slice starts until the Stage-2 exit criteria are met.
++ Phase 9. No Stage-3 slice starts until the Stage-2 exit criteria are met. The
+Stage-2 packet groups (`OP-1`..`OP-5`) and their execution order are decomposed
+in `docs/OPERATIONALIZATION-ROADMAP.md` (D-044).
 
 ## Phase 0 — Operating Setup *(Stage 1 — Product baseline)*
 | Slice | Files / artifacts |
@@ -67,29 +69,37 @@ Stage 3 — every slice below is gated on the Stage-2 exit criteria (D-043).
 | 5.4 answer modes | timeline mode, analytical synthesis mode |
 
 ## Phase 6 — Provider Hardening *(Stage 2 — Operationalization)*
-Stage 2 — runs after Stage 1 and before any Stage-3 slice (D-043).
+Stage 2 — runs after Stage 1 and before any Stage-3 slice (D-043). Decomposed as
+**OP-2** (provider hardening) in `docs/OPERATIONALIZATION-ROADMAP.md` (D-044);
+A-35 failed-embedding reconciliation is the separate **OP-3** packet, which
+consumes the 6.1 retry and 6.2 dead-letter primitives below.
 | Slice | Files / artifacts |
 | --- | --- |
-| 6.1 timeouts & retries | bounded retry policy, classified errors (R-9) |
-| 6.2 dead-letter | failed indexing jobs survive and are inspectable |
-| 6.3 rate-limit handling | backoff and observability |
+| 6.1 timeouts & retries | bounded retry policy, classified errors (R-9) — OP-2 |
+| 6.2 dead-letter | failed indexing jobs survive and are inspectable — OP-2 |
+| 6.3 rate-limit handling | backoff and observability — OP-2 |
+| 6.4 failed-embedding reconciliation | retry `embedding_status='failed'` with bounded backoff + dead-letter (A-35) — OP-3, after 6.1/6.2 |
 
 ## Phase 7 — Evaluation and Observability *(Stage 2 — Operationalization)*
-Stage 2 — runs after Stage 1 and before any Stage-3 slice (D-043).
+Stage 2 — runs after Stage 1 and before any Stage-3 slice (D-043). Decomposed as
+**OP-5** (evaluation & observability) in `docs/OPERATIONALIZATION-ROADMAP.md`
+(D-044); OP-5 closes Stage 2.
 | Slice | Files / artifacts |
 | --- | --- |
-| 7.1 gold eval set | curated questions + expected evidence chunks |
-| 7.2 retrieval & groundedness metrics | hit-rate, empty-rate, groundedness check |
-| 7.3 cost & latency | token + latency aggregation |
+| 7.1 gold eval set | curated questions + expected evidence chunks — OP-5 |
+| 7.2 retrieval & groundedness metrics | hit-rate, empty-rate, groundedness check — OP-5 |
+| 7.3 cost & latency | token + latency aggregation — OP-5 |
 
 ## Phase 8 — Privacy and Shared-Diary Controls *(spans stages — see note)*
 Phase 8 spans two stages (D-043). The raw-data durability/backup contour
-(daily backup window, stronger-than-nightly recovery — D-027, A-40) is **Stage 2**
-and is not yet decomposed into a slice row; a Stage-2 row will be added when that
-work is approached. The slices below — access control, visibility, export/delete,
-audit, retention — are **Stage 3** and are gated on the Stage-2 exit criteria.
+(daily backup window, stronger-than-nightly recovery — D-027, A-40) is **Stage 2
+only**, decomposed as **OP-4** in `docs/OPERATIONALIZATION-ROADMAP.md` (D-044) and
+mapped to slice row 8.0 below. The remaining slices — access control, visibility,
+export/delete, audit, retention — are **Stage 3**, are gated on the Stage-2 exit
+criteria, and are **not** decomposed by D-044.
 | Slice | Files / artifacts |
 | --- | --- |
+| 8.0 raw-data durability & backup | daily backup window (`03:00–05:00` target) + stronger-than-nightly recovery for raw `SourceMessage` (D-027, A-40) — **Stage 2**, OP-4 |
 | 8.1 community-scoped access | enforced at every read (I-7, R-3) — Stage 3 |
 | 8.2 visibility model | per-note scopes (assumption A-15) — Stage 3 |
 | 8.3 export/delete flow | tombstones + audit log + retention policy — Stage 3 |
