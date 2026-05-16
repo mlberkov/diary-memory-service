@@ -31,7 +31,7 @@ in `docs/OPERATIONALIZATION-ROADMAP.md` (D-044).
 ## Phase 2 — Durable Backend Core *(Stage 1 — Product baseline)*
 | Slice | Files / artifacts |
 | --- | --- |
-| 2.0 canonical local Postgres backend | `src/memory_rag/storage/postgres/{__init__,store}.py`, `src/memory_rag/storage/postgres/schema.sql`, `docker-compose.yml`, `tests/test_postgres_store.py`; `_build_store` postgres branch in `adapters/telegram/webhook.py`; `Settings.postgres_dsn()` (D-022) |
+| 2.0 canonical local Postgres backend | `src/memory_rag/storage/postgres/{__init__,store}.py`, `src/memory_rag/storage/postgres/migrations/` (versioned schema; `schema.sql` retired by OP-1.1 / D-045), `docker-compose.yml`, `tests/test_postgres_store.py`; `_build_store` postgres branch in `adapters/telegram/webhook.py`; `Settings.postgres_dsn()` (D-022) |
 | 2.1 schema (identities) | initial migration: `users`, `families`, `children`, `telegram_chats`, `source_messages` |
 | 2.2 schema (notes) | migration: `notes`, `event_chunks` with lineage |
 | 2.3 ingestion pipeline | parser (`parse_version`), event splitter, chunk creation; raw persisted first (I-3, R-1) |
@@ -67,6 +67,15 @@ Stage 3 — every slice below is gated on the Stage-2 exit criteria (D-043).
 | 5.2 query rewriting | rewriter behind flag |
 | 5.3 reranking | reranker behind flag |
 | 5.4 answer modes | timeline mode, analytical synthesis mode |
+
+## OP-1 — Schema-migration tooling *(Stage 2 — Operationalization)*
+Stage 2 — runs after Stage 1 and before any Stage-3 slice (D-043). Packet group
+**OP-1** in `docs/OPERATIONALIZATION-ROADMAP.md` (D-044); OP-1 leads Stage 2
+because OP-2/OP-3/OP-4 all depend on non-destructive migrations.
+| Slice | Files / artifacts |
+| --- | --- |
+| OP-1.1 migration tooling foundation | `yoyo-migrations` dependency; `src/memory_rag/storage/postgres/migrations/0001.baseline-schema.sql` (baseline migration capturing the retired `schema.sql` verbatim); `src/memory_rag/storage/postgres/migrations_runner.py` (`apply_migrations` / `stamp_baseline` / CLI); `PostgresDomainStore.__init__` rewired to apply migrations to head; `schema.sql` deleted; `pyproject.toml` wheel `force-include`; `tests/test_postgres_migrations.py`. Foundation only — does **not** close OP-1 or resolve A-34 (no schema-changing upgrade migration yet). Closes D-045. |
+| OP-1.x non-destructive upgrade | a later packet introduces and validates a real schema-changing upgrade migration — completes OP-1 and resolves A-34 |
 
 ## Phase 6 — Provider Hardening *(Stage 2 — Operationalization)*
 Stage 2 — runs after Stage 1 and before any Stage-3 slice (D-043). Decomposed as

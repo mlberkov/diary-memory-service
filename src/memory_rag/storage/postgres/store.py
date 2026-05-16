@@ -1,12 +1,13 @@
 """Local PostgreSQL store implementing ``DomainRepository`` and
 ``SearchRepository`` (D-022, D-023, D-024, D-025).
 
-Schema is bootstrapped at construction by executing ``schema.sql`` (loaded
-via :mod:`importlib.resources` so it works whether the package is run from
-source or installed). Connections are managed by a small
-:class:`psycopg_pool.ConnectionPool`. Native Postgres types are used for
-``TIMESTAMPTZ`` and ``DATE``; ``detected_route`` is TEXT with a CHECK
-listing every :class:`RouteKind` value.
+Schema is bootstrapped at construction by applying the versioned migrations
+under ``migrations/`` to head via
+:mod:`memory_rag.storage.postgres.migrations_runner` (OP-1.1 / D-045). The
+migration history is the single canonical schema source. Connections are
+managed by a small :class:`psycopg_pool.ConnectionPool`. Native Postgres
+types are used for ``TIMESTAMPTZ`` and ``DATE``; ``detected_route`` is TEXT
+with a CHECK listing every :class:`RouteKind` value.
 
 Idempotency (R-2 / D-023) is enforced by the
 ``UNIQUE (external_chat_id, external_message_id, edit_seq)`` constraint on
@@ -36,7 +37,6 @@ from __future__ import annotations
 
 import json
 from datetime import date
-from importlib import resources
 from typing import Any
 
 from pgvector.psycopg import register_vector
@@ -58,6 +58,7 @@ from memory_rag.core.domain.models import (
 )
 from memory_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
 from memory_rag.core.routing import RouteKind
+from memory_rag.storage.postgres.migrations_runner import apply_migrations
 
 
 def _date_range_sql(date_range: DateRange | None) -> tuple[str, list[date]]:
@@ -81,14 +82,6 @@ def _date_range_sql(date_range: DateRange | None) -> tuple[str, list[date]]:
     return fragment, params
 
 
-def _load_schema_sql() -> str:
-    return (
-        resources.files("memory_rag.storage.postgres")
-        .joinpath("schema.sql")
-        .read_text(encoding="utf-8")
-    )
-
-
 def _configure_connection(conn: Connection[Any]) -> None:
     """Register the pgvector codec on every pooled connection."""
     register_vector(conn)
@@ -98,25 +91,11 @@ class PostgresDomainStore:
     """Local Postgres implementation of ``DomainRepository``."""
 
     def __init__(self, dsn: str, *, min_size: int = 1, max_size: int = 4) -> None:
-        # Bootstrap pass: a tiny pool with no codec config so `CREATE EXTENSION`
-        # can run before pgvector is registered. The real pool below registers
-        # the codec on every connection it opens.
-        boot_pool = ConnectionPool(
-            conninfo=dsn,
-            min_size=1,
-            max_size=1,
-            timeout=10,
-            open=False,
-        )
-        boot_pool.open()
-        boot_pool.wait(timeout=10)
-        try:
-            ddl = _load_schema_sql()
-            with boot_pool.connection() as conn, conn.cursor() as cur:
-                cur.execute(ddl)
-                conn.commit()
-        finally:
-            boot_pool.close()
+        # Schema bootstrap: apply the versioned migrations to head before the
+        # connection pool opens (OP-1.1 / D-045). The migration runner manages
+        # its own connection; the baseline migration runs `CREATE EXTENSION
+        # vector`, so the pool below can register the pgvector codec safely.
+        apply_migrations(dsn)
 
         self._pool: ConnectionPool = ConnectionPool(
             conninfo=dsn,

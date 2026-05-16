@@ -19,6 +19,10 @@ dependencies = [
     "pgvector>=0.3,<1",
     "openai>=1.50,<2",
     "httpx>=0.27,<0.28",
+    # Postgres schema-migration tooling (OP-1.1 / D-045). yoyo-migrations runs
+    # the versioned baseline migration at bootstrap via its psycopg v3 backend
+    # (the `postgresql+psycopg` scheme), so no second Postgres driver is added.
+    "yoyo-migrations>=9,<10",
 ]
 
 [project.optional-dependencies]
@@ -37,7 +41,7 @@ packages = ["src/memory_rag"]
 
 # Force-include non-Python data files needed at runtime.
 [tool.hatch.build.targets.wheel.force-include]
-"src/memory_rag/storage/postgres/schema.sql" = "memory_rag/storage/postgres/schema.sql"
+"src/memory_rag/storage/postgres/migrations" = "memory_rag/storage/postgres/migrations"
 
 # ---------------- Ruff ----------------
 [tool.ruff]
@@ -86,6 +90,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["pgvector.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["yoyo.*"]
 ignore_missing_imports = true
 
 # ---------------- Pytest ----------------
