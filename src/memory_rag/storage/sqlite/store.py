@@ -38,6 +38,7 @@ from memory_rag.core.domain.models import (
     DateRange,
     EventChunk,
     FallbackMode,
+    IndexingDeadLetter,
     Note,
     Query,
     RetrievalHit,
@@ -160,6 +161,22 @@ CREATE TABLE IF NOT EXISTS answer_traces (
 );
 
 CREATE INDEX IF NOT EXISTS idx_answer_traces_query_id ON answer_traces(query_id);
+
+CREATE TABLE IF NOT EXISTS indexing_dead_letters (
+    dead_letter_id    TEXT PRIMARY KEY,
+    source_message_id TEXT NOT NULL REFERENCES source_messages(source_message_id),
+    community_id      TEXT NOT NULL,
+    chunk_ids         TEXT NOT NULL,
+    model_name        TEXT NOT NULL,
+    error_class       TEXT NOT NULL,
+    created_at        TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_indexing_dead_letters_community_id
+    ON indexing_dead_letters(community_id);
+
+CREATE INDEX IF NOT EXISTS idx_indexing_dead_letters_source_message_id
+    ON indexing_dead_letters(source_message_id);
 """
 
 
@@ -582,6 +599,72 @@ class SqliteDomainStore:
             latency_ms=int(row["latency_ms"]),
             created_at=datetime.fromisoformat(row["created_at"]),
         )
+
+    def save_indexing_dead_letter(self, record: IndexingDeadLetter) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO indexing_dead_letters "
+                "(dead_letter_id, source_message_id, community_id, chunk_ids, "
+                " model_name, error_class, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    record.dead_letter_id,
+                    record.source_message_id,
+                    record.community_id,
+                    json.dumps(list(record.chunk_ids)),
+                    record.model_name,
+                    record.error_class,
+                    record.created_at.isoformat(),
+                ),
+            )
+            conn.commit()
+
+    def list_indexing_dead_letters(
+        self, community_id: str, *, limit: int | None = None
+    ) -> list[IndexingDeadLetter]:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        if limit is not None and limit < 0:
+            raise ValueError("limit must be non-negative")
+        sql = (
+            "SELECT dead_letter_id, source_message_id, community_id, chunk_ids, "
+            "       model_name, error_class, created_at "
+            "  FROM indexing_dead_letters "
+            " WHERE community_id = ? "
+            " ORDER BY created_at DESC, dead_letter_id DESC"
+        )
+        params: tuple[object, ...] = (community_id,)
+        if limit is not None:
+            sql += " LIMIT ?"
+            params = (community_id, limit)
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [_row_to_dead_letter(row) for row in rows]
+
+    def get_indexing_dead_letter(self, dead_letter_id: str) -> IndexingDeadLetter | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT dead_letter_id, source_message_id, community_id, chunk_ids, "
+                "       model_name, error_class, created_at "
+                "  FROM indexing_dead_letters "
+                " WHERE dead_letter_id = ?",
+                (dead_letter_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return _row_to_dead_letter(row)
+
+
+def _row_to_dead_letter(row: sqlite3.Row) -> IndexingDeadLetter:
+    return IndexingDeadLetter(
+        dead_letter_id=row["dead_letter_id"],
+        source_message_id=row["source_message_id"],
+        community_id=row["community_id"],
+        chunk_ids=tuple(json.loads(row["chunk_ids"])),
+        model_name=row["model_name"],
+        error_class=row["error_class"],
+        created_at=datetime.fromisoformat(row["created_at"]),
+    )
 
 
 def _row_to_source(row: sqlite3.Row) -> SourceMessage:

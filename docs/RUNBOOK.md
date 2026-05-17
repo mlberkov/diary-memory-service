@@ -53,7 +53,7 @@ The canonical durable backend (D-022) runs via `docker compose up -d postgres`. 
 Phase 3.1+3.2 ships with a dual contour:
 
 - `EMBEDDING_BACKEND=mock` (default) — deterministic in-process stand-in. `model_name` on persisted rows is the literal string `mock`, so SQL inspection alone tells you which provider produced a row.
-- `EMBEDDING_BACKEND=openai` — calls `text-embedding-3-large` with `dimensions=3072` explicitly. Requires `OPENAI_API_KEY`. Single attempt; no retries (Phase 6 owns hardening).
+- `EMBEDDING_BACKEND=openai` — calls `text-embedding-3-large` with `dimensions=3072` explicitly. Requires `OPENAI_API_KEY`. The call has an explicit per-attempt timeout and bounded retries — see "Provider resilience (D-047)" below.
 
 The boot gate (R-10) refuses to start when `EMBEDDING_DIMENSION` is not `3072`, when `EMBEDDING_BACKEND=openai` and `EMBEDDING_MODEL` is not `text-embedding-3-large`, when the OpenAI key is missing under the openai backend, or when the connected Postgres lacks the `vector` extension.
 
@@ -68,7 +68,21 @@ docker compose exec -T postgres psql -U postgres -d memory_rag -c \
     ORDER BY created_at DESC;"
 ```
 
-There is no auto-retry (A-35). Replay (R-2) does not re-embed. A future Phase-6 reconciliation packet will add bounded retries and a dead-letter strategy.
+Replay (R-2) does not re-embed.
+
+#### Dead-letter surface (OP-2.2 / D-048)
+On that same failure the service also **attempts** to persist one `indexing_dead_letters` row recording the failed indexing job: `source_message_id`, `community_id`, the affected `chunk_ids`, the `model_name`, and `error_class` (the exception class name only — no free-text exception payload). Inspect:
+
+```bash
+docker compose exec -T postgres psql -U postgres -d memory_rag -c \
+  "SELECT dead_letter_id, source_message_id, model_name, error_class, created_at
+     FROM indexing_dead_letters
+    ORDER BY created_at DESC;"
+```
+
+The dead-letter write is **best-effort**: it runs *after* the `embedding_status='failed'` marking, and a failure of its own is logged (`dead_letter.write_failed`) and swallowed. A row can therefore be absent even though the chunks are correctly `failed`. When the two disagree, treat `event_chunks.embedding_status = 'failed'` (the probe above) as the source of truth — it is the authoritative failure signal; the dead-letter table is a structured convenience layered on top. Each failed source produces at most one dead-letter row (replay does not re-embed).
+
+There is still no auto-retry (A-35). The OP-3 reconciliation packet will retry `failed` chunks with bounded backoff and consume this dead-letter surface.
 
 #### Schema migrations (OP-1 / D-045, D-046)
 The Postgres schema is versioned. The migration history under `src/memory_rag/storage/postgres/migrations/` is the single canonical schema source — there is no `schema.sql`. Migrations are run by `yoyo-migrations` (raw-SQL migration files; psycopg v3 backend).
@@ -110,13 +124,31 @@ Use plain `CREATE INDEX` (not `CONCURRENTLY`): yoyo wraps each migration in a tr
 Slice 4.5 ships with a dual contour:
 
 - `CHAT_BACKEND=mock` (default) — deterministic in-process stand-in. `model_name` on persisted `AnswerTrace` rows is the literal string `mock`, so SQL inspection alone tells you which provider produced a row.
-- `CHAT_BACKEND=openai` — calls `chat.completions.create` with `response_format={"type": "json_object"}` and `temperature=0`. Requires `OPENAI_API_KEY`. Single attempt; no retries (Phase 6 owns hardening, R-9).
+- `CHAT_BACKEND=openai` — calls `chat.completions.create` with `response_format={"type": "json_object"}` and `temperature=0`. Requires `OPENAI_API_KEY`. The call has an explicit per-attempt timeout and bounded retries — see "Provider resilience (D-047)" below.
 
 The boot gate (R-10) refuses to start when `CHAT_BACKEND=openai` and `CHAT_MODEL` is not the canonical `gpt-4.1`, or when the OpenAI key is missing under the openai backend. The non-empty `model_name` check from D-034 is unchanged.
 
 `OpenAIError` and `TimeoutError` from the SDK boundary are translated to `ChatProviderUnavailableError` so the existing D-035 grading writes the call as `FallbackMode.PROVIDER_UNAVAILABLE` and the dispatcher emits the retry-hint reply. `answer_text=""`, `token_counts={}`, `latency_ms=0` per D-035's truthful-trace table.
 
 Live calls are not part of `make check`. The optional smoke `tests/test_chat_client_openai.py` is skipped unless `MEMORY_RAG_OPENAI_TEST_KEY` is set (same gating pattern as the live embedding smoke and the live Postgres tests).
+
+### Provider resilience (D-047, D-049)
+Both OpenAI adapters (embedding and chat) make every API call with an explicit per-attempt timeout and a bounded retry loop, so R-9 holds — there is no unbounded wait or retry. Four env knobs, shared by both adapters:
+
+- `PROVIDER_TIMEOUT_SECONDS` (default `30.0`) — the per-attempt wall-clock budget.
+- `PROVIDER_MAX_ATTEMPTS` (default `3`) — total attempts including the first; `1` disables retries.
+- `PROVIDER_BACKOFF_BASE_SECONDS` (default `0.5`) — the base of the exponential inter-attempt wait.
+- `PROVIDER_BACKOFF_CAP_SECONDS` (default `8.0`) — the ceiling on any single inter-attempt wait.
+
+A retryable failure that is not the final attempt is followed by an inter-attempt wait: exponential backoff with full jitter (`base × 2^(attempt−1)`, clamped to the cap). When a 429 carries a server `Retry-After`, that delay is honored instead — also clamped to `PROVIDER_BACKOFF_CAP_SECONDS`, so total wait stays bounded. Only the numeric `Retry-After` form is parsed; a date-form or malformed header falls back to computed backoff. Worst-case bounded wall time for one provider call is `PROVIDER_TIMEOUT_SECONDS × PROVIDER_MAX_ATTEMPTS + PROVIDER_BACKOFF_CAP_SECONDS × (PROVIDER_MAX_ATTEMPTS − 1)` (106s at defaults). The SDK's own retry is disabled (`max_retries=0`) so this loop is the single retry authority. Timeouts, connection errors, 5xx, and rate limits (429) are retried; auth failures and other 4xx fail fast. The mock backends ignore all four knobs.
+
+Each attempt logs a `provider.attempt` line (label, attempt number, outcome class, latency); a retryable attempt that is followed by a wait also carries `delay_ms` and `delay_source=computed|retry_after`. An exhausted call logs a distinct `provider.exhausted` line. To see provider-call behavior:
+
+```bash
+grep -E 'provider\.(attempt|exhausted)' <service-log>
+```
+
+A chat call that exhausts its retries surfaces to the user as the existing `FallbackMode.PROVIDER_UNAVAILABLE` retry-hint reply (D-035); an embedding call that exhausts its retries flips the affected chunks to `embedding_status='failed'` (A-35) — see "Failed embeddings" above.
 
 ### Webhook idempotency (R-2 / D-023)
 Repeated delivery of the same Telegram message-state — same `(external_chat_id, external_message_id, edit_seq)` — does not create duplicate rows. The webhook returns the same functional 200 reply and logs `effective_path=replay` instead of `fresh`. Operationally, `effective_path=replay` is normal; investigate only if the *first* call for a given key never appears with `effective_path=fresh`.

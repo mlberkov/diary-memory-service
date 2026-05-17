@@ -7,7 +7,7 @@ from datetime import UTC, date, datetime
 import pytest
 
 from memory_rag.adapters.embeddings import MockEmbeddingClient
-from memory_rag.core.domain import EventChunk, FallbackMode
+from memory_rag.core.domain import EventChunk, FallbackMode, IndexingDeadLetter
 from memory_rag.core.embeddings import EmbeddingStatus
 from memory_rag.core.routing import InboundMessage, RouteKind
 from memory_rag.services import DomainService
@@ -186,6 +186,13 @@ class _RaisingEmbeddingClient:
         raise RuntimeError("provider down")
 
 
+class _DeadLetterWriteFailsStore(MockDomainStore):
+    """Mock store whose dead-letter write always raises (Slice 6.2)."""
+
+    def save_indexing_dead_letter(self, record: IndexingDeadLetter) -> None:
+        raise RuntimeError("dead-letter store down")
+
+
 def test_ingest_without_embedding_client_leaves_chunks_pending() -> None:
     store = MockDomainStore()
     service = DomainService(store)
@@ -207,6 +214,8 @@ def test_ingest_with_embedding_client_persists_embeddings_and_flips_status() -> 
     assert store.len_embeddings() == 2
     assert {c.embedding_status for c in _all_chunks(store)} == {EmbeddingStatus.READY}
     assert store.count_embedding_records_for_source(result.source_message_id) == 2
+    # The success path writes no dead-letter row (Slice 6.2).
+    assert store.len_indexing_dead_letters() == 0
 
 
 def test_ingest_embedding_failure_marks_chunks_failed_and_keeps_lineage() -> None:
@@ -220,6 +229,41 @@ def test_ingest_embedding_failure_marks_chunks_failed_and_keeps_lineage() -> Non
     assert store.len_embeddings() == 0
     assert {c.embedding_status for c in _all_chunks(store)} == {EmbeddingStatus.FAILED}
     assert store.count_embedding_records_for_source(result.source_message_id) == 0
+
+
+def test_ingest_embedding_failure_records_one_dead_letter() -> None:
+    store = MockDomainStore()
+    service = DomainService(store, embedding_client=_RaisingEmbeddingClient())
+
+    result = service.ingest(_note_message("2026-05-09\nA\nB"))
+
+    dead_letters = store.list_indexing_dead_letters("42")  # community_id == chat id
+    assert len(dead_letters) == 1
+    record = dead_letters[0]
+    assert record.source_message_id == result.source_message_id
+    assert record.community_id == "42"
+    assert set(record.chunk_ids) == {c.chunk_id for c in _all_chunks(store)}
+    assert record.model_name == "boom"
+    assert record.error_class == "RuntimeError"
+
+
+def test_ingest_dead_letter_write_failure_is_swallowed_and_chunks_stay_failed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A failing dead-letter write must not undo the A-35 failure marking."""
+    store = _DeadLetterWriteFailsStore()
+    service = DomainService(store, embedding_client=_RaisingEmbeddingClient())
+
+    with caplog.at_level("WARNING"):
+        result = service.ingest(_note_message("2026-05-09\nA\nB"))
+
+    # The dead-letter write failure is swallowed — ingest never raises.
+    assert result.fallback is FallbackMode.NONE
+    assert result.events_count == 2
+    # embedding_status='failed' stays authoritative despite the write failure.
+    assert {c.embedding_status for c in _all_chunks(store)} == {EmbeddingStatus.FAILED}
+    assert store.len_indexing_dead_letters() == 0
+    assert "dead_letter.write_failed" in caplog.text
 
 
 def test_ingest_replay_does_not_call_embedding_client() -> None:

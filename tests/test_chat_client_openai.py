@@ -19,6 +19,7 @@ from datetime import UTC, date, datetime
 import pytest
 
 from memory_rag.adapters.answers.openai_client import OpenAIChatClient
+from memory_rag.adapters.resilience import RetryPolicy
 from memory_rag.core.domain import build_answer_prompt, parse_structured_answer
 from memory_rag.core.domain.models import AnswerContext, EventChunk
 from memory_rag.core.embeddings import EmbeddingStatus
@@ -58,7 +59,11 @@ def _make_context(*chunks: EventChunk) -> AnswerContext:
 
 def test_openai_chat_client_round_trips_through_structured_parser() -> None:
     assert OPENAI_TEST_KEY is not None
-    client = OpenAIChatClient(api_key=OPENAI_TEST_KEY, model_name="gpt-4.1")
+    client = OpenAIChatClient(
+        api_key=OPENAI_TEST_KEY,
+        model_name="gpt-4.1",
+        retry_policy=RetryPolicy(timeout_seconds=30.0, max_attempts=3),
+    )
     context = _make_context(_make_chunk("c1", "Walked the dog along the river."))
     prompt = build_answer_prompt(context)
 

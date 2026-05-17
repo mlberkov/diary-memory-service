@@ -31,13 +31,20 @@ DOMAIN_TABLES = (
     "queries",
     "retrieval_hits",
     "answer_traces",
+    "indexing_dead_letters",
 )
 
 #: Id of the OP-1.2 / D-046 upgrade migration (filename stem).
 UPGRADE_MIGRATION_ID = "0002.index-embedding-status"
 
+#: Id of the OP-2.2 / D-048 dead-letter-table upgrade migration (filename stem).
+DEAD_LETTER_MIGRATION_ID = "0003.indexing-dead-letter-table"
+
 #: Index added by the OP-1.2 upgrade migration on ``event_chunks``.
 EMBEDDING_STATUS_INDEX = "idx_event_chunks_embedding_status"
+
+#: Number of versioned migrations in the history (baseline + two upgrades).
+MIGRATION_COUNT = 3
 
 PG_DSN = os.environ.get("MEMORY_RAG_PG_TEST_DSN")
 
@@ -58,8 +65,12 @@ if PG_DSN is not None:
 
 
 def test_migrations_discoverable() -> None:
-    """The migration set is the baseline plus the OP-1.2 upgrade, in order."""
-    assert migration_ids() == [BASELINE_MIGRATION_ID, UPGRADE_MIGRATION_ID]
+    """The migration set is the baseline plus the two upgrades, in order."""
+    assert migration_ids() == [
+        BASELINE_MIGRATION_ID,
+        UPGRADE_MIGRATION_ID,
+        DEAD_LETTER_MIGRATION_ID,
+    ]
 
 
 def test_migrations_dir_is_packaged() -> None:
@@ -69,6 +80,7 @@ def test_migrations_dir_is_packaged() -> None:
     assert sql_files == [
         "0001.baseline-schema.sql",
         "0002.index-embedding-status.sql",
+        "0003.indexing-dead-letter-table.sql",
     ]
 
 
@@ -181,6 +193,22 @@ def _apply_only_baseline(dsn: str) -> None:
             backend.apply_migrations(backend.to_apply(baseline))
 
 
+def _apply_through_0002(dsn: str) -> None:
+    """Apply 0001 + 0002 through yoyo, leaving 0003 pending.
+
+    Stages a genuine prior schema version so a later ``apply_migrations`` runs
+    the 0003 dead-letter migration as a real non-destructive upgrade over
+    populated data."""
+    from yoyo import get_backend, read_migrations
+
+    backend = get_backend(mr._yoyo_uri(dsn))
+    with migrations_dir() as path:
+        migrations = read_migrations(str(path))
+        prior = migrations.filter(lambda m: m.id != DEAD_LETTER_MIGRATION_ID)
+        with backend.lock():
+            backend.apply_migrations(backend.to_apply(prior))
+
+
 def _insert_note_row(dsn: str, note_id: str, source_message_id: str) -> None:
     with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
@@ -240,7 +268,7 @@ def test_fresh_bootstrap_applies_migrations_to_head(clean_db: str) -> None:
         assert _table_exists(clean_db, table), f"missing table {table}"
     assert _vector_extension_present(clean_db)
     assert _index_exists(clean_db, EMBEDDING_STATUS_INDEX)
-    assert _yoyo_row_count(clean_db) == 2
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT
     assert not _baseline_is_pending(clean_db)
 
 
@@ -250,7 +278,7 @@ def test_apply_is_idempotent(clean_db: str) -> None:
     apply_migrations(clean_db)
     apply_migrations(clean_db)
 
-    assert _yoyo_row_count(clean_db) == 2
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT
     assert not _baseline_is_pending(clean_db)
 
 
@@ -266,11 +294,34 @@ def test_upgrade_0002_preserves_data(clean_db: str) -> None:
     assert not _index_exists(clean_db, EMBEDDING_STATUS_INDEX)
     assert _yoyo_row_count(clean_db) == 1
 
-    # The real upgrade: 0002 applies on top of the populated database.
+    # The real upgrade: the pending migrations apply on top of the
+    # populated database (0002, then 0003).
     apply_migrations(clean_db)
 
     assert _index_exists(clean_db, EMBEDDING_STATUS_INDEX)
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT
+    assert _count_rows(clean_db, "source_messages") == 1
+    assert _count_rows(clean_db, "notes") == 1
+    assert _count_rows(clean_db, "event_chunks") == 1
+
+
+@pgmark
+def test_upgrade_0003_preserves_data(clean_db: str) -> None:
+    """Applying 0003 over a populated 0001+0002 database is a non-destructive
+    upgrade: the dead-letter table appears and every pre-existing row survives."""
+    # Stage a prior schema version (0001 + 0002 only) with realistic data.
+    _apply_through_0002(clean_db)
+    _insert_source_row(clean_db, "src-1")
+    _insert_note_row(clean_db, "note-1", "src-1")
+    _insert_chunk_row(clean_db, "chunk-1", "note-1", "src-1")
+    assert not _table_exists(clean_db, "indexing_dead_letters")
     assert _yoyo_row_count(clean_db) == 2
+
+    # The real upgrade: 0003 applies on top of the populated database.
+    apply_migrations(clean_db)
+
+    assert _table_exists(clean_db, "indexing_dead_letters")
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT
     assert _count_rows(clean_db, "source_messages") == 1
     assert _count_rows(clean_db, "notes") == 1
     assert _count_rows(clean_db, "event_chunks") == 1
@@ -292,10 +343,10 @@ def test_adoption_stamp_path_then_upgrade(clean_db: str) -> None:
     assert not _baseline_is_pending(clean_db)
     assert _yoyo_row_count(clean_db) == 1
 
-    # apply_migrations skips the stamped baseline and applies only 0002;
-    # the index appears and all pre-existing data survives.
+    # apply_migrations skips the stamped baseline and applies the later
+    # migrations; the index appears and all pre-existing data survives.
     apply_migrations(clean_db)
-    assert _yoyo_row_count(clean_db) == 2
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT
     assert _index_exists(clean_db, EMBEDDING_STATUS_INDEX)
     assert _count_rows(clean_db, "source_messages") == 1
     assert _count_rows(clean_db, "notes") == 1
@@ -310,7 +361,7 @@ def test_store_constructor_bootstraps_via_migrations(clean_db: str) -> None:
         for table in DOMAIN_TABLES:
             assert _table_exists(clean_db, table), f"missing table {table}"
         assert _index_exists(clean_db, EMBEDDING_STATUS_INDEX)
-        assert _yoyo_row_count(clean_db) == 2
+        assert _yoyo_row_count(clean_db) == MIGRATION_COUNT
         assert not _baseline_is_pending(clean_db)
     finally:
         store.close()
