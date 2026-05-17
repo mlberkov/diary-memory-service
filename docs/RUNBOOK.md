@@ -68,7 +68,21 @@ docker compose exec -T postgres psql -U postgres -d memory_rag -c \
     ORDER BY created_at DESC;"
 ```
 
-There is no auto-retry (A-35). Replay (R-2) does not re-embed. A future Phase-6 reconciliation packet will add bounded retries and a dead-letter strategy.
+Replay (R-2) does not re-embed.
+
+#### Dead-letter surface (OP-2.2 / D-048)
+On that same failure the service also **attempts** to persist one `indexing_dead_letters` row recording the failed indexing job: `source_message_id`, `community_id`, the affected `chunk_ids`, the `model_name`, and `error_class` (the exception class name only — no free-text exception payload). Inspect:
+
+```bash
+docker compose exec -T postgres psql -U postgres -d memory_rag -c \
+  "SELECT dead_letter_id, source_message_id, model_name, error_class, created_at
+     FROM indexing_dead_letters
+    ORDER BY created_at DESC;"
+```
+
+The dead-letter write is **best-effort**: it runs *after* the `embedding_status='failed'` marking, and a failure of its own is logged (`dead_letter.write_failed`) and swallowed. A row can therefore be absent even though the chunks are correctly `failed`. When the two disagree, treat `event_chunks.embedding_status = 'failed'` (the probe above) as the source of truth — it is the authoritative failure signal; the dead-letter table is a structured convenience layered on top. Each failed source produces at most one dead-letter row (replay does not re-embed).
+
+There is still no auto-retry (A-35). The OP-3 reconciliation packet will retry `failed` chunks with bounded backoff and consume this dead-letter surface.
 
 #### Schema migrations (OP-1 / D-045, D-046)
 The Postgres schema is versioned. The migration history under `src/memory_rag/storage/postgres/migrations/` is the single canonical schema source — there is no `schema.sql`. Migrations are run by `yoyo-migrations` (raw-SQL migration files; psycopg v3 backend).

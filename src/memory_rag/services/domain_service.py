@@ -30,6 +30,14 @@ source, and the ingest result remains ``FallbackMode.NONE`` — raw and
 chunk lineage survived; embedding is downstream enrichment (I-2, I-3).
 Failed chunks stay failed until a future Phase-6 reconciliation job
 (A-35); replay does not retry.
+
+Dead-letter surface (Slice 6.2): on that same provider exception the
+service additionally attempts to persist one ``IndexingDeadLetter``
+row recording the failed indexing job. That write is best-effort — it
+runs after the ``embedding_status='failed'`` marking and a failure of
+its own is logged and swallowed, so it can never undo the A-35
+marking. ``event_chunks.embedding_status`` stays the authoritative
+failure signal.
 """
 
 from __future__ import annotations
@@ -40,6 +48,7 @@ from uuid import uuid4
 from memory_rag.core.domain import (
     EventChunk,
     FallbackMode,
+    IndexingDeadLetter,
     IngestResult,
     Note,
     SourceMessage,
@@ -166,15 +175,41 @@ class DomainService:
         try:
             vectors = client.embed([c.chunk_text for c in chunks])
         except Exception as exc:
+            dead_letter_id = str(uuid4())
+            error_class = exc.__class__.__name__
             log.warning(
-                "embedding.failed source_message_id=%s model=%s chunks=%d error_class=%s",
+                "embedding.failed source_message_id=%s model=%s chunks=%d "
+                "error_class=%s dead_letter_id=%s",
                 source_message_id,
                 client.model_name,
                 len(chunks),
-                exc.__class__.__name__,
+                error_class,
+                dead_letter_id,
             )
+            # A-35 failure marking runs first and unchanged: the best-effort
+            # dead-letter write below must never be able to suppress it.
             for chunk in chunks:
                 self._store.set_chunk_embedding_status(chunk.chunk_id, EmbeddingStatus.FAILED)
+            # Dead-letter surface (Slice 6.2): record the failed indexing job.
+            # Best-effort — a failure here is logged and swallowed so it cannot
+            # undo the failure marking; embedding_status stays authoritative.
+            dead_letter = IndexingDeadLetter(
+                dead_letter_id=dead_letter_id,
+                source_message_id=source_message_id,
+                community_id=community_id,
+                chunk_ids=tuple(c.chunk_id for c in chunks),
+                model_name=client.model_name,
+                error_class=error_class,
+                created_at=now,
+            )
+            try:
+                self._store.save_indexing_dead_letter(dead_letter)
+            except Exception as dead_letter_exc:
+                log.warning(
+                    "dead_letter.write_failed dead_letter_id=%s error_class=%s",
+                    dead_letter_id,
+                    dead_letter_exc.__class__.__name__,
+                )
             return
 
         records = [

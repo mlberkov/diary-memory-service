@@ -50,6 +50,7 @@ from memory_rag.core.domain.models import (
     DateRange,
     EventChunk,
     FallbackMode,
+    IndexingDeadLetter,
     Note,
     Query,
     RetrievalHit,
@@ -590,6 +591,74 @@ class PostgresDomainStore:
             latency_ms=int(row["latency_ms"]),
             created_at=row["created_at"],
         )
+
+    def save_indexing_dead_letter(self, record: IndexingDeadLetter) -> None:
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO indexing_dead_letters "
+                "(dead_letter_id, source_message_id, community_id, chunk_ids, "
+                " model_name, error_class, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (
+                    record.dead_letter_id,
+                    record.source_message_id,
+                    record.community_id,
+                    list(record.chunk_ids),
+                    record.model_name,
+                    record.error_class,
+                    record.created_at,
+                ),
+            )
+            conn.commit()
+
+    def list_indexing_dead_letters(
+        self, community_id: str, *, limit: int | None = None
+    ) -> list[IndexingDeadLetter]:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        if limit is not None and limit < 0:
+            raise ValueError("limit must be non-negative")
+        sql = (
+            "SELECT dead_letter_id, source_message_id, community_id, chunk_ids, "
+            "       model_name, error_class, created_at "
+            "  FROM indexing_dead_letters "
+            " WHERE community_id = %s "
+            " ORDER BY created_at DESC, dead_letter_id DESC"
+        )
+        params: tuple[object, ...] = (community_id,)
+        if limit is not None:
+            sql += " LIMIT %s"
+            params = (community_id, limit)
+        with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+        return [_row_to_dead_letter(row) for row in rows]
+
+    def get_indexing_dead_letter(self, dead_letter_id: str) -> IndexingDeadLetter | None:
+        with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                "SELECT dead_letter_id, source_message_id, community_id, chunk_ids, "
+                "       model_name, error_class, created_at "
+                "  FROM indexing_dead_letters "
+                " WHERE dead_letter_id = %s",
+                (dead_letter_id,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return _row_to_dead_letter(row)
+
+
+def _row_to_dead_letter(row: dict[str, Any]) -> IndexingDeadLetter:
+    return IndexingDeadLetter(
+        dead_letter_id=row["dead_letter_id"],
+        source_message_id=row["source_message_id"],
+        community_id=row["community_id"],
+        chunk_ids=tuple(row["chunk_ids"]),
+        model_name=row["model_name"],
+        error_class=row["error_class"],
+        created_at=row["created_at"],
+    )
 
 
 def _row_to_source(row: dict[str, Any]) -> SourceMessage:

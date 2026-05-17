@@ -35,6 +35,7 @@ from typing import Protocol
 from memory_rag.core.domain.models import (
     AnswerTrace,
     EventChunk,
+    IndexingDeadLetter,
     Note,
     Query,
     RetrievalHit,
@@ -150,3 +151,26 @@ class DomainRepository(Protocol):
 
     def get_answer_trace_for_query(self, query_id: str) -> AnswerTrace | None:
         """Fetch the ``AnswerTrace`` for a query, or ``None`` (Slice 4.3a)."""
+
+    def save_indexing_dead_letter(self, record: IndexingDeadLetter) -> None:
+        """Persist one dead-letter row for a failed indexing job (Slice 6.2).
+
+        Called by ``DomainService`` when an embedding call fails during
+        ingest, alongside the per-chunk ``embedding_status='failed'``
+        marking. The record is append-only — backends never update or
+        delete it. The caller treats this write as best-effort: a
+        backend failure here must not undo the failure marking.
+        """
+
+    def list_indexing_dead_letters(
+        self, community_id: str, *, limit: int | None = None
+    ) -> list[IndexingDeadLetter]:
+        """List dead-letter rows for a community in deterministic order.
+
+        Order: ``(created_at DESC, dead_letter_id DESC)`` — most recent
+        failures first. Community scoping is mandatory (I-7). ``limit``
+        caps the result; ``None`` means no cap.
+        """
+
+    def get_indexing_dead_letter(self, dead_letter_id: str) -> IndexingDeadLetter | None:
+        """Fetch a single dead-letter row by id, or ``None`` (Slice 6.2)."""

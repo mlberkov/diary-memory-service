@@ -33,6 +33,7 @@ from memory_rag.core.domain.models import (
     AnswerTrace,
     DateRange,
     EventChunk,
+    IndexingDeadLetter,
     Note,
     Query,
     RetrievalHit,
@@ -74,6 +75,7 @@ class MockDomainStore:
         self._queries: dict[str, Query] = {}
         self._retrieval_hits: dict[str, RetrievalHit] = {}
         self._answer_traces: dict[str, AnswerTrace] = {}
+        self._dead_letters: dict[str, IndexingDeadLetter] = {}
 
     def save_source_message(self, source: SourceMessage) -> None:
         key = (source.external_chat_id, source.external_message_id, source.edit_seq)
@@ -264,6 +266,27 @@ class MockDomainStore:
     def get_answer_trace_for_query(self, query_id: str) -> AnswerTrace | None:
         return self._answer_traces.get(query_id)
 
+    def save_indexing_dead_letter(self, record: IndexingDeadLetter) -> None:
+        if record.dead_letter_id in self._dead_letters:
+            raise ValueError(f"duplicate dead_letter_id={record.dead_letter_id}")
+        self._dead_letters[record.dead_letter_id] = record
+
+    def list_indexing_dead_letters(
+        self, community_id: str, *, limit: int | None = None
+    ) -> list[IndexingDeadLetter]:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        if limit is not None and limit < 0:
+            raise ValueError("limit must be non-negative")
+        rows = [d for d in self._dead_letters.values() if d.community_id == community_id]
+        rows.sort(key=lambda d: (d.created_at, d.dead_letter_id), reverse=True)
+        if limit is None:
+            return rows
+        return rows[:limit]
+
+    def get_indexing_dead_letter(self, dead_letter_id: str) -> IndexingDeadLetter | None:
+        return self._dead_letters.get(dead_letter_id)
+
     def len_sources(self) -> int:
         return len(self._sources)
 
@@ -285,6 +308,9 @@ class MockDomainStore:
     def len_answer_traces(self) -> int:
         return len(self._answer_traces)
 
+    def len_indexing_dead_letters(self) -> int:
+        return len(self._dead_letters)
+
     def clear(self) -> None:
         self._sources.clear()
         self._idempotency.clear()
@@ -294,6 +320,7 @@ class MockDomainStore:
         self._queries.clear()
         self._retrieval_hits.clear()
         self._answer_traces.clear()
+        self._dead_letters.clear()
 
 
 def _cosine_distance(a: list[float], b: list[float]) -> float:

@@ -102,6 +102,7 @@ The safety floor for ambiguous input is **preserve as draft**, not **clarify and
 - `Query`
 - `RetrievalHit`
 - `AnswerTrace`
+- `IndexingDeadLetter`
 - `FeedbackEvent`
 
 > `Family` and `Child` are the first-use-case entity names for the canonical core concepts `community` and `subject` (D-041; see `docs/GLOSSARY.md`). The realized scope identifier in code and schema is `community_id`; child scoping is not yet in code and, when the D-040 child-filter packet introduces it, is born directly as `subject_id`.
@@ -199,6 +200,25 @@ Fields:
 - token_counts
 - latency_ms
 - created_at
+
+### IndexingDeadLetter
+Fields:
+- dead_letter_id
+- source_message_id
+- community_id
+- chunk_ids
+- model_name
+- error_class
+- created_at
+
+One row recording a failed indexing job: when an embedding call raises during
+ingest, the affected chunks are marked `embedding_status='failed'` (A-35) and
+the service additionally attempts to persist this record (OP-2.2 / D-048).
+`chunk_ids` lists every chunk the failed call covered; `error_class` is the
+exception class name only. The record is append-only — it carries no status
+field; OP-3 reconciliation consumes this surface without mutating it. The
+write is best-effort: `event_chunks.embedding_status` stays the authoritative
+failure signal.
 
 ## 6. Chunking Contract
 

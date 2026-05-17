@@ -303,3 +303,33 @@ class RetrievalHit:
     score: float
     model_name: str
     created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class IndexingDeadLetter:
+    """A failed indexing job recorded for operator inspection (Slice 6.2).
+
+    One record is attempted per failed embedding call: when the embedding
+    provider raises during ``DomainService.ingest``, the affected chunks
+    are marked ``embedding_status='failed'`` (A-35) and the service
+    additionally attempts to persist this record. The write is
+    best-effort — at most one row per failed embedding call for one
+    source message, and the row may be absent if its own persistence
+    fails. ``event_chunks.embedding_status`` stays the authoritative
+    failure signal in that case.
+
+    ``chunk_ids`` lists every chunk the failed call covered.
+    ``error_class`` is the exception class name only — the same
+    provenance the ``embedding.failed`` log line carries; no free-text
+    exception payload is stored. The record is append-only: it has no
+    status / resolved column. A future reconciliation job (OP-3 / A-35)
+    consumes this surface but does not mutate it.
+    """
+
+    dead_letter_id: str
+    source_message_id: str
+    community_id: str
+    chunk_ids: tuple[str, ...]
+    model_name: str
+    error_class: str
+    created_at: datetime

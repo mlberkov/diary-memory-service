@@ -84,11 +84,12 @@ Stage 2 — runs after Stage 1 and before any Stage-3 slice (D-043). Decomposed 
 **OP-2** (provider hardening) in `docs/OPERATIONALIZATION-ROADMAP.md` (D-044);
 A-35 failed-embedding reconciliation is the separate **OP-3** packet, which
 consumes the 6.1 retry and 6.2 dead-letter primitives below. Slice 6.1
-(timeouts & bounded retries) has landed (D-047); 6.2 and 6.3 remain.
+(timeouts & bounded retries) has landed (D-047) and Slice 6.2 (dead-letter
+surface) has landed (D-048); 6.3 remains.
 | Slice | Files / artifacts |
 | --- | --- |
 | 6.1 timeouts & retries | `src/memory_rag/adapters/resilience.py` (`RetryPolicy`, `OutcomeClass`, `classify_openai_error`, `run_with_retries` — shared adapter-side bounded-retry/timeout primitive, R-9); both OpenAI adapters (`adapters/embeddings/openai_client.py`, `adapters/answers/openai_client.py`) build the SDK client with explicit `timeout` + `max_retries=0` and wrap the API call in `run_with_retries`; `config.py` adds `provider_timeout_seconds` / `provider_max_attempts`; both factories thread a `RetryPolicy` into the `openai` branch; `.env.example` stanza; `tests/test_provider_resilience.py`, `tests/test_openai_embedding_retry.py`, `tests/test_openai_chat_retry.py` (offline). Embedding exhaustion re-raises the original SDK error (A-35 preserved); chat exhaustion raises `ChatProviderUnavailableError` (D-035 preserved). Closes D-047. |
-| 6.2 dead-letter | failed indexing jobs survive and are inspectable — OP-2 |
+| 6.2 dead-letter | `core/domain/models.py` adds the channel-neutral `IndexingDeadLetter` entity (re-exported from `core/domain/__init__.py`); `storage/postgres/migrations/0003.indexing-dead-letter-table.sql` adds the additive, non-destructive `indexing_dead_letters` table; SQLite gets the equivalent embedded DDL and the mock store a process-local dict; `DomainRepository` gains `save_indexing_dead_letter` / `list_indexing_dead_letters` / `get_indexing_dead_letter` with mock / sqlite / postgres parity; `DomainService._embed_chunks` attempts a best-effort dead-letter write after the `embedding_status='failed'` marking (`embedding.failed` log line gains `dead_letter_id`; a failed write logs `dead_letter.write_failed` and is swallowed); `tests/test_storage_dead_letter.py`, extended `tests/test_domain_service.py` and `tests/test_postgres_migrations.py`. Failed indexing jobs survive and are inspectable. Closes D-048. |
 | 6.3 rate-limit handling | backoff and observability — OP-2 |
 | 6.4 failed-embedding reconciliation | retry `embedding_status='failed'` with bounded backoff + dead-letter (A-35) — OP-3, after 6.1/6.2 |
 
