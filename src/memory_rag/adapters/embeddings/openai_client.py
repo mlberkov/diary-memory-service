@@ -4,13 +4,14 @@ Canonical Phase-3 contour: ``text-embedding-3-large`` at full 3072
 dimensions. ``dimensions=3072`` is passed explicitly in the request even
 though it is the native default — the request contract is self-documenting.
 
-Provider hardening (R-9, Slice 6.1 / D-047): the SDK client is built with an
-explicit per-attempt ``timeout`` and ``max_retries=0`` (the adapter's own
-bounded loop is the single retry authority), and ``embed`` runs the API call
-through :func:`~memory_rag.adapters.resilience.run_with_retries`. On exhausted
-or non-retryable failure the original SDK exception is re-raised — ``embed``
-introduces no exception type of its own, so ``DomainService`` still flips
-``embedding_status='failed'`` (A-35).
+Provider hardening (R-9): the SDK client is built with an explicit per-attempt
+``timeout`` and ``max_retries=0`` (the adapter's own bounded loop is the single
+retry authority), and ``embed`` runs the API call through
+:func:`~memory_rag.adapters.resilience.run_with_retries` with rate-limit-aware
+backoff (``Retry-After`` honored via ``extract_retry_after_seconds``). On
+exhausted or non-retryable failure the original SDK exception is re-raised —
+``embed`` introduces no exception type of its own, so ``DomainService`` still
+flips ``embedding_status='failed'`` (A-35).
 
 Domain code only sees ``EmbeddingClient``; the SDK lives behind this
 adapter (Invariant I-11).
@@ -20,7 +21,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from memory_rag.adapters.resilience import RetryPolicy, classify_openai_error, run_with_retries
+from memory_rag.adapters.resilience import (
+    RetryPolicy,
+    classify_openai_error,
+    extract_retry_after_seconds,
+    run_with_retries,
+)
 from memory_rag.logging import get_logger
 
 if TYPE_CHECKING:
@@ -85,6 +91,7 @@ class OpenAIEmbeddingClient:
             _call,
             policy=self._retry_policy,
             classify=classify_openai_error,
+            retry_after=extract_retry_after_seconds,
             label="openai.embeddings",
             logger=_log,
         )

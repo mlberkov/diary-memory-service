@@ -26,6 +26,8 @@ def build_embedding_client(settings: Settings) -> EmbeddingClient:
             retry_policy=RetryPolicy(
                 timeout_seconds=settings.provider_timeout_seconds,
                 max_attempts=settings.provider_max_attempts,
+                backoff_base_seconds=settings.provider_backoff_base_seconds,
+                backoff_cap_seconds=settings.provider_backoff_cap_seconds,
             ),
         )
     return MockEmbeddingClient(dimension=settings.embedding_dimension)

@@ -132,21 +132,23 @@ The boot gate (R-10) refuses to start when `CHAT_BACKEND=openai` and `CHAT_MODEL
 
 Live calls are not part of `make check`. The optional smoke `tests/test_chat_client_openai.py` is skipped unless `MEMORY_RAG_OPENAI_TEST_KEY` is set (same gating pattern as the live embedding smoke and the live Postgres tests).
 
-### Provider resilience (D-047)
-Both OpenAI adapters (embedding and chat) make every API call with an explicit per-attempt timeout and a bounded retry loop, so R-9 holds — there is no unbounded wait or retry. Two env knobs, shared by both adapters:
+### Provider resilience (D-047, D-049)
+Both OpenAI adapters (embedding and chat) make every API call with an explicit per-attempt timeout and a bounded retry loop, so R-9 holds — there is no unbounded wait or retry. Four env knobs, shared by both adapters:
 
 - `PROVIDER_TIMEOUT_SECONDS` (default `30.0`) — the per-attempt wall-clock budget.
 - `PROVIDER_MAX_ATTEMPTS` (default `3`) — total attempts including the first; `1` disables retries.
+- `PROVIDER_BACKOFF_BASE_SECONDS` (default `0.5`) — the base of the exponential inter-attempt wait.
+- `PROVIDER_BACKOFF_CAP_SECONDS` (default `8.0`) — the ceiling on any single inter-attempt wait.
 
-Worst-case bounded wall time for one provider call is `PROVIDER_TIMEOUT_SECONDS × PROVIDER_MAX_ATTEMPTS` (90s at defaults) — Slice 6.1 adds no inter-attempt delay. The SDK's own retry is disabled (`max_retries=0`) so this loop is the single retry authority. Timeouts, connection errors, 5xx, and rate limits (429) are retried; auth failures and other 4xx fail fast. The mock backends ignore both knobs.
+A retryable failure that is not the final attempt is followed by an inter-attempt wait: exponential backoff with full jitter (`base × 2^(attempt−1)`, clamped to the cap). When a 429 carries a server `Retry-After`, that delay is honored instead — also clamped to `PROVIDER_BACKOFF_CAP_SECONDS`, so total wait stays bounded. Only the numeric `Retry-After` form is parsed; a date-form or malformed header falls back to computed backoff. Worst-case bounded wall time for one provider call is `PROVIDER_TIMEOUT_SECONDS × PROVIDER_MAX_ATTEMPTS + PROVIDER_BACKOFF_CAP_SECONDS × (PROVIDER_MAX_ATTEMPTS − 1)` (106s at defaults). The SDK's own retry is disabled (`max_retries=0`) so this loop is the single retry authority. Timeouts, connection errors, 5xx, and rate limits (429) are retried; auth failures and other 4xx fail fast. The mock backends ignore all four knobs.
 
-Each attempt logs a `provider.attempt` line (label, attempt number, outcome class, latency); an exhausted call logs a distinct `provider.exhausted` line. To see provider-call behavior:
+Each attempt logs a `provider.attempt` line (label, attempt number, outcome class, latency); a retryable attempt that is followed by a wait also carries `delay_ms` and `delay_source=computed|retry_after`. An exhausted call logs a distinct `provider.exhausted` line. To see provider-call behavior:
 
 ```bash
 grep -E 'provider\.(attempt|exhausted)' <service-log>
 ```
 
-A chat call that exhausts its retries surfaces to the user as the existing `FallbackMode.PROVIDER_UNAVAILABLE` retry-hint reply (D-035); an embedding call that exhausts its retries flips the affected chunks to `embedding_status='failed'` (A-35) — see "Failed embeddings" above. Rate-limit-aware backoff (honoring `Retry-After`) is deferred to Slice 6.3.
+A chat call that exhausts its retries surfaces to the user as the existing `FallbackMode.PROVIDER_UNAVAILABLE` retry-hint reply (D-035); an embedding call that exhausts its retries flips the affected chunks to `embedding_status='failed'` (A-35) — see "Failed embeddings" above.
 
 ### Webhook idempotency (R-2 / D-023)
 Repeated delivery of the same Telegram message-state — same `(external_chat_id, external_message_id, edit_seq)` — does not create duplicate rows. The webhook returns the same functional 200 reply and logs `effective_path=replay` instead of `fresh`. Operationally, `effective_path=replay` is normal; investigate only if the *first* call for a given key never appears with `effective_path=fresh`.

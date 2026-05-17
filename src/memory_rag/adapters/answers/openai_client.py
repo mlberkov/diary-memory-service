@@ -3,13 +3,15 @@
 Canonical Slice 4.5 contour: ``gpt-4.1`` via ``chat.completions.create``
 with ``response_format={"type": "json_object"}`` and ``temperature=0``.
 
-Provider hardening (R-9, Slice 6.1 / D-047): the SDK client is built with an
-explicit per-attempt ``timeout`` and ``max_retries=0`` (the adapter's own
-bounded loop is the single retry authority), and ``complete`` runs the API call
-through :func:`~memory_rag.adapters.resilience.run_with_retries`.
+Provider hardening (R-9): the SDK client is built with an explicit per-attempt
+``timeout`` and ``max_retries=0`` (the adapter's own bounded loop is the single
+retry authority), and ``complete`` runs the API call through
+:func:`~memory_rag.adapters.resilience.run_with_retries` with rate-limit-aware
+backoff (``Retry-After`` honored via ``extract_retry_after_seconds``).
 ``ChatResponse.latency_ms`` is measured once around the whole bounded loop, so
-it is the total elapsed time across every attempt and remains the single
-source of truth that ``QueryService`` persists into ``AnswerTrace``.
+it is the total elapsed time across every attempt — including inter-attempt
+backoff — and remains the single source of truth that ``QueryService``
+persists into ``AnswerTrace``.
 
 ``openai.OpenAIError`` (the SDK base class) and ``TimeoutError`` are translated
 to :class:`ChatProviderUnavailableError` — now only after bounded retries are
@@ -26,7 +28,12 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any
 
-from memory_rag.adapters.resilience import RetryPolicy, classify_openai_error, run_with_retries
+from memory_rag.adapters.resilience import (
+    RetryPolicy,
+    classify_openai_error,
+    extract_retry_after_seconds,
+    run_with_retries,
+)
 from memory_rag.core.answers.client import ChatProviderUnavailableError, ChatResponse
 from memory_rag.core.domain.answer_prompt import AnswerPrompt
 from memory_rag.logging import get_logger
@@ -92,6 +99,7 @@ class OpenAIChatClient:
                 _call,
                 policy=self._retry_policy,
                 classify=classify_openai_error,
+                retry_after=extract_retry_after_seconds,
                 label="openai.chat",
                 logger=_log,
             )

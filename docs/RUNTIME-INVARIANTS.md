@@ -39,7 +39,7 @@ Prompt assembly never mixes chunks from more than one `community_id`. This is as
 ## R-9. Bounded provider behavior
 Provider calls have explicit timeouts and bounded retries. There is no unbounded wait or unbounded retry loop in any handler.
 
-Enforced for the OpenAI embedding and chat adapters as of Slice 6.1 (D-047): both build the SDK client with an explicit per-attempt timeout and `max_retries=0`, and every API call runs through the shared `adapters/resilience.py` bounded-retry loop (`provider_timeout_seconds` × `provider_max_attempts`, no inter-attempt delay). Rate-limit-aware backoff (Slice 6.3) and retry/timeout hardening for non-provider calls are not yet covered.
+Enforced for the OpenAI embedding and chat adapters as of Slice 6.1 (D-047): both build the SDK client with an explicit per-attempt timeout and `max_retries=0`, and every API call runs through the shared `adapters/resilience.py` bounded-retry loop. As of Slice 6.3 (D-049) a retryable failure is followed by an inter-attempt wait — exponential backoff with full jitter, or a server `Retry-After` when present — clamped to `provider_backoff_cap_seconds`. Worst-case bounded wall time for one provider call is `provider_timeout_seconds × provider_max_attempts + provider_backoff_cap_seconds × (provider_max_attempts − 1)`. Retry/timeout hardening for non-provider calls (Postgres, internal RPC) is not yet covered.
 
 ## R-10. Health gates on boot
 Startup verifies the boot-time constraints that are load-bearing for the current phase. Failure aborts boot rather than serving partial functionality.

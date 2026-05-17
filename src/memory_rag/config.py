@@ -20,7 +20,9 @@ answer pipeline.
 Slice 6.1 (D-047) adds two provider-resilience knobs
 (``provider_timeout_seconds``, ``provider_max_attempts``) that the OpenAI
 adapter factories turn into the bounded timeout / retry policy required
-by R-9.
+by R-9. Slice 6.3 (D-049) adds two more
+(``provider_backoff_base_seconds``, ``provider_backoff_cap_seconds``) for
+rate-limit-aware exponential backoff between retries.
 """
 
 from __future__ import annotations
@@ -73,13 +75,17 @@ class Settings(BaseSettings):
     # value. The mock backend ignores it.
     chat_model: str = Field(default="")
 
-    # Slice 6.1 (D-047, R-9) provider-resilience knobs. Shared by both OpenAI
-    # adapters via their factories. ``provider_timeout_seconds`` is the
-    # per-attempt wall-clock budget; ``provider_max_attempts`` is the total
-    # attempt count including the first (1 disables retries). Worst-case
-    # bounded wall time per provider call is the product of the two.
+    # Provider-resilience knobs (R-9), shared by both OpenAI adapters via their
+    # factories. ``provider_timeout_seconds`` is the per-attempt wall-clock
+    # budget; ``provider_max_attempts`` is the total attempt count including the
+    # first (1 disables retries). ``provider_backoff_base_seconds`` /
+    # ``provider_backoff_cap_seconds`` size the exponential-with-jitter wait
+    # between retries (D-049). Worst-case bounded wall time per provider call is
+    # ``timeout * attempts + backoff_cap * (attempts - 1)``.
     provider_timeout_seconds: float = Field(default=30.0, gt=0)
     provider_max_attempts: int = Field(default=3, ge=1)
+    provider_backoff_base_seconds: float = Field(default=0.5, gt=0)
+    provider_backoff_cap_seconds: float = Field(default=8.0, gt=0)
 
     # Slice 3.3 (D-025) baseline-hybrid retrieval knobs. Defaults are
     # tuning placeholders, not quality claims; the next quality-decision

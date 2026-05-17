@@ -25,6 +25,8 @@ def build_chat_client(settings: Settings) -> ChatClient:
             retry_policy=RetryPolicy(
                 timeout_seconds=settings.provider_timeout_seconds,
                 max_attempts=settings.provider_max_attempts,
+                backoff_base_seconds=settings.provider_backoff_base_seconds,
+                backoff_cap_seconds=settings.provider_backoff_cap_seconds,
             ),
         )
     return MockChatClient()

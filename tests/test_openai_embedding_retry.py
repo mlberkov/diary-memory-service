@@ -51,10 +51,17 @@ class _FakeOpenAI:
 
 
 def _client(embeddings: _ScriptedEmbeddings, *, max_attempts: int = 3) -> OpenAIEmbeddingClient:
+    # Zero backoff keeps these wiring tests instant; inter-attempt backoff
+    # itself is covered offline in test_provider_resilience.py.
     return OpenAIEmbeddingClient(
         api_key="test-key",
         dimension=3,
-        retry_policy=RetryPolicy(timeout_seconds=5.0, max_attempts=max_attempts),
+        retry_policy=RetryPolicy(
+            timeout_seconds=5.0,
+            max_attempts=max_attempts,
+            backoff_base_seconds=0.0,
+            backoff_cap_seconds=0.0,
+        ),
         _client=_FakeOpenAI(embeddings),
     )
 
