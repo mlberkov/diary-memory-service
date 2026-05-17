@@ -239,6 +239,23 @@ class MockDomainStore:
             raise KeyError(f"unknown chunk_id={chunk_id}")
         self._chunks[chunk_id] = replace(existing, embedding_status=status)
 
+    def list_failed_event_chunks(
+        self, community_id: str, *, limit: int | None = None
+    ) -> list[EventChunk]:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        if limit is not None and limit < 0:
+            raise ValueError("limit must be non-negative")
+        rows = [
+            c
+            for c in self._chunks.values()
+            if c.community_id == community_id and c.embedding_status is EmbeddingStatus.FAILED
+        ]
+        rows.sort(key=lambda c: (c.created_at, c.chunk_id))
+        if limit is None:
+            return rows
+        return rows[:limit]
+
     def save_query(self, query: Query) -> None:
         if query.query_id in self._queries:
             raise ValueError(f"duplicate query_id={query.query_id}")

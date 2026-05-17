@@ -125,6 +125,22 @@ class DomainRepository(Protocol):
         (I-3, R-1).
         """
 
+    def list_failed_event_chunks(
+        self, community_id: str, *, limit: int | None = None
+    ) -> list[EventChunk]:
+        """List chunks stuck at ``embedding_status='failed'`` for a community (OP-3.1).
+
+        The discovery seam for failed-embedding reconciliation: returns
+        every ``EventChunk`` whose ``embedding_status`` is
+        ``EmbeddingStatus.FAILED`` within ``community_id``. Order:
+        ``(created_at ASC, chunk_id ASC)`` — oldest failure first, the
+        FIFO order a future retry job consumes. Community scoping is
+        mandatory (I-7, R-3). ``limit`` caps the result; ``None`` means
+        no cap. When the result size equals ``limit`` more failed chunks
+        may exist beyond the cap — this method reports a bounded slice,
+        not a total. Read-only: it transitions no status.
+        """
+
     def save_query(self, query: Query) -> None:
         """Persist a single ``Query`` row for an ``/ask`` call (Slice 3.5)."""
 

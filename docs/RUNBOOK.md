@@ -58,15 +58,15 @@ Phase 3.1+3.2 ships with a dual contour:
 The boot gate (R-10) refuses to start when `EMBEDDING_DIMENSION` is not `3072`, when `EMBEDDING_BACKEND=openai` and `EMBEDDING_MODEL` is not `text-embedding-3-large`, when the OpenAI key is missing under the openai backend, or when the connected Postgres lacks the `vector` extension.
 
 #### Failed embeddings
-On any provider exception during ingest, the chunks remain persisted, their `embedding_status` flips to `failed`, and zero `embedding_records` are written for that source. The ingest result still returns `FallbackMode.NONE` because raw + chunks survived (I-2, I-3). Inspect:
+On any provider exception during ingest, the chunks remain persisted, their `embedding_status` flips to `failed`, and zero `embedding_records` are written for that source. The ingest result still returns `FallbackMode.NONE` because raw + chunks survived (I-2, I-3).
+
+Inspect failed chunks with the read-only reconciliation entrypoint (OP-3.1 / D-050):
 
 ```bash
-docker compose exec -T postgres psql -U postgres -d memory_rag -c \
-  "SELECT chunk_id, source_message_id, chunk_text, embedding_status
-     FROM event_chunks
-    WHERE embedding_status = 'failed'
-    ORDER BY created_at DESC;"
+python -m memory_rag.services.reconciliation --community <community_id> [--limit N]
 ```
+
+It lists every chunk stuck at `embedding_status='failed'` for the community — oldest failure first — with its `chunk_id`, `source_message_id`, `note_date`, and `created_at`, plus the total count. `--limit` caps the listing (default `100`). The entrypoint targets the canonical Postgres backend and is read-only: it discovers and reports, it does not retry or transition any chunk. It supersedes the hand-run `psql` probe over `event_chunks`; that table's `embedding_status='failed'` rows remain the authoritative failure signal it reads.
 
 Replay (R-2) does not re-embed.
 
@@ -82,7 +82,7 @@ docker compose exec -T postgres psql -U postgres -d memory_rag -c \
 
 The dead-letter write is **best-effort**: it runs *after* the `embedding_status='failed'` marking, and a failure of its own is logged (`dead_letter.write_failed`) and swallowed. A row can therefore be absent even though the chunks are correctly `failed`. When the two disagree, treat `event_chunks.embedding_status = 'failed'` (the probe above) as the source of truth — it is the authoritative failure signal; the dead-letter table is a structured convenience layered on top. Each failed source produces at most one dead-letter row (replay does not re-embed).
 
-There is still no auto-retry (A-35). The OP-3 reconciliation packet will retry `failed` chunks with bounded backoff and consume this dead-letter surface.
+There is still no auto-retry (A-35). OP-3.1 (D-050) landed the read-only discovery surface above; the OP-3.2 reconciliation slice will retry `failed` chunks with bounded backoff and consume this dead-letter surface.
 
 #### Schema migrations (OP-1 / D-045, D-046)
 The Postgres schema is versioned. The migration history under `src/memory_rag/storage/postgres/migrations/` is the single canonical schema source — there is no `schema.sql`. Migrations are run by `yoyo-migrations` (raw-SQL migration files; psycopg v3 backend).

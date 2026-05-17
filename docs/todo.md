@@ -34,9 +34,21 @@ Development-sequencing gate (D-043): no Stage-3 item — Phase 5 quality booster
 
 ## OP-3 — Reconciliation for failed embeddings (Stage 2 — operationalization, A-35)
 - Stage-2 packet group **OP-3** (D-044; see `docs/OPERATIONALIZATION-ROADMAP.md`). Runs after OP-1 (schema-migration tooling) and OP-2 (provider hardening), because the reconciliation job consumes OP-2's bounded-backoff retry and dead-letter primitives.
-- A-35 leaves failed embeddings sticky: a chunk with `embedding_status='failed'` stays that way until manual intervention. Ship a reconciliation job that retries `failed` chunks with bounded backoff and a dead-letter strategy, plus the corresponding observability (logs / metrics on retry success/failure).
+- A-35 leaves failed embeddings sticky: a chunk with `embedding_status='failed'` stays that way until manual intervention.
+- **OP-3.1 — failed-embedding discovery + read-only entrypoint: done (D-050).** `DomainRepository.list_failed_event_chunks` (community-scoped, oldest-first, parity across mock / sqlite / postgres); `services/reconciliation.py` with `ReconciliationService.discover_failed_chunks` and the read-only `python -m memory_rag.services.reconciliation` CLI, replacing the raw `psql` probe as the failed-chunk inspection surface. Discovery only — no retry. See `docs/RUNBOOK.md` "Failed embeddings".
+- **OP-3.2 — failed-embedding retry: next.** Retry the chunks `list_failed_event_chunks` discovers, re-invoking `EmbeddingClient` with OP-2's bounded backoff; transition succeeded chunks `failed → ready`; route exhausted retries to the OP-2.2 dead-letter surface; emit retry-outcome observability (logs / metrics on success/failure). This is the slice that **resolves A-35**.
 
 ---
+
+Closed in the OP-3.1 failed-embedding discovery packet (D-050):
+- `src/memory_rag/storage/repository.py` — `DomainRepository` Protocol gains one method, `list_failed_event_chunks(community_id, *, limit=None) -> list[EventChunk]`: chunks at `embedding_status='failed'`, community-scoped (I-7 / R-3), ordered `(created_at ASC, chunk_id ASC)` oldest-first, optional `limit`.
+- `src/memory_rag/storage/{mock,sqlite,postgres}/store.py` — the method implemented with full parity; validation (empty `community_id`, negative `limit`) mirrors `list_indexing_dead_letters`. Postgres reuses the OP-1.2 `idx_event_chunks_embedding_status` index — no new schema or migration.
+- `src/memory_rag/services/reconciliation.py` (new) — `ReconciliationService.discover_failed_chunks` (read-only discovery; emits `reconciliation.discovered`); channel-neutral frozen/slotted `FailedEmbeddingReport`; pure `render_report`; the `python -m memory_rag.services.reconciliation --community <id> [--limit N]` operator CLI (Postgres-targeted, mirroring `migrations_runner`; `DEFAULT_DISCOVERY_LIMIT = 100`).
+- `src/memory_rag/services/__init__.py` — re-exports `ReconciliationService` and `FailedEmbeddingReport`.
+- `tests/test_storage_failed_chunks.py` (new) — mock + sqlite offline parity, PG-DSN-gated postgres parity (ordering, limit, empty, community scoping, only-`failed`, validation). `tests/test_reconciliation.py` (new) — service discovery, read-only assertion, `render_report`, `_main` wiring via an injected store, PG-DSN-gated end-to-end.
+- Docs: D-050 in `decision-log.md`; new OP-3 section + OP-3.1 row in `execution-map.md`; "Failed embeddings" subsection in `RUNBOOK.md` (CLI as the inspection surface); OP-3.1 recorded as landed in `OPERATIONALIZATION-ROADMAP.md`.
+- No schema / migration / boot-gate / scheduler / Telegram surface. No new runtime dependency. A-34 does not apply. `INVARIANTS.md` / `RUNTIME-INVARIANTS.md` / `assumptions.md` untouched — read-only discovery enforces no invariant and A-35 stays open.
+- **Explicitly not in this packet:** any retry loop re-invoking `EmbeddingClient`; the `failed → ready` transition; bounded backoff during reconciliation; dead-letter write routing; scheduler / background worker / boot gate / Telegram surface; retry-outcome metrics beyond the discovery report; a total-failed-count query; A-35 resolution; the D-026 `diary_rag` / `family_id` / `Note` renames.
 
 Closed in the Slice 3.4 date-range retrieval-filter packet (D-040):
 - `src/diary_rag/core/diary/models.py` adds the channel-neutral frozen/slotted `DateRange(start, end)` value object — inclusive `entry_date` lower/upper bound, both sides `date | None`, both-`None` is a valid no-constraint range, `start > end` rejected in `__post_init__`. `src/diary_rag/core/diary/__init__.py` re-exports it.
