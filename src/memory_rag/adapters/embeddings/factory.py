@@ -10,6 +10,7 @@ external dependencies.
 from __future__ import annotations
 
 from memory_rag.adapters.embeddings.mock import MockEmbeddingClient
+from memory_rag.adapters.resilience import RetryPolicy
 from memory_rag.config import Settings
 from memory_rag.core.embeddings import EmbeddingClient
 
@@ -22,5 +23,9 @@ def build_embedding_client(settings: Settings) -> EmbeddingClient:
             api_key=settings.openai_api_key,
             model_name=settings.embedding_model,
             dimension=settings.embedding_dimension,
+            retry_policy=RetryPolicy(
+                timeout_seconds=settings.provider_timeout_seconds,
+                max_attempts=settings.provider_max_attempts,
+            ),
         )
     return MockEmbeddingClient(dimension=settings.embedding_dimension)

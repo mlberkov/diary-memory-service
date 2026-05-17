@@ -83,10 +83,11 @@ the first non-destructive schema-changing upgrade migration; A-34 is resolved.
 Stage 2 — runs after Stage 1 and before any Stage-3 slice (D-043). Decomposed as
 **OP-2** (provider hardening) in `docs/OPERATIONALIZATION-ROADMAP.md` (D-044);
 A-35 failed-embedding reconciliation is the separate **OP-3** packet, which
-consumes the 6.1 retry and 6.2 dead-letter primitives below.
+consumes the 6.1 retry and 6.2 dead-letter primitives below. Slice 6.1
+(timeouts & bounded retries) has landed (D-047); 6.2 and 6.3 remain.
 | Slice | Files / artifacts |
 | --- | --- |
-| 6.1 timeouts & retries | bounded retry policy, classified errors (R-9) — OP-2 |
+| 6.1 timeouts & retries | `src/memory_rag/adapters/resilience.py` (`RetryPolicy`, `OutcomeClass`, `classify_openai_error`, `run_with_retries` — shared adapter-side bounded-retry/timeout primitive, R-9); both OpenAI adapters (`adapters/embeddings/openai_client.py`, `adapters/answers/openai_client.py`) build the SDK client with explicit `timeout` + `max_retries=0` and wrap the API call in `run_with_retries`; `config.py` adds `provider_timeout_seconds` / `provider_max_attempts`; both factories thread a `RetryPolicy` into the `openai` branch; `.env.example` stanza; `tests/test_provider_resilience.py`, `tests/test_openai_embedding_retry.py`, `tests/test_openai_chat_retry.py` (offline). Embedding exhaustion re-raises the original SDK error (A-35 preserved); chat exhaustion raises `ChatProviderUnavailableError` (D-035 preserved). Closes D-047. |
 | 6.2 dead-letter | failed indexing jobs survive and are inspectable — OP-2 |
 | 6.3 rate-limit handling | backoff and observability — OP-2 |
 | 6.4 failed-embedding reconciliation | retry `embedding_status='failed'` with bounded backoff + dead-letter (A-35) — OP-3, after 6.1/6.2 |

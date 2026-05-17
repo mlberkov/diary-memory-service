@@ -25,6 +25,11 @@ Development-sequencing gate (D-043): no Stage-3 item — Phase 5 quality booster
 - **OP-1.2 — non-destructive schema-changing upgrade: done (D-046).** `src/memory_rag/storage/postgres/migrations/0002.index-embedding-status.sql` adds the first additive schema-changing upgrade (an index on `event_chunks(embedding_status)`); gated tests prove the 0001→0002 upgrade is non-destructive over populated data, including a stamp-adopted volume.
 - **OP-1 is complete and A-34 is resolved.** Both halves of the exit criterion — fresh-environment bootstrap and a non-destructive upgrade from a prior schema version — succeed without a destructive volume reset.
 
+## OP-2 — Provider hardening (Stage 2 — operationalization)
+- Stage-2 packet group **OP-2** (D-044; see `docs/OPERATIONALIZATION-ROADMAP.md`). Runs after OP-1; ordered 6.1 → 6.2 → 6.3.
+- **OP-2.1 / Slice 6.1 — timeouts, bounded retries, error classification: done (D-047).** `src/memory_rag/adapters/resilience.py` provides the shared bounded-retry/timeout primitive; both OpenAI adapters build the SDK client with an explicit `timeout` + `max_retries=0` and run every call through it; `config.py` adds `provider_timeout_seconds` / `provider_max_attempts`. R-9 is enforced for provider calls. See `docs/RUNBOOK.md` "Provider resilience (D-047)".
+- **Next: Slice 6.2 — dead-letter surface.** Failed indexing jobs survive and are inspectable; consumes the 6.1 exhausted-retry signal. Slice 6.3 (rate-limit backoff honoring `Retry-After`) follows.
+
 ## OP-3 — Reconciliation for failed embeddings (Stage 2 — operationalization, A-35)
 - Stage-2 packet group **OP-3** (D-044; see `docs/OPERATIONALIZATION-ROADMAP.md`). Runs after OP-1 (schema-migration tooling) and OP-2 (provider hardening), because the reconciliation job consumes OP-2's bounded-backoff retry and dead-letter primitives.
 - A-35 leaves failed embeddings sticky: a chunk with `embedding_status='failed'` stays that way until manual intervention. Ship a reconciliation job that retries `failed` chunks with bounded backoff and a dead-letter strategy, plus the corresponding observability (logs / metrics on retry success/failure).

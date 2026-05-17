@@ -10,6 +10,7 @@ external dependencies.
 from __future__ import annotations
 
 from memory_rag.adapters.answers.mock import MockChatClient
+from memory_rag.adapters.resilience import RetryPolicy
 from memory_rag.config import Settings
 from memory_rag.core.answers import ChatClient
 
@@ -21,5 +22,9 @@ def build_chat_client(settings: Settings) -> ChatClient:
         return OpenAIChatClient(
             api_key=settings.openai_api_key,
             model_name=settings.chat_model,
+            retry_policy=RetryPolicy(
+                timeout_seconds=settings.provider_timeout_seconds,
+                max_attempts=settings.provider_max_attempts,
+            ),
         )
     return MockChatClient()

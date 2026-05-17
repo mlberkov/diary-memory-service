@@ -53,7 +53,7 @@ The canonical durable backend (D-022) runs via `docker compose up -d postgres`. 
 Phase 3.1+3.2 ships with a dual contour:
 
 - `EMBEDDING_BACKEND=mock` (default) — deterministic in-process stand-in. `model_name` on persisted rows is the literal string `mock`, so SQL inspection alone tells you which provider produced a row.
-- `EMBEDDING_BACKEND=openai` — calls `text-embedding-3-large` with `dimensions=3072` explicitly. Requires `OPENAI_API_KEY`. Single attempt; no retries (Phase 6 owns hardening).
+- `EMBEDDING_BACKEND=openai` — calls `text-embedding-3-large` with `dimensions=3072` explicitly. Requires `OPENAI_API_KEY`. The call has an explicit per-attempt timeout and bounded retries — see "Provider resilience (D-047)" below.
 
 The boot gate (R-10) refuses to start when `EMBEDDING_DIMENSION` is not `3072`, when `EMBEDDING_BACKEND=openai` and `EMBEDDING_MODEL` is not `text-embedding-3-large`, when the OpenAI key is missing under the openai backend, or when the connected Postgres lacks the `vector` extension.
 
@@ -110,13 +110,29 @@ Use plain `CREATE INDEX` (not `CONCURRENTLY`): yoyo wraps each migration in a tr
 Slice 4.5 ships with a dual contour:
 
 - `CHAT_BACKEND=mock` (default) — deterministic in-process stand-in. `model_name` on persisted `AnswerTrace` rows is the literal string `mock`, so SQL inspection alone tells you which provider produced a row.
-- `CHAT_BACKEND=openai` — calls `chat.completions.create` with `response_format={"type": "json_object"}` and `temperature=0`. Requires `OPENAI_API_KEY`. Single attempt; no retries (Phase 6 owns hardening, R-9).
+- `CHAT_BACKEND=openai` — calls `chat.completions.create` with `response_format={"type": "json_object"}` and `temperature=0`. Requires `OPENAI_API_KEY`. The call has an explicit per-attempt timeout and bounded retries — see "Provider resilience (D-047)" below.
 
 The boot gate (R-10) refuses to start when `CHAT_BACKEND=openai` and `CHAT_MODEL` is not the canonical `gpt-4.1`, or when the OpenAI key is missing under the openai backend. The non-empty `model_name` check from D-034 is unchanged.
 
 `OpenAIError` and `TimeoutError` from the SDK boundary are translated to `ChatProviderUnavailableError` so the existing D-035 grading writes the call as `FallbackMode.PROVIDER_UNAVAILABLE` and the dispatcher emits the retry-hint reply. `answer_text=""`, `token_counts={}`, `latency_ms=0` per D-035's truthful-trace table.
 
 Live calls are not part of `make check`. The optional smoke `tests/test_chat_client_openai.py` is skipped unless `MEMORY_RAG_OPENAI_TEST_KEY` is set (same gating pattern as the live embedding smoke and the live Postgres tests).
+
+### Provider resilience (D-047)
+Both OpenAI adapters (embedding and chat) make every API call with an explicit per-attempt timeout and a bounded retry loop, so R-9 holds — there is no unbounded wait or retry. Two env knobs, shared by both adapters:
+
+- `PROVIDER_TIMEOUT_SECONDS` (default `30.0`) — the per-attempt wall-clock budget.
+- `PROVIDER_MAX_ATTEMPTS` (default `3`) — total attempts including the first; `1` disables retries.
+
+Worst-case bounded wall time for one provider call is `PROVIDER_TIMEOUT_SECONDS × PROVIDER_MAX_ATTEMPTS` (90s at defaults) — Slice 6.1 adds no inter-attempt delay. The SDK's own retry is disabled (`max_retries=0`) so this loop is the single retry authority. Timeouts, connection errors, 5xx, and rate limits (429) are retried; auth failures and other 4xx fail fast. The mock backends ignore both knobs.
+
+Each attempt logs a `provider.attempt` line (label, attempt number, outcome class, latency); an exhausted call logs a distinct `provider.exhausted` line. To see provider-call behavior:
+
+```bash
+grep -E 'provider\.(attempt|exhausted)' <service-log>
+```
+
+A chat call that exhausts its retries surfaces to the user as the existing `FallbackMode.PROVIDER_UNAVAILABLE` retry-hint reply (D-035); an embedding call that exhausts its retries flips the affected chunks to `embedding_status='failed'` (A-35) — see "Failed embeddings" above. Rate-limit-aware backoff (honoring `Retry-After`) is deferred to Slice 6.3.
 
 ### Webhook idempotency (R-2 / D-023)
 Repeated delivery of the same Telegram message-state — same `(external_chat_id, external_message_id, edit_seq)` — does not create duplicate rows. The webhook returns the same functional 200 reply and logs `effective_path=replay` instead of `fresh`. Operationally, `effective_path=replay` is normal; investigate only if the *first* call for a given key never appears with `effective_path=fresh`.

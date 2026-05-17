@@ -16,6 +16,7 @@ import os
 import pytest
 
 from memory_rag.adapters.embeddings.openai_client import OpenAIEmbeddingClient
+from memory_rag.adapters.resilience import RetryPolicy
 
 OPENAI_TEST_KEY = os.environ.get("MEMORY_RAG_OPENAI_TEST_KEY")
 
@@ -27,7 +28,10 @@ pytestmark = pytest.mark.skipif(
 
 def test_openai_client_round_trip_returns_3072_dim_vector() -> None:
     assert OPENAI_TEST_KEY is not None
-    client = OpenAIEmbeddingClient(api_key=OPENAI_TEST_KEY)
+    client = OpenAIEmbeddingClient(
+        api_key=OPENAI_TEST_KEY,
+        retry_policy=RetryPolicy(timeout_seconds=30.0, max_attempts=3),
+    )
     vectors = client.embed(["a short diary line"])
     assert len(vectors) == 1
     assert len(vectors[0]) == 3072

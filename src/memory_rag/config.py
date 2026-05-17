@@ -16,6 +16,11 @@ Slice 3.3 (D-025) adds two retrieval knobs (``retrieval_top_k``,
 ``retrieval_candidate_k``) used by ``QueryService`` to size the dense /
 sparse candidate pools and the final evidence list returned to the
 answer pipeline.
+
+Slice 6.1 (D-047) adds two provider-resilience knobs
+(``provider_timeout_seconds``, ``provider_max_attempts``) that the OpenAI
+adapter factories turn into the bounded timeout / retry policy required
+by R-9.
 """
 
 from __future__ import annotations
@@ -67,6 +72,14 @@ class Settings(BaseSettings):
     # ``chat_backend == "openai"`` and ``chat_model`` is not the canonical
     # value. The mock backend ignores it.
     chat_model: str = Field(default="")
+
+    # Slice 6.1 (D-047, R-9) provider-resilience knobs. Shared by both OpenAI
+    # adapters via their factories. ``provider_timeout_seconds`` is the
+    # per-attempt wall-clock budget; ``provider_max_attempts`` is the total
+    # attempt count including the first (1 disables retries). Worst-case
+    # bounded wall time per provider call is the product of the two.
+    provider_timeout_seconds: float = Field(default=30.0, gt=0)
+    provider_max_attempts: int = Field(default=3, ge=1)
 
     # Slice 3.3 (D-025) baseline-hybrid retrieval knobs. Defaults are
     # tuning placeholders, not quality claims; the next quality-decision

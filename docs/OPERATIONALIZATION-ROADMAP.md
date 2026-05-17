@@ -6,11 +6,13 @@ This document is the detailed design artifact for **Stage 2 — Operationalizati
 / real infrastructure binding** (D-043). It decomposes Stage 2 into an ordered,
 refinable sequence of packet groups, `OP-1`..`OP-5`.
 
-**Status: in progress.** OP-1.1 — the OP-1 foundation packet — has landed
-(D-045): the migration tool, the baseline migration, and the rewired bootstrap.
-No other `OP-` packet has been executed, and OP-1 itself is not yet complete
-(see §3). This document records the *recommended* sequence and the *fixed*
-ordering constraints; it is a refinable design surface.
+**Status: in progress.** OP-1 is complete — OP-1.1 (D-045) landed the migration
+tool, the baseline migration, and the rewired bootstrap; OP-1.2 (D-046) landed
+the first non-destructive schema-changing upgrade and resolved A-34. OP-2 is in
+progress: Slice 6.1 (D-047) landed the provider timeout / bounded-retry
+primitive. No other `OP-` packet has been executed. This document records the
+*recommended* sequence and the *fixed* ordering constraints; it is a refinable
+design surface.
 
 - **D-043** adopted the three-stage sequencing model and the operationalization
   gate, and named Stage 2's scope — Phase 6, Phase 7, the raw-data
@@ -65,7 +67,7 @@ Stage 2 = the five work items D-043 placed before the operationalization gate:
 | Group | Source | Surfaces it touches |
 | --- | --- | --- |
 | **OP-1 — Schema-migration tooling** *(complete)* | A-34; D-043 Stage-2 exit clause "schema upgrades are non-destructive" | Introduce a migration tool and capture the current bootstrap DDL as the baseline migration — **OP-1.1 landed (D-045)**: `yoyo-migrations`; `src/memory_rag/storage/postgres/migrations/0001.baseline-schema.sql`; `schema.sql` retired; bootstrap applies migrations to head; one-time `stamp` adoption for pre-existing volumes. **OP-1.2 landed (D-046)**: the first non-destructive schema-*changing* upgrade migration `0002.index-embedding-status.sql`, validated as a non-destructive upgrade over populated data. **OP-1 is complete and A-34 is resolved.** |
-| **OP-2 — Provider hardening** | Phase 6 (BuildPlan slices 6.1 timeouts & retries, 6.2 dead-letter, 6.3 rate-limit handling) | Bounded retry policy and explicit timeouts on provider calls (R-9); error classification; a dead-letter surface for failed indexing jobs; rate-limit backoff and the matching observability. |
+| **OP-2 — Provider hardening** *(in progress)* | Phase 6 (BuildPlan slices 6.1 timeouts & retries, 6.2 dead-letter, 6.3 rate-limit handling) | Bounded retry policy and explicit timeouts on provider calls (R-9); error classification; a dead-letter surface for failed indexing jobs; rate-limit backoff and the matching observability. **Slice 6.1 landed (D-047)**: the shared `adapters/resilience.py` bounded-retry/timeout primitive, wired into both OpenAI adapters with an explicit per-attempt timeout and `max_retries=0` — R-9 is enforced for provider calls. 6.2 (dead-letter) and 6.3 (rate-limit backoff) remain. |
 | **OP-3 — Failed-embedding reconciliation** | A-35 | A reconciliation job that retries `embedding_status='failed'` chunks with bounded backoff, routes exhausted retries to OP-2's dead-letter surface, and emits retry-outcome logs/metrics. |
 | **OP-4 — Raw-data durability & backup** | Phase 8 raw-data durability/backup slice (Stage 2 only); D-027; A-40 | Daily backup window (target `03:00–05:00` local) covering at minimum `source_messages` plus enough relational scaffolding to restore `SourceMessage → Note → EventChunk` lineage; a stronger-than-nightly recovery primitive; the A-40 mechanism + RPO/RTO selection. |
 | **OP-5 — Evaluation & observability** | Phase 7 (BuildPlan slices 7.1 gold eval set, 7.2 retrieval & groundedness metrics, 7.3 cost & latency) | A curated gold eval set (extending the D-038 retrieval harness); retrieval hit-rate / empty-rate / groundedness metrics; parse-success metrics; indexing latency; cost & token aggregation; regression visibility. |
