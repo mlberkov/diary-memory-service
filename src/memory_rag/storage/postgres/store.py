@@ -449,6 +449,30 @@ class PostgresDomainStore:
                 raise KeyError(f"unknown chunk_id={chunk_id}")
             conn.commit()
 
+    def list_failed_event_chunks(
+        self, community_id: str, *, limit: int | None = None
+    ) -> list[EventChunk]:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        if limit is not None and limit < 0:
+            raise ValueError("limit must be non-negative")
+        sql = (
+            "SELECT chunk_id, note_id, source_message_id, community_id, "
+            "       author_user_id, note_date, event_index, chunk_text, "
+            "       created_at, embedding_status "
+            "  FROM event_chunks "
+            " WHERE community_id = %s AND embedding_status = 'failed' "
+            " ORDER BY created_at ASC, chunk_id ASC"
+        )
+        params: tuple[object, ...] = (community_id,)
+        if limit is not None:
+            sql += " LIMIT %s"
+            params = (community_id, limit)
+        with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+        return [_row_to_chunk(row) for row in rows]
+
     def save_query(self, query: Query) -> None:
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
