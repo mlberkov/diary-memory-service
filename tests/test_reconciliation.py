@@ -1,8 +1,9 @@
-"""Tests for the failed-embedding reconciliation service (OP-3.1, OP-3.2a).
+"""Tests for the failed-embedding reconciliation service (OP-3.1, OP-3.2).
 
 Covers ``ReconciliationService.discover_failed_chunks`` (read-only
-discovery), ``retry_failed_chunks`` (mutating retry), the report
-renderers, and the ``_main`` operator entrypoint. The CLI targets
+discovery), ``retry_failed_chunks`` (mutating retry, including the
+OP-3.2b exhausted-retry dead-letter routing), the report renderers, and
+the ``_main`` operator entrypoint. The CLI targets
 Postgres in production; ``_main`` is exercised here with injected
 dependencies so the wiring is covered offline under ``make check``.
 Postgres-gated cases exercise the service against the real backend.
@@ -17,13 +18,19 @@ from datetime import UTC, date, datetime
 import pytest
 
 from memory_rag.adapters.embeddings.mock import MockEmbeddingClient
-from memory_rag.core.domain.models import EventChunk, Note, SourceMessage
+from memory_rag.core.domain.models import (
+    EventChunk,
+    IndexingDeadLetter,
+    Note,
+    SourceMessage,
+)
 from memory_rag.core.embeddings.models import EmbeddingRecord, EmbeddingStatus
 from memory_rag.core.routing import RouteKind
 from memory_rag.services.reconciliation import (
     DEFAULT_DISCOVERY_LIMIT,
     FailedEmbeddingReport,
     ReconciliationService,
+    RetryGroupOutcome,
     RetryOutcomeReport,
     _main,
     render_report,
@@ -424,6 +431,89 @@ def test_retry_without_embedding_client_raises() -> None:
 
 
 # ---------------------------------------------------------------------------
+# retry_failed_chunks dead-letter routing (OP-3.2b)
+# ---------------------------------------------------------------------------
+
+
+class _DeadLetterWriteFailsStore(MockDomainStore):
+    """MockDomainStore whose dead-letter write always raises, as if the
+    ``indexing_dead_letters`` sink were unavailable."""
+
+    def save_indexing_dead_letter(self, record: IndexingDeadLetter) -> None:
+        raise RuntimeError("dead-letter sink down")
+
+
+def test_retry_exhausted_group_writes_one_dead_letter() -> None:
+    """An exhausted retry routes the failed group to ``indexing_dead_letters``."""
+    store = _seeded_mock_store()
+    report = ReconciliationService(
+        store, _RaisingEmbeddingClient(dimension=64)
+    ).retry_failed_chunks("fam-A")
+
+    group = report.groups[0]
+    assert group.succeeded is False
+    assert group.dead_letter_id is not None
+
+    rows = store.list_indexing_dead_letters("fam-A")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.dead_letter_id == group.dead_letter_id
+    assert row.source_message_id == "s1"
+    assert row.community_id == "fam-A"
+    assert set(row.chunk_ids) == {"c-old", "c-new"}
+    # Honest provenance: the mock client reports its own identity (D-024).
+    assert row.model_name == "mock"
+    assert row.error_class == "RuntimeError"
+
+
+def test_retry_dead_letter_write_failure_is_swallowed() -> None:
+    """A failing dead-letter write never regresses the failed outcome."""
+    store = _DeadLetterWriteFailsStore()
+    store.save_event_chunks([_chunk("c-old", EmbeddingStatus.FAILED, _at(10))])
+
+    # retry_failed_chunks must not raise despite the dead-letter sink failing.
+    report = ReconciliationService(
+        store, _RaisingEmbeddingClient(dimension=64)
+    ).retry_failed_chunks("fam-A")
+
+    group = report.groups[0]
+    assert group.succeeded is False
+    assert group.error_class == "RuntimeError"
+    # The write failed, so no dead-letter identity is carried.
+    assert group.dead_letter_id is None
+    assert store.len_indexing_dead_letters() == 0
+    # No state regression: the chunk stays failed.
+    chunk = store.get_event_chunk("c-old")
+    assert chunk is not None
+    assert chunk.embedding_status is EmbeddingStatus.FAILED
+
+
+def test_retry_dead_letter_write_failure_logs_write_failed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store = _DeadLetterWriteFailsStore()
+    store.save_event_chunks([_chunk("c-old", EmbeddingStatus.FAILED, _at(10))])
+
+    with caplog.at_level("WARNING"):
+        ReconciliationService(store, _RaisingEmbeddingClient(dimension=64)).retry_failed_chunks(
+            "fam-A"
+        )
+
+    assert "dead_letter.write_failed" in caplog.text
+
+
+def test_retry_success_writes_no_dead_letter() -> None:
+    """A fully succeeding retry routes nothing to the dead-letter surface."""
+    store = _seeded_mock_store()
+    report = ReconciliationService(store, MockEmbeddingClient(dimension=64)).retry_failed_chunks(
+        "fam-A"
+    )
+
+    assert store.len_indexing_dead_letters() == 0
+    assert all(g.dead_letter_id is None for g in report.groups)
+
+
+# ---------------------------------------------------------------------------
 # render_retry_report
 # ---------------------------------------------------------------------------
 
@@ -452,6 +542,38 @@ def test_render_retry_report_empty() -> None:
     text = render_retry_report(RetryOutcomeReport(community_id="fam-A", groups=()))
     assert "retried_chunks=0 succeeded=0 failed=0 groups=0" in text
     assert "No failed-embedding chunks to retry." in text
+
+
+def test_render_retry_report_shows_dead_letter_id_for_routed_group() -> None:
+    """A failed group whose dead-letter write succeeded renders its id."""
+    store = _seeded_mock_store()
+    report = ReconciliationService(
+        store, _RaisingEmbeddingClient(dimension=64)
+    ).retry_failed_chunks("fam-A")
+    text = render_retry_report(report)
+
+    dead_letter_id = report.groups[0].dead_letter_id
+    assert dead_letter_id is not None
+    assert f"dead_letter_id={dead_letter_id}" in text
+
+
+def test_render_retry_report_omits_dead_letter_id_when_unwritten() -> None:
+    """No ``dead_letter_id`` token when the write failed (id is None)."""
+    report = RetryOutcomeReport(
+        community_id="fam-A",
+        groups=(
+            RetryGroupOutcome(
+                source_message_id="s1",
+                chunk_ids=("c-old",),
+                succeeded=False,
+                error_class="RuntimeError",
+                dead_letter_id=None,
+            ),
+        ),
+    )
+    text = render_retry_report(report)
+    assert "outcome=failed error_class=RuntimeError" in text
+    assert "dead_letter_id=" not in text
 
 
 # ---------------------------------------------------------------------------
@@ -561,3 +683,28 @@ def test_pg_retry_failed_chunks(pg_store: PostgresDomainStore) -> None:
         assert chunk is not None
         assert chunk.embedding_status is EmbeddingStatus.READY
     assert pg_store.count_embedding_records_for_source("s1") == 2
+
+
+@pgmark
+def test_pg_retry_exhausted_writes_dead_letter(pg_store: PostgresDomainStore) -> None:
+    """An exhausted retry against Postgres leaves an inspectable dead-letter row."""
+    pg_store.save_source_message(_source("s1", "fam-A"))
+    pg_store.save_note(_note("n1", "s1", "fam-A"))
+    pg_store.save_event_chunks([_chunk("c-old", EmbeddingStatus.FAILED, _at(10))])
+
+    report = ReconciliationService(pg_store, _RaisingEmbeddingClient()).retry_failed_chunks("fam-A")
+
+    group = report.groups[0]
+    assert group.succeeded is False
+    assert group.dead_letter_id is not None
+
+    rows = pg_store.list_indexing_dead_letters("fam-A")
+    assert len(rows) == 1
+    assert rows[0].dead_letter_id == group.dead_letter_id
+    assert rows[0].source_message_id == "s1"
+    assert set(rows[0].chunk_ids) == {"c-old"}
+    assert rows[0].error_class == "RuntimeError"
+    # No state regression: the chunk stays failed.
+    chunk = pg_store.get_event_chunk("c-old")
+    assert chunk is not None
+    assert chunk.embedding_status is EmbeddingStatus.FAILED

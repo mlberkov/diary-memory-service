@@ -1,4 +1,4 @@
-"""Failed-embedding reconciliation — discovery and retry (OP-3.1, OP-3.2a).
+"""Failed-embedding reconciliation — discovery and retry (OP-3.1, OP-3.2).
 
 When an embedding provider call fails during ingest, the affected
 ``event_chunks`` flip to ``embedding_status='failed'`` and stay there
@@ -8,10 +8,12 @@ When an embedding provider call fails during ingest, the affected
   ``DomainRepository.list_failed_event_chunks`` seam and wraps the result
   in a :class:`FailedEmbeddingReport`. It performs no retry, no status
   transition, and no dead-letter write.
-* **Retry** (OP-3.2a, mutating): ``retry_failed_chunks`` re-embeds the
+* **Retry** (OP-3.2, mutating): ``retry_failed_chunks`` re-embeds the
   discovered failed chunks, persists ``EmbeddingRecord`` rows, and
-  transitions succeeded chunks ``failed -> ready``. Chunks whose retry
-  fails are left ``failed`` (no state regression) and reported.
+  transitions succeeded chunks ``failed -> ready`` (OP-3.2a). Chunks whose
+  retry fails are left ``failed`` (no state regression), reported, and
+  routed to the ``indexing_dead_letters`` surface with a best-effort,
+  append-only write (OP-3.2b).
 
 Retry groups discovered chunks by ``source_message_id`` so each provider
 call replays the same per-source batch ingest used. The bounded retry /
@@ -36,7 +38,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from memory_rag.core.domain.models import EventChunk
+from memory_rag.core.domain.models import EventChunk, IndexingDeadLetter
 from memory_rag.core.embeddings import EmbeddingClient, EmbeddingRecord, EmbeddingStatus
 from memory_rag.logging import get_logger
 from memory_rag.storage.repository import DomainRepository
@@ -73,13 +75,17 @@ class RetryGroupOutcome:
     it is retried with a single ``EmbeddingClient.embed`` call, so its
     chunks succeed or fail together. ``error_class`` carries the failing
     exception's class name only (never its message) and is set iff the
-    group did not succeed.
+    group did not succeed. ``dead_letter_id`` is set iff the group failed
+    *and* its best-effort ``indexing_dead_letters`` write succeeded; it
+    stays ``None`` for succeeded groups and for failed groups whose
+    dead-letter write itself failed (logged as ``dead_letter.write_failed``).
     """
 
     source_message_id: str
     chunk_ids: tuple[str, ...]
     succeeded: bool
     error_class: str | None = None
+    dead_letter_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,7 +164,9 @@ class ReconciliationService:
         ``EmbeddingClient.embed`` call. A succeeding group has its
         ``EmbeddingRecord`` rows persisted before its chunks transition
         ``failed -> ready``; a failing group is left ``failed`` (no state
-        regression) and reported with the exception class name. Groups are
+        regression), reported with the exception class name, and routed to
+        the ``indexing_dead_letters`` surface with a best-effort, append-only
+        write whose own failure is logged and swallowed. Groups are
         independent — one failure does not stop the others.
 
         Raises ``RuntimeError`` if the service was built without an
@@ -207,13 +215,39 @@ class ReconciliationService:
                     self._store.set_chunk_embedding_status(chunk.chunk_id, EmbeddingStatus.READY)
             except Exception as exc:
                 error_class = exc.__class__.__name__
+                # Exhausted retry: route the failed group to the OP-2.2
+                # dead-letter surface. The group is already failed before
+                # this write — the write is best-effort and append-only,
+                # so a failure of its own is logged (dead_letter.write_failed)
+                # and swallowed, and can never regress the failed outcome.
+                dead_letter = IndexingDeadLetter(
+                    dead_letter_id=str(uuid4()),
+                    source_message_id=source_message_id,
+                    community_id=community_id,
+                    chunk_ids=chunk_ids,
+                    model_name=client.model_name,
+                    error_class=error_class,
+                    created_at=now,
+                )
+                # Set iff the write below succeeds — see RetryGroupOutcome.
+                dead_letter_id: str | None = None
+                try:
+                    self._store.save_indexing_dead_letter(dead_letter)
+                    dead_letter_id = dead_letter.dead_letter_id
+                except Exception as dead_letter_exc:
+                    log.warning(
+                        "dead_letter.write_failed dead_letter_id=%s error_class=%s",
+                        dead_letter.dead_letter_id,
+                        dead_letter_exc.__class__.__name__,
+                    )
                 log.warning(
                     "reconciliation.retry.group.failed community_id=%s "
-                    "source_message_id=%s chunks=%d error_class=%s",
+                    "source_message_id=%s chunks=%d error_class=%s dead_letter_id=%s",
                     community_id,
                     source_message_id,
                     len(group),
                     error_class,
+                    "none" if dead_letter_id is None else dead_letter_id,
                 )
                 outcomes.append(
                     RetryGroupOutcome(
@@ -221,6 +255,7 @@ class ReconciliationService:
                         chunk_ids=chunk_ids,
                         succeeded=False,
                         error_class=error_class,
+                        dead_letter_id=dead_letter_id,
                     )
                 )
                 continue
@@ -278,7 +313,8 @@ def render_retry_report(report: RetryOutcomeReport) -> str:
     """Render a :class:`RetryOutcomeReport` as operator-facing text.
 
     One header line of run totals plus one line per retried group;
-    ``error_class`` appears only on failed groups.
+    ``error_class`` appears only on failed groups, and ``dead_letter_id``
+    only on a failed group whose dead-letter write succeeded.
     """
     header = (
         f"community_id={report.community_id} "
@@ -298,6 +334,8 @@ def render_retry_report(report: RetryOutcomeReport) -> str:
         )
         if not group.succeeded:
             line += f" error_class={group.error_class}"
+            if group.dead_letter_id is not None:
+                line += f" dead_letter_id={group.dead_letter_id}"
         lines.append(line)
     return "\n".join(lines)
 
