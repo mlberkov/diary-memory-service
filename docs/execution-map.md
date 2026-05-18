@@ -125,10 +125,23 @@ export/delete, audit, retention — are **Stage 3**, are gated on the Stage-2 ex
 criteria, and are **not** decomposed by D-044.
 | Slice | Files / artifacts |
 | --- | --- |
-| 8.0 raw-data durability & backup | daily backup window (`03:00–05:00` target) + stronger-than-nightly recovery for raw `SourceMessage` (D-027, A-40) — **Stage 2**, OP-4 |
+| 8.0 raw-data durability & backup | daily backup window (`03:00–05:00` target) + a stronger-than-nightly recovery primitive — nightly base backup + continuous WAL archiving → PITR — for raw `SourceMessage` (D-027, D-053; A-40 resolved) — **Stage 2**, OP-4 |
 | 8.1 community-scoped access | enforced at every read (I-7, R-3) — Stage 3 |
 | 8.2 visibility model | per-note scopes (assumption A-15) — Stage 3 |
 | 8.3 export/delete flow | tombstones + audit log + retention policy — Stage 3 |
+
+## OP-4 — Raw-data durability & backup *(Stage 2 — Operationalization; in progress)*
+Stage 2 — runs after Stage 1 and before any Stage-3 slice (D-043). Packet group
+**OP-4** in `docs/OPERATIONALIZATION-ROADMAP.md` (D-044); covers the Stage-2
+raw-data durability/backup slice of Phase 8 (row 8.0 above) — depends only on
+OP-1 (recovery restores into a schema-versioned database) and may run in
+parallel with OP-2/OP-3. OP-4.1 landed the A-40 decision; OP-4.2 (backup
+automation) and OP-4.3 (executed restore drill) remain.
+| Slice | Files / artifacts |
+| --- | --- |
+| OP-4.1 backup mechanism & recovery contour decision | docs-only decision packet (D-053): resolves A-40 — for the reference/local Postgres shape (`docker-compose.yml`), the recovery primitive is a nightly physical base backup (`pg_basebackup`) + continuous WAL archiving (`archive_command`) → point-in-time recovery; managed-cloud and self-hosted shapes use the provider- or operator-owned equivalent (no vendor named — A-41 stays open). RPO ≤ 5 min / RTO ≤ 1 h for raw `SourceMessage` data; nightly base-backup window `03:00–05:00` local (D-027, unchanged); base backups retained 30 days, WAL retained to cover the oldest retained base backup; restore drill once before the first non-local deployment, then quarterly thereafter. Decomposes OP-4 into OP-4.1/4.2/4.3. Updates `decision-log.md`, `assumptions.md` + `assumption-audit.md` (**A-40 closed**), `OPERATIONALIZATION-ROADMAP.md`, `RUNBOOK.md`, this map, `todo.md`, `ARCHITECTURE.md`, `TechSpec.md`. Docs-only — no scripts, scheduler, WAL config, schema/migration, or `src/` change. **Resolves A-40**; OP-4 in progress. Closes D-053. |
+| OP-4.2 backup automation | base-backup + WAL-archiving configuration, `archive_command`, and scheduler wiring implementing the D-053 contour — open. |
+| OP-4.3 restore drill | an executed restore drill recovering raw `SourceMessage` data from a base backup and via PITR, validating the D-053 RPO ≤ 5 min / RTO ≤ 1 h targets — open. |
 
 ## Phase 9 — TheyGrow Integration Seam *(Stage 3 — Quality / Expansion)*
 Stage 3 — every slice below is gated on the Stage-2 exit criteria (D-043).

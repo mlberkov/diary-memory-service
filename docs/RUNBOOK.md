@@ -282,13 +282,16 @@ Operationally: the draft floor (R-13) means no inbound message is silently disca
 
 Schema upgrade note: the `source_messages.detected_route` CHECK constraint extended from `{start, help, note, ask, clarify, unknown}` to `{start, help, note, ask, draft, clarify, unknown}` (D-028). Per A-34, existing local Postgres volumes must be reset with `docker compose down -v` before the new CHECK applies; SQLite has no enum constraint on the column. Until the reset is performed, inserts with `detected_route='draft'` raise a CHECK violation against the live Postgres backend.
 
-### Raw-data durability and recovery (D-027)
-Raw `SourceMessage` is the highest-tier durability surface (I-15). The target operational contour:
+### Raw-data durability and recovery (D-027, D-053)
+Raw `SourceMessage` is the highest-tier durability surface (I-15). D-053 (OP-4.1) resolved A-40 — the backup mechanism and the recovery objectives below are the committed contour. Backup/restore automation is not yet wired (OP-4.2); this section describes what the recovery contour is, not commands to run.
 
-- daily backup window (target: `03:00–05:00` local time) covering at minimum `source_messages` plus enough relational scaffolding to restore `SourceMessage → Note → EventChunk` lineage,
-- a stronger-than-nightly recovery primitive (continuous WAL archiving, point-in-time recovery, streaming replicas, or a managed-cloud equivalent — selected per deployment shape).
+- **Daily backup window.** A nightly physical base backup (`pg_basebackup`) runs in the `03:00–05:00` local-time window. The base backup is cluster-wide — it covers raw `source_messages` plus the `notes` / `event_chunks` lineage scaffolding, the append-only `indexing_dead_letters` audit surface, and every other table.
+- **Stronger-than-nightly recovery primitive.** Continuous WAL archiving (`archive_command`, `archive_timeout` ≈ 5 min) on top of the base backup enables point-in-time recovery to any moment between the last base backup and the failure. For the reference/local Postgres deployment (`docker-compose.yml`) this base-backup + WAL-archiving primitive is the committed mechanism; the managed-cloud and self-hosted shapes use the provider- or operator-owned equivalent PITR (the specific managed provider is still open — A-41).
+- **Recovery objectives for raw data.** RPO ≤ 5 minutes (at most ~5 minutes of raw writes lost) and RTO ≤ 1 hour (raw `SourceMessage` data recoverable within an hour of the recovery decision).
+- **Retention.** Base backups are retained 30 days; archived WAL is retained long enough to cover the oldest retained base backup, so PITR is possible to any point in the trailing ~30-day window.
+- **Restore drill.** A restore drill — recovering raw `SourceMessage` data from a base backup and exercising PITR from archived WAL — is run once before the first non-local deployment, then quarterly thereafter.
 
-Specific backup tooling and RPO/RTO targets remain bracketed as A-40. Derived state (embeddings, indexes, retrieval traces, answer traces) is reproducible from raw under the active parser/embedding versions; raw loss is unrecoverable, so operational policies treat raw retention as the highest tier.
+Because the base backup is physical and cluster-wide, derived state (embeddings, indexes, retrieval traces, answer traces) restores alongside raw with no replay step; replay from raw under the active parser/embedding versions (I-12) remains a fallback recovery path. Raw loss is unrecoverable, so operational policy treats raw retention as the highest tier.
 
 ### Raw export (D-027)
 The user can export their raw `SourceMessage` data on demand in JSON (stable field names, ISO timestamps) or TXT (one record per block). The export is scope-bounded the same way retrieval is (R-3 / R-14) and records its own provenance (export id, scope, time range, format, requester). Derived state is not in the minimum export contract — raw is sufficient to reconstruct everything else.
