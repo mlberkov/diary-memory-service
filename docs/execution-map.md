@@ -97,12 +97,14 @@ and Slice 6.3 (rate-limit backoff, D-049) have all landed — OP-2 is complete.
 Stage 2 — runs after Stage 1 and before any Stage-3 slice (D-043). Packet group
 **OP-3** in `docs/OPERATIONALIZATION-ROADMAP.md` (D-044); runs after OP-1 and
 OP-2 because it consumes the 6.1 retry and 6.2 dead-letter primitives. OP-3.1
-landed the read-only discovery seam; the retry slice (OP-3.2) that resolves
-A-35 is still open.
+landed the read-only discovery seam and OP-3.2a landed the retry execution
+(`failed → ready`); the OP-3.2b slice that routes exhausted retries to the
+dead-letter surface and resolves A-35 is still open.
 | Slice | Files / artifacts |
 | --- | --- |
 | OP-3.1 failed-embedding discovery + read-only entrypoint | `storage/repository.py` adds the `DomainRepository.list_failed_event_chunks` Protocol method (community-scoped, `embedding_status='failed'`, `(created_at ASC, chunk_id ASC)` order, optional `limit`); `storage/mock/store.py`, `storage/sqlite/store.py`, `storage/postgres/store.py` implement it with full parity (Postgres reuses the OP-1.2 `idx_event_chunks_embedding_status` index — no new migration); `services/reconciliation.py` (new) adds `ReconciliationService.discover_failed_chunks`, the channel-neutral `FailedEmbeddingReport`, `render_report`, and the read-only `python -m memory_rag.services.reconciliation --community <id> [--limit N]` CLI (Postgres-targeted, mirroring `migrations_runner`); `services/__init__.py` re-exports both; `tests/test_storage_failed_chunks.py` and `tests/test_reconciliation.py` (new). Replaces the raw `psql` probe as the failed-chunk inspection surface. Discovery only — no retry, no status transition, no dead-letter routing; A-35 stays open. Closes D-050. |
-| OP-3.2 failed-embedding retry | retry the discovered `failed` chunks with bounded backoff, route exhausted retries to the dead-letter surface, emit retry-outcome observability — resolves A-35 (next OP-3 slice) |
+| OP-3.2a failed-embedding retry execution | `services/reconciliation.py` — `ReconciliationService` gains an optional injected `EmbeddingClient` and `retry_failed_chunks(community_id, *, limit=None)`, which consumes the OP-3.1 `list_failed_event_chunks` seam, groups failed chunks by `source_message_id`, retries each group with one `EmbeddingClient.embed` call (OP-2 bounded backoff stays internal to the client), persists `EmbeddingRecord` rows then transitions succeeded chunks `failed → ready`, and leaves exhausted-retry chunks `failed`; new channel-neutral `RetryGroupOutcome` / `RetryOutcomeReport` dataclasses and `render_retry_report`; `reconciliation.retry.group.ok|failed` + `reconciliation.retry.summary` logs; `_main` gains a `--retry` mode wiring `build_embedding_client`; `services/__init__.py` re-exports `RetryOutcomeReport`; extended `tests/test_reconciliation.py` (success, exhausted failure, source grouping, records-before-status, `UNIQUE` collision, `_main --retry`, PG-DSN-gated end-to-end). No new repository method, no schema or migration. Retries and clears succeeded chunks but routes no dead letters; A-35 stays open. Closes D-051. |
+| OP-3.2b failed-embedding retry dead-letter routing | route exhausted reconciliation retries to the OP-2.2 dead-letter surface and resolve A-35 (next OP-3 slice) |
 
 ## Phase 7 — Evaluation and Observability *(Stage 2 — Operationalization)*
 Stage 2 — runs after Stage 1 and before any Stage-3 slice (D-043). Decomposed as

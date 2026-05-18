@@ -68,6 +68,16 @@ python -m memory_rag.services.reconciliation --community <community_id> [--limit
 
 It lists every chunk stuck at `embedding_status='failed'` for the community — oldest failure first — with its `chunk_id`, `source_message_id`, `note_date`, and `created_at`, plus the total count. `--limit` caps the listing (default `100`). The entrypoint targets the canonical Postgres backend and is read-only: it discovers and reports, it does not retry or transition any chunk. It supersedes the hand-run `psql` probe over `event_chunks`; that table's `embedding_status='failed'` rows remain the authoritative failure signal it reads.
 
+Retry the failed chunks with the same entrypoint's `--retry` mode (OP-3.2a / D-051):
+
+```bash
+python -m memory_rag.services.reconciliation --community <community_id> --retry [--limit N]
+```
+
+`--retry` re-embeds the discovered failed chunks, grouped by `source_message_id` — the same per-source batching ingest uses — with one `EmbeddingClient.embed` call per group and OP-2's bounded backoff internal to the client. A group that embeds successfully has its `embedding_records` written and its chunks transitioned `failed → ready`; a group whose retry is exhausted is left at `embedding_status='failed'` with no state regression. The command prints a per-group report — `retried_chunks` / `succeeded` / `failed` / `groups` totals plus one `outcome=ready|failed` line per `source_message_id` — and emits `reconciliation.retry.group.ok` / `reconciliation.retry.group.failed` and `reconciliation.retry.summary` logs. `--limit` caps the retried slice exactly as in discovery mode. Without `--retry` the entrypoint stays the read-only discovery surface described above.
+
+Exhausted retries stay `failed` and remain discoverable: OP-3.2a runs the retry but does not yet route exhausted retries into the dead-letter surface (A-35 stays open; OP-3.2b adds that routing).
+
 Replay (R-2) does not re-embed.
 
 #### Dead-letter surface (OP-2.2 / D-048)
@@ -82,7 +92,7 @@ docker compose exec -T postgres psql -U postgres -d memory_rag -c \
 
 The dead-letter write is **best-effort**: it runs *after* the `embedding_status='failed'` marking, and a failure of its own is logged (`dead_letter.write_failed`) and swallowed. A row can therefore be absent even though the chunks are correctly `failed`. When the two disagree, treat `event_chunks.embedding_status = 'failed'` (the probe above) as the source of truth — it is the authoritative failure signal; the dead-letter table is a structured convenience layered on top. Each failed source produces at most one dead-letter row (replay does not re-embed).
 
-There is still no auto-retry (A-35). OP-3.1 (D-050) landed the read-only discovery surface above; the OP-3.2 reconciliation slice will retry `failed` chunks with bounded backoff and consume this dead-letter surface.
+There is still no automatic / scheduled retry (A-35). OP-3.1 (D-050) landed the read-only discovery surface and OP-3.2a (D-051) the operator-run `--retry` mode above; the OP-3.2b reconciliation slice will route exhausted reconciliation retries into this dead-letter surface.
 
 #### Schema migrations (OP-1 / D-045, D-046)
 The Postgres schema is versioned. The migration history under `src/memory_rag/storage/postgres/migrations/` is the single canonical schema source — there is no `schema.sql`. Migrations are run by `yoyo-migrations` (raw-SQL migration files; psycopg v3 backend).
