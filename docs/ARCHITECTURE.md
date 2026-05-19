@@ -159,7 +159,7 @@ Target contour:
 - **Raw is especially durable.** Derived state (embeddings, indexes, traces) may be reconstructed by replay from raw under active parser/embedding versions; raw loss is unrecoverable. Operational policies (retention windows, restore drills) treat raw retention as the highest tier.
 - **Replayability remains the recovery primitive.** Once raw is restored, parsing/chunking/embedding/indexing rerun (I-12). Replay produces logical state, not duplicates.
 
-Specific backup tooling, retention windows, and RPO/RTO targets are deployment-shape choices and remain bracketed as open assumptions.
+Specific backup tooling, retention windows, and RPO/RTO targets are resolved by D-053 (OP-4.1): for the reference Postgres shape, a nightly base backup + continuous WAL archiving → point-in-time recovery, RPO ≤ 5 min / RTO ≤ 1 h, and 30-day base-backup retention; managed-cloud and self-hosted shapes use the provider- or operator-owned equivalent.
 
 ## Raw export
 

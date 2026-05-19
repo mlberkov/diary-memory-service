@@ -267,7 +267,7 @@ Raw `SourceMessage` is the highest-tier durability surface. Derived state (embed
 
 Operational policy requires:
 - a daily backup window (target: `03:00–05:00` local time) covering at minimum `source_messages` plus enough relational scaffolding to restore the `SourceMessage → Note → EventChunk` lineage,
-- a stronger-than-nightly recovery primitive (continuous WAL archiving, point-in-time recovery, streaming replicas, or a managed-cloud equivalent — selected per deployment shape; mechanism bracketed as A-40),
+- a stronger-than-nightly recovery primitive (continuous WAL archiving, point-in-time recovery, streaming replicas, or a managed-cloud equivalent — selected per deployment shape; mechanism selected by D-053 — nightly base backup + continuous WAL archiving → PITR, with RPO ≤ 5 min / RTO ≤ 1 h targets),
 - retention windows and restore drills that treat raw as the highest tier.
 
 ### Raw export (D-027)

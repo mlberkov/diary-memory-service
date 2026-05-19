@@ -1,7 +1,38 @@
 services:
+  # OP-4.2 — one-shot: create the WAL/base archive layout and hand it to the
+  # postgres OS user (UID 999) before the archive_command first fires.
+  pg_archive_init:
+    image: pgvector/pgvector:pg16
+    container_name: memory_rag_pg_archive_init
+    entrypoint:
+      ["sh", "-c", "mkdir -p /archive/wal /archive/base && chown -R 999:999 /archive"]
+    volumes:
+      - memory_rag_pg_archive:/archive
+
   postgres:
     image: pgvector/pgvector:pg16
     container_name: memory_rag_pg
+    # OP-4.2 — WAL archiving for point-in-time recovery (D-053, D-054).
+    # archive_command copies each completed WAL segment into the archive volume:
+    #   - `test -f ... ||` makes it idempotent — a re-issued segment exits 0;
+    #   - `.tmp` then `mv` keeps a half-written segment from ever appearing
+    #     under its final name.
+    # A genuine copy failure exits non-zero, so Postgres keeps the segment in
+    # pg_wal and retries — no raw WAL is lost. wal_level/archive_mode changes
+    # need a restart; archive_command/archive_timeout are reload-able.
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_timeout=300
+      - -c
+      - "archive_command=test -f /archive/wal/%f || ( cp %p /archive/wal/%f.tmp && mv /archive/wal/%f.tmp /archive/wal/%f )"
+    depends_on:
+      pg_archive_init:
+        condition: service_completed_successfully
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -10,6 +41,10 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - memory_rag_pg_data:/var/lib/postgresql/data
+      - memory_rag_pg_archive:/archive
+      # OP-4.2 — initdb-time hook: add a `host replication` rule so the
+      # pg_backup sidecar can run pg_basebackup over the Compose network.
+      - ./configs/postgres/initdb-replication-hba.sh:/docker-entrypoint-initdb.d/10-replication-hba.sh:ro
     healthcheck:
       test:
         ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-memory_rag}"]
@@ -17,5 +52,61 @@ services:
       timeout: 5s
       retries: 20
 
+  # OP-4.2 — opt-in nightly base-backup runner. Started only with
+  # `docker compose --profile backup up -d`; a plain `up` leaves it down.
+  pg_backup:
+    image: pgvector/pgvector:pg16
+    container_name: memory_rag_pg_backup
+    profiles: ["backup"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-memory_rag}
+      BACKUP_WINDOW_START: ${BACKUP_WINDOW_START:-3}
+      BACKUP_WINDOW_END: ${BACKUP_WINDOW_END:-5}
+      BASE_RETENTION_DAYS: ${BASE_RETENTION_DAYS:-30}
+      TZ: ${TZ:-UTC}
+    entrypoint: ["sh", "/opt/pg_backup/scheduler.sh"]
+    volumes:
+      - memory_rag_pg_archive:/archive
+      - ./scripts/pg_backup:/opt/pg_backup:ro
+    restart: unless-stopped
+
+  # OP-4.3 — opt-in recovered-cluster runner for restore drills and operator
+  # restores (D-055). Started only with `docker compose --profile restore up`.
+  # It runs the cluster that `scripts/pg_restore/restore.sh` prepared on the
+  # dedicated, throwaway `memory_rag_pg_restore_data` volume — never the live
+  # `memory_rag_pg_data`. The archive volume is mounted read-write so restore.sh
+  # can write run logs and the result marker under /archive/restore_logs; this
+  # cluster has archive_mode off (the default — no `-c` archive flags), so it
+  # never writes WAL back into the archive. The host port is kept off 5432 so
+  # the recovered cluster never clashes with the live `postgres`.
+  pg_restore:
+    image: pgvector/pgvector:pg16
+    container_name: memory_rag_pg_restore
+    profiles: ["restore"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-memory_rag}
+    ports:
+      - "${RESTORE_PORT:-5433}:5432"
+    volumes:
+      - memory_rag_pg_restore_data:/var/lib/postgresql/data
+      - memory_rag_pg_archive:/archive
+      - ./scripts/pg_restore:/opt/pg_restore:ro
+    healthcheck:
+      test:
+        ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-memory_rag}"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
 volumes:
   memory_rag_pg_data:
+  memory_rag_pg_archive:
+  memory_rag_pg_restore_data:

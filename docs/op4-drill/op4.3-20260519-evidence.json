@@ -1,0 +1,65 @@
+{
+  "drill": "OP-4.3 — executed restore drill for raw SourceMessage data (D-055)",
+  "metadata": {
+    "drill_run_date": "2026-05-19",
+    "environment": "local-compose-reference",
+    "notes": "Reference/local docker-compose shape (docker-compose.yml, pgvector/pgvector:pg16). Synthetic source_messages rows only — community_id 'op43-drill', no PII, no real payloads. Restored into the dedicated memory_rag_pg_restore_data scratch volume via scripts/pg_restore/restore.sh. Inspection harness, not a make check gate."
+  },
+  "base_backup": {
+    "backup_dir": "/archive/base/base-20260519T063936Z",
+    "backup_timestamp_utc": "2026-05-19T06:39:36Z",
+    "start_wal": "000000010000000000000003",
+    "taken_by": "scripts/pg_backup/backup.sh (OP-4.2, make backup-run)"
+  },
+  "ingestion": {
+    "comment": "Three synthetic batches ingested AFTER the base backup so recovery depends on archived-WAL replay. Batches 1 and 2 forced a WAL switch (pg_switch_wal); batch 3 did not, to observe the un-archived window.",
+    "batch_1": { "keys_prefix": "op43-drill-1-", "row_count": 5, "committed_utc": "2026-05-19T06:40:03Z", "wal_segment": "000000010000000000000004", "forced_switch": true },
+    "batch_2": { "keys_prefix": "op43-drill-2-", "row_count": 5, "committed_utc": "2026-05-19T06:40:13Z", "wal_segment": "000000010000000000000005", "forced_switch": true },
+    "batch_3": { "keys_prefix": "op43-drill-3-", "row_count": 5, "committed_utc": "2026-05-19T06:40:23Z", "wal_segment": "000000010000000000000006", "forced_switch": false }
+  },
+  "restore_full": {
+    "recovery_target": "latest (replay all archived WAL)",
+    "start_timestamp_utc": "2026-05-19T08:42:06Z",
+    "end_timestamp_utc": "2026-05-19T08:42:11Z",
+    "rto_seconds": 5,
+    "source_message_check": {
+      "expected": "all 3 batches (15 rows) — every batch's WAL was archived by restore time",
+      "ids_or_keys": ["op43-drill-1-* (5)", "op43-drill-2-* (5)", "op43-drill-3-* (5)"],
+      "recovered_row_count": 15,
+      "recovered": true
+    }
+  },
+  "restore_pitr": {
+    "target_timestamp_utc": "2026-05-19T06:40:03.568169+00",
+    "start_timestamp_utc": "2026-05-19T08:43:54Z",
+    "end_timestamp_utc": "2026-05-19T08:43:57Z",
+    "rto_seconds": 3,
+    "rpo_seconds_or_window": "0 — the recovery point (between batch-1 and batch-2) was reached exactly; all data committed at or before the target was recovered, all data after it correctly excluded",
+    "source_message_check": {
+      "expected": "batch-1 only (5 rows); batch-2 and batch-3 excluded by recovery_target_time",
+      "ids_or_keys": ["op43-drill-1-* (5, recovered)", "op43-drill-2-* (0, correctly excluded)", "op43-drill-3-* (0, correctly excluded)"],
+      "recovered_row_count": 5,
+      "recovered": true
+    }
+  },
+  "rpo_observation": {
+    "comment": "RPO is the data-loss window between the last recoverable point and a failure. A forced pg_switch_wal archives a segment immediately (RPO -> 0). Without a switch, archive_timeout=300s force-archives a partially-filled segment, bounding the un-archived window.",
+    "forced_switch_window_seconds": 0,
+    "unforced_window_observed_seconds": 290,
+    "unforced_window_detail": "batch-3 committed 2026-05-19T06:40:23Z with no forced switch; its WAL segment 000000010000000000000006 was force-archived at 2026-05-19T06:45:13Z by archive_timeout=300 — ~290s, within the 300s bound.",
+    "archive_timeout_seconds": 300,
+    "worst_case_rpo_bound_seconds": 300
+  },
+  "summary": {
+    "rpo_seconds": 300,
+    "rpo_basis": "worst-case un-archived window for an un-switched raw write, bounded by archive_timeout=300s; forced-switch and post-archive_timeout data observed at 0 loss",
+    "rto_seconds": 5,
+    "rto_basis": "longest observed restore wall-clock (full restore); PITR observed at 3s",
+    "d053_target_rpo_seconds": 300,
+    "d053_target_rto_seconds": 3600,
+    "verdict_rpo": "met",
+    "verdict_rto": "met",
+    "phase8_raw_durability_dod": "met — raw SourceMessage rows recovered from the prior backup window (full restore) and to a tighter-than-nightly recovery point (PITR), both within the D-053 RPO/RTO targets"
+  },
+  "log_reference": "/archive/restore_logs/ in the memory_rag_pg_archive volume — restore.sh writes restore-<ts>.log and last_restore.json per run (transient: the drill volumes were dropped at teardown)."
+}
