@@ -84,10 +84,23 @@ class PerLegRecall:
 
 @dataclass(frozen=True, slots=True)
 class AggregateMetrics:
+    """Means / fractions across the gold set.
+
+    ``hit_rate`` uses a **non-empty-gold denominator** — only queries with
+    at least one ``expected_handle`` participate. Negative queries (empty
+    ``expected_handles``) cannot produce a hit, so counting them would just
+    dilute the rate. This is what keeps ``hit_rate`` distinct from
+    ``per_leg_recall_at_20.fused``, which divides by *all* queries.
+    ``empty_rate`` divides by all queries — it measures retrieval returning
+    zero candidates, independent of whether the query had expected chunks.
+    """
+
     recall_at_5: float
     recall_at_10: float
     recall_at_20: float
     mrr_at_20: float
+    hit_rate: float
+    empty_rate: float
     per_leg_recall_at_20: PerLegRecall
 
 
@@ -291,6 +304,36 @@ def mrr_at_k(expected: set[str], returned: Sequence[str], k: int) -> float:
     return 1.0 / rank
 
 
+def hit_rate(rows: Sequence[PerQueryResult]) -> float:
+    """Fraction of **non-empty-gold** queries that surfaced a relevant chunk.
+
+    Denominator is the set of gold queries with at least one expected
+    chunk; numerator is those whose fused result list contained at least
+    one of them (``first_relevant_rank_in_fused is not None``). Negative
+    queries (empty ``expected_chunk_ids``) are excluded from both — they
+    cannot produce a hit. Returns ``0.0`` when there is no non-empty-gold
+    query, keeping aggregation honest without raising.
+    """
+    answerable = [r for r in rows if r.expected_chunk_ids]
+    if not answerable:
+        return 0.0
+    hits = sum(1 for r in answerable if r.first_relevant_rank_in_fused is not None)
+    return hits / len(answerable)
+
+
+def empty_rate(rows: Sequence[PerQueryResult]) -> float:
+    """Fraction of **all** gold queries whose fused result list was empty.
+
+    An empty fused list means retrieval returned zero candidates (both the
+    dense and sparse legs came back empty). This counts every gold query,
+    answerable or negative. Returns ``0.0`` for an empty report.
+    """
+    if not rows:
+        return 0.0
+    empties = sum(1 for r in rows if not r.fused_top_k_ids)
+    return empties / len(rows)
+
+
 # --------------------------------------------------------------- run loop
 
 
@@ -323,9 +366,11 @@ def run_harness(
        legs for honest recall comparison.
     4. Compute per-leg / aggregate metrics.
 
-    The report's aggregate metrics are means across queries; per-query
-    rows expose the diagnostic per-leg first-hit rank fields and the
-    explicit ``reciprocal_rank_in_fused`` float.
+    The report's recall / MRR aggregates are means across queries;
+    ``hit_rate`` is a fraction over non-empty-gold queries only and
+    ``empty_rate`` a fraction over all queries (see ``AggregateMetrics``).
+    Per-query rows expose the diagnostic per-leg first-hit rank fields and
+    the explicit ``reciprocal_rank_in_fused`` float.
     """
     per_query_rows: list[PerQueryResult] = []
     sum_r5 = 0.0
@@ -403,6 +448,8 @@ def run_harness(
         recall_at_10=sum_r10 / n,
         recall_at_20=sum_r20 / n,
         mrr_at_20=sum_mrr / n,
+        hit_rate=hit_rate(per_query_rows),
+        empty_rate=empty_rate(per_query_rows),
         per_leg_recall_at_20=PerLegRecall(
             dense=sum_dense_recall / n,
             sparse=sum_sparse_recall / n,

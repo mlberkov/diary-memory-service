@@ -231,6 +231,8 @@ def _format_human(report: HarnessReport) -> str:
         f"  recall@10 = {a.recall_at_10:.3f}",
         f"  recall@20 = {a.recall_at_20:.3f}",
         f"  mrr@20    = {a.mrr_at_20:.3f}",
+        f"  hit_rate   = {a.hit_rate:.3f}  (denominator: non-empty-gold queries only)",
+        f"  empty_rate = {a.empty_rate:.3f}  (denominator: all queries)",
         "  per_leg_recall@20:",
         f"    dense  = {pl.dense:.3f}",
         f"    sparse = {pl.sparse:.3f}",

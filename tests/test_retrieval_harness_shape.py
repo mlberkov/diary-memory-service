@@ -121,6 +121,10 @@ def test_mock_mode_returns_expected_report_shape(gold_path: Path, corpus_path: P
     assert isinstance(agg.recall_at_10, float)
     assert isinstance(agg.recall_at_20, float)
     assert isinstance(agg.mrr_at_20, float)
+    assert isinstance(agg.hit_rate, float)
+    assert 0.0 <= agg.hit_rate <= 1.0
+    assert isinstance(agg.empty_rate, float)
+    assert 0.0 <= agg.empty_rate <= 1.0
     assert isinstance(agg.per_leg_recall_at_20, PerLegRecall)
     assert isinstance(agg.per_leg_recall_at_20.dense, float)
     assert isinstance(agg.per_leg_recall_at_20.sparse, float)

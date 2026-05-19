@@ -230,7 +230,7 @@ Multi-worker caveat: each uvicorn worker / pod holds its own dispatcher singleto
 ### Retrieval-quality inspection harness (D-038)
 `src/memory_rag/eval/retrieval/` ships a hand-curated harness that measures the D-025 baseline contour against a small fixture corpus + gold-query set. It is **inspection, not a gate** — the CLI exit code is always `0` regardless of the observed metrics.
 
-Two modes share one metric shape (aggregate `recall@{5,10,20}`, `mrr@20`, `per_leg_recall@20.{dense,sparse,fused}`; per-query top-`candidate_k` chunk-id lists, diagnostic per-leg first-relevant-rank fields, and an explicit `reciprocal_rank_in_fused` numerator):
+Two modes share one metric shape (aggregate `recall@{5,10,20}`, `mrr@20`, `hit_rate`, `empty_rate`, `per_leg_recall@20.{dense,sparse,fused}`; per-query top-`candidate_k` chunk-id lists, diagnostic per-leg first-relevant-rank fields, and an explicit `reciprocal_rank_in_fused` numerator). See "Retrieval hit-rate / empty-rate" below for the two OP-5.2a metrics:
 
 - **Mock mode.** Runs under `make check` via `tests/test_retrieval_harness_shape.py`. Shape-only assertions, no quality thresholds. Also smokeable directly:
 
@@ -250,6 +250,20 @@ Two modes share one metric shape (aggregate `recall@{5,10,20}`, `mrr@20`, `per_l
   Live OpenAI is used on the **corpus side** at ingest time because D-025's dense leg filters by `model_name` and the cached query embeddings are pinned to `text-embedding-3-large` — mixing models is silently broken (the harness aborts on `model_name` mismatch rather than returning zero hits). Live OpenAI on the corpus side is acceptable here because the operator chose this run deliberately; `make check` never enters this path.
 
   After the run, paste the aggregate metrics plus 2–3 illustrative per-query rows into the D-038 "Baseline snapshot (observed)" subsection in `docs/decision-log.md` — framed as observed values for the D-025 contour, not as a must-beat threshold for any future packet.
+
+#### Retrieval hit-rate / empty-rate (OP-5.2a / D-057)
+The harness report carries two retrieval-coverage aggregates alongside recall / MRR. Both are **inspection only** — observed values, no thresholds, the CLI exit code stays `0`. They appear in the human report under the `Aggregate (...)` block and in the `--json` output's `aggregate` object.
+
+- **`hit_rate`** — of the gold queries that *have* expected chunks, the fraction whose fused result list surfaced at least one of them. Answers "of the answerable queries, how often did retrieval surface something relevant?" Its **denominator is the non-empty-gold queries only** — negative queries (empty `expected_handles`) are excluded because they cannot produce a hit, and counting them would only dilute the rate. This non-empty-gold denominator is what keeps `hit_rate` distinct from `per_leg_recall@20.fused`, which divides by *all* queries. The human report annotates the line `(denominator: non-empty-gold queries only)`.
+- **`empty_rate`** — the fraction of *all* gold queries whose fused result list came back empty (retrieval returned zero candidates — both the dense and sparse legs empty). It counts every query, answerable or negative. The human report annotates the line `(denominator: all queries)`.
+
+Where to look: run the harness in mock mode and read the `hit_rate` / `empty_rate` lines, or inspect `aggregate.hit_rate` / `aggregate.empty_rate` in `--json`. For the OP-5 observability set the denominator split is explicit — that set has **21 total gold queries, 19 of them non-empty** (2 negatives, "did I go skiing this winter" and "notes about my tax return"), so `hit_rate` is computed over **19** while `empty_rate` is computed over **21**:
+
+```bash
+uv run python -m memory_rag.eval.retrieval --mode mock \
+  --gold eval/retrieval/observability/gold.json \
+  --corpus eval/retrieval/observability/corpus.jsonl
+```
 
 #### Query-embeddings cache (`eval/retrieval/embeddings_cache.json`)
 The cache pins query embeddings to a specific `text-embedding-3-large` @ 3072-dim point-in-time output so the Postgres run is reproducible without contacting OpenAI on the query side. Regenerate is an operator-only ritual:
