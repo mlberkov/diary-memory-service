@@ -48,6 +48,20 @@ from memory_rag.storage.mock.store import MockDomainStore
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GOLD_PATH = REPO_ROOT / "eval" / "retrieval" / "gold.json"
 CORPUS_PATH = REPO_ROOT / "eval" / "retrieval" / "corpus.jsonl"
+OBS_GOLD_PATH = REPO_ROOT / "eval" / "retrieval" / "observability" / "gold.json"
+OBS_CORPUS_PATH = REPO_ROOT / "eval" / "retrieval" / "observability" / "corpus.jsonl"
+
+# The two fixture pairs the harness ships: the frozen D-038 baseline set and
+# the OP-5 observability set (D-056). Mock-mode shape coverage runs over both —
+# the end-to-end run also resolves every gold handle, so a bad handle fails here.
+FIXTURE_PAIRS = [
+    pytest.param(GOLD_PATH, CORPUS_PATH, id="d038-baseline"),
+    pytest.param(OBS_GOLD_PATH, OBS_CORPUS_PATH, id="op5-observability"),
+]
+CORPUS_PATHS = [
+    pytest.param(CORPUS_PATH, id="d038-baseline"),
+    pytest.param(OBS_CORPUS_PATH, id="op5-observability"),
+]
 
 
 def _build_chunks_for_source(
@@ -64,9 +78,11 @@ def _build_chunks_for_source(
     return chunks_for_source
 
 
-def _run_mock_end_to_end() -> HarnessReport:
-    gold = load_gold(GOLD_PATH)
-    corpus = load_corpus(CORPUS_PATH)
+def _run_mock_end_to_end(
+    gold_path: Path = GOLD_PATH, corpus_path: Path = CORPUS_PATH
+) -> HarnessReport:
+    gold = load_gold(gold_path)
+    corpus = load_corpus(corpus_path)
     store = MockDomainStore()
     embedding_client = MockEmbeddingClient()
     chunks_for_source = _build_chunks_for_source(store)
@@ -89,13 +105,14 @@ def _run_mock_end_to_end() -> HarnessReport:
 # --------------------------------------------------------------- shape tests
 
 
-def test_mock_mode_returns_expected_report_shape() -> None:
-    report = _run_mock_end_to_end()
+@pytest.mark.parametrize("gold_path,corpus_path", FIXTURE_PAIRS)
+def test_mock_mode_returns_expected_report_shape(gold_path: Path, corpus_path: Path) -> None:
+    report = _run_mock_end_to_end(gold_path, corpus_path)
     assert isinstance(report, HarnessReport)
     assert report.mode == "mock"
     assert isinstance(report.corpus_size, int) and report.corpus_size > 0
 
-    gold = load_gold(GOLD_PATH)
+    gold = load_gold(gold_path)
     assert report.queries == len(gold.queries)
 
     agg = report.aggregate
@@ -110,8 +127,11 @@ def test_mock_mode_returns_expected_report_shape() -> None:
     assert isinstance(agg.per_leg_recall_at_20.fused, float)
 
 
-def test_per_query_shape_includes_diagnostic_rank_fields() -> None:
-    report = _run_mock_end_to_end()
+@pytest.mark.parametrize("gold_path,corpus_path", FIXTURE_PAIRS)
+def test_per_query_shape_includes_diagnostic_rank_fields(
+    gold_path: Path, corpus_path: Path
+) -> None:
+    report = _run_mock_end_to_end(gold_path, corpus_path)
     assert report.per_query, "expected at least one per-query row"
     for row in report.per_query:
         assert isinstance(row, PerQueryResult)
@@ -194,10 +214,11 @@ def test_ingest_fixture_corpus_resolves_handles() -> None:
         assert store.get_event_chunk(chunk_id) is not None
 
 
-def test_mock_corpus_embeddings_have_honest_provenance() -> None:
+@pytest.mark.parametrize("corpus_path", CORPUS_PATHS)
+def test_mock_corpus_embeddings_have_honest_provenance(corpus_path: Path) -> None:
     store = MockDomainStore()
     embedding_client = MockEmbeddingClient()
-    corpus = load_corpus(CORPUS_PATH)
+    corpus = load_corpus(corpus_path)
     chunks_for_source = _build_chunks_for_source(store)
     ingest_fixture_corpus(store, chunks_for_source, embedding_client, corpus)
     assert store._embeddings, "expected at least one persisted embedding"
@@ -262,13 +283,14 @@ def test_postgres_mode_imports_cleanly_without_dsn() -> None:
 # -------------------------------------------------------------- smoke: ingest
 
 
-def test_domain_service_drives_corpus_ingestion() -> None:
+@pytest.mark.parametrize("corpus_path", CORPUS_PATHS)
+def test_domain_service_drives_corpus_ingestion(corpus_path: Path) -> None:
     """Sanity: ``DomainService.ingest`` succeeds on every fixture corpus message."""
     store = MockDomainStore()
     embedding_client = MockEmbeddingClient()
     service = DomainService(store, embedding_client=embedding_client)
     received_at = datetime.now(tz=UTC)
-    corpus = load_corpus(CORPUS_PATH)
+    corpus = load_corpus(corpus_path)
     for cm in corpus:
         inbound = InboundMessage(
             external_message_id=cm.external_message_id,

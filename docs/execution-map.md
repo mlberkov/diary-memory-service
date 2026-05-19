@@ -112,7 +112,7 @@ Stage 2 — runs after Stage 1 and before any Stage-3 slice (D-043). Decomposed 
 (D-044); OP-5 closes Stage 2.
 | Slice | Files / artifacts |
 | --- | --- |
-| 7.1 gold eval set | curated questions + expected evidence chunks — OP-5 |
+| 7.1 gold eval set | `eval/retrieval/observability/{gold.json,corpus.jsonl}` — a ~21-query / 19-message OP-5 *observability* gold set, sitting **beside** the frozen D-038 baseline set (`eval/retrieval/{gold.json,corpus.jsonl}`), not superseding it; `tests/test_retrieval_harness_shape.py` parametrized over both fixture pairs (mock-mode, shape-only); `.gitignore` for the operator-produced embeddings caches; new D-056 entry in `decision-log.md`; RUNBOOK harness subsection gains a fixture-set / invocation note; `OPERATIONALIZATION-ROADMAP.md` + `todo.md` updated. Default mock invocation still loads the D-038 set; the observability set is selected via explicit `--gold`/`--corpus` flags. Closes D-056 — **→ OP-5.1**. **Out of scope:** any retrieval-behavior or `src/` change; harness code change; live OpenAI inside `make check`; quality thresholds / gating / nDCG; the D-038 Postgres baseline capture; a Postgres-mode capture over the observability set; retrieval/groundedness metrics and cost/latency (OP-5.2 / OP-5.3); D-026 renames; schema/DDL changes. |
 | 7.2 retrieval & groundedness metrics | hit-rate, empty-rate, groundedness check — OP-5 |
 | 7.3 cost & latency | token + latency aggregation — OP-5 |
 

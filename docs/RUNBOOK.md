@@ -263,7 +263,31 @@ OPENAI_API_KEY=... uv run python -m memory_rag.eval.retrieval.regenerate_embeddi
 The cache is **not** committed by the D-038 implementation packet — it is produced by this ritual. Postgres-mode refuses to start if the cache is missing.
 
 #### Gold-set handle contract
-`expected_handles` entries in `eval/retrieval/gold.json` use the form `"{external_message_id}#{event_index}"` where `event_index` is the 0-based ordinal of the produced `EventChunk` within the source message after `DomainService.ingest` chunks it. This is internal to the harness only — it is **not** a business event id, **not** a Telegram message id, **not** any external domain identifier. It exists because `chunk_id` is uuid4 at ingest time.
+`expected_handles` entries in `eval/retrieval/gold.json` use the form `"{external_message_id}#{event_index}"` where `event_index` is the 0-based ordinal of the produced `EventChunk` within the source message after `DomainService.ingest` chunks it. This is internal to the harness only — it is **not** a business event id, **not** a Telegram message id, **not** any external domain identifier. It exists because `chunk_id` is uuid4 at ingest time. The same contract applies unchanged to the OP-5 observability set below.
+
+#### Gold-set fixtures — D-038 baseline vs OP-5 observability (D-056)
+The harness ships **two** fixture pairs, kept distinct:
+
+- **Frozen D-038 baseline set** — `eval/retrieval/gold.json` + `eval/retrieval/corpus.jsonl` (12 queries). Role: the D-025 baseline-measurement set. Used by the still-pending D-038 Postgres baseline capture above and later baseline-vs-quality comparisons. Frozen — do not edit it to grow coverage.
+- **OP-5 observability set** — `eval/retrieval/observability/gold.json` + `eval/retrieval/observability/corpus.jsonl` (~21 queries / 19-message corpus, curated for coverage diversity: negatives, multilingual, paraphrase, single/multi-hit). Role: the expanded evaluability set the rest of OP-5 builds on.
+
+**Invocation contract — default vs explicit.** The **default** mock invocation (`--mode mock`, no path flags) loads the **frozen D-038 baseline** pair. The **observability** set must always be selected explicitly:
+
+```bash
+uv run python -m memory_rag.eval.retrieval --mode mock \
+  --gold eval/retrieval/observability/gold.json \
+  --corpus eval/retrieval/observability/corpus.jsonl
+```
+
+A Postgres-mode run over the observability set additionally points `--embeddings-cache` at `eval/retrieval/observability/embeddings_cache.json`, and its cache is regenerated with the matching paths:
+
+```bash
+OPENAI_API_KEY=... uv run python -m memory_rag.eval.retrieval.regenerate_embeddings \
+  --gold eval/retrieval/observability/gold.json \
+  --cache eval/retrieval/observability/embeddings_cache.json [--force]
+```
+
+Mock-mode shape coverage in `tests/test_retrieval_harness_shape.py` is parametrized over **both** pairs under `make check`.
 
 ### Hybrid retrieval (D-025)
 `/ask` runs the baseline hybrid path: a single query-embedding call followed by dense + sparse legs against `SearchRepository`, fused with service-layer RRF. Every retrieval call logs `retrieval.hybrid community_id=… model=… dense_n=… sparse_n=… merged_n=…` so an operator can confirm both legs ran. The dispatcher reply trailer for a successful answer is `(hybrid retrieval — dense+sparse RRF)`; an empty merged set returns `FallbackMode.NO_EVIDENCE` with the plain "No memories matched 'X'." reply.
