@@ -76,6 +76,37 @@ services:
       - ./scripts/pg_backup:/opt/pg_backup:ro
     restart: unless-stopped
 
+  # OP-4.3 — opt-in recovered-cluster runner for restore drills and operator
+  # restores (D-055). Started only with `docker compose --profile restore up`.
+  # It runs the cluster that `scripts/pg_restore/restore.sh` prepared on the
+  # dedicated, throwaway `memory_rag_pg_restore_data` volume — never the live
+  # `memory_rag_pg_data`. The archive volume is mounted read-write so restore.sh
+  # can write run logs and the result marker under /archive/restore_logs; this
+  # cluster has archive_mode off (the default — no `-c` archive flags), so it
+  # never writes WAL back into the archive. The host port is kept off 5432 so
+  # the recovered cluster never clashes with the live `postgres`.
+  pg_restore:
+    image: pgvector/pgvector:pg16
+    container_name: memory_rag_pg_restore
+    profiles: ["restore"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-memory_rag}
+    ports:
+      - "${RESTORE_PORT:-5433}:5432"
+    volumes:
+      - memory_rag_pg_restore_data:/var/lib/postgresql/data
+      - memory_rag_pg_archive:/archive
+      - ./scripts/pg_restore:/opt/pg_restore:ro
+    healthcheck:
+      test:
+        ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-memory_rag}"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
 volumes:
   memory_rag_pg_data:
   memory_rag_pg_archive:
+  memory_rag_pg_restore_data:
