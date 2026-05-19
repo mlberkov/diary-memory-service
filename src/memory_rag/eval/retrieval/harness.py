@@ -28,10 +28,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from memory_rag.core.domain import FallbackMode
 from memory_rag.core.domain.models import EventChunk
 from memory_rag.core.embeddings import EmbeddingClient
 from memory_rag.core.routing import InboundMessage, RouteKind
 from memory_rag.services.domain_service import DomainService
+from memory_rag.services.query_service import QueryService
 from memory_rag.services.retrieval import reciprocal_rank_fusion
 from memory_rag.storage.repository import DomainRepository
 from memory_rag.storage.search_repository import SearchRepository
@@ -131,12 +133,69 @@ class PerQueryResult:
 
 
 @dataclass(frozen=True, slots=True)
+class PerAnswerResult:
+    """One row per gold query in the groundedness (answer-path) report.
+
+    ``answerable`` is ``True`` when the source ``GoldQuery.expected_handles``
+    is non-empty (the query is gold-answerable; negatives are excluded from
+    the ``groundedness_rate`` denominator). ``fallback_mode`` carries the
+    ``FallbackMode.value`` returned by ``QueryService.answer``.
+    ``context_chunk_count`` is ``len(AnswerResult.context.ordered_chunks)`` —
+    how many chunks the answer path actually saw post-RRF.
+    ``grounded`` is derived from ``fallback_mode`` via ``is_grounded``
+    (the documented fallback-derived proxy mapping, OP-5.2b / D-058).
+    """
+
+    query: str
+    community_id: str
+    answerable: bool
+    fallback_mode: str
+    context_chunk_count: int
+    grounded: bool
+
+
+@dataclass(frozen=True, slots=True)
+class GroundednessMetrics:
+    """Proxy groundedness metric derived from ``AnswerResult.fallback``;
+    not a factuality or citation-coverage score.
+
+    The metric is a **fallback-derived proxy** for "answer text supported by
+    retrieved evidence" (I-9 citation-subset semantics): an answer is graded
+    grounded when its ``FallbackMode`` is one of the contours that, by the
+    D-035 parse contract, carries a non-empty ``cited_chunk_ids`` that is a
+    subset of the answer context. ``PARSE_FAILURE`` (which catches
+    ``FabricatedCitationError`` — the I-9 violation contour) and
+    ``PROVIDER_UNAVAILABLE`` / ``NO_EVIDENCE`` are not grounded.
+
+    ``groundedness_rate`` uses a **non-empty-gold (answerable) denominator**
+    — only queries with at least one ``expected_handle`` participate;
+    negatives correctly returning ``NO_EVIDENCE`` are excluded so they do
+    not dilute the rate (mirrors the OP-5.2a / D-057 ``hit_rate``
+    denominator). ``fallback_mode_counts`` is a breakdown over **all**
+    queries (negatives included), for inspection.
+    """
+
+    groundedness_rate: float
+    fallback_mode_counts: dict[str, int]
+
+
+@dataclass(frozen=True, slots=True)
+class GroundednessReport:
+    aggregate: GroundednessMetrics
+    per_answer: tuple[PerAnswerResult, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class HarnessReport:
     mode: str  # "mock" | "postgres"
     corpus_size: int
     queries: int
     aggregate: AggregateMetrics
     per_query: tuple[PerQueryResult, ...]
+    # ``groundedness`` is attached by the CLI after ``run_harness`` returns —
+    # ``run_harness`` itself computes retrieval only (no chat client). Default
+    # ``None`` keeps the JSON additive on top of the OP-5.2a / D-057 shape.
+    groundedness: GroundednessReport | None = None
 
 
 # --------------------------------------------------------------------- IO
@@ -334,6 +393,63 @@ def empty_rate(rows: Sequence[PerQueryResult]) -> float:
     return empties / len(rows)
 
 
+# ------------------------------------------------------ groundedness (proxy)
+
+
+_GROUNDED_FALLBACKS: frozenset[FallbackMode] = frozenset(
+    {FallbackMode.NONE, FallbackMode.WEAK_EVIDENCE, FallbackMode.AMBIGUOUS}
+)
+"""Fallback contours that, by the D-035 parse contract, carry a non-empty
+``cited_chunk_ids`` that is a subset of the answer context — the proxy
+"answer text supported by retrieved evidence" set used by OP-5.2b / D-058.
+
+``NO_EVIDENCE`` (empty retrieval or LLM-declared no_evidence),
+``PROVIDER_UNAVAILABLE`` (no answer produced), and ``PARSE_FAILURE`` (which
+catches ``FabricatedCitationError`` — the I-9 citation-subset violation
+contour) are intentionally **not** grounded.
+"""
+
+
+def is_grounded(fallback: FallbackMode) -> bool:
+    """Documented fallback-derived proxy mapping (OP-5.2b / D-058).
+
+    ``True`` for ``NONE`` / ``WEAK_EVIDENCE`` / ``AMBIGUOUS`` — the three
+    contours that by the D-035 parse contract carry a non-empty
+    ``cited_chunk_ids`` ⊆ context. ``False`` for ``NO_EVIDENCE`` /
+    ``PROVIDER_UNAVAILABLE`` / ``PARSE_FAILURE`` (the I-9-violation
+    contour is folded into ``PARSE_FAILURE`` and remains ungrounded).
+    """
+    return fallback in _GROUNDED_FALLBACKS
+
+
+def groundedness_rate(rows: Sequence[PerAnswerResult]) -> float:
+    """Fraction of **answerable** queries whose answer was grounded (proxy).
+
+    Denominator is the set of gold queries with at least one
+    ``expected_handle`` (``answerable=True``); numerator is those whose
+    ``grounded`` flag is ``True``. Negatives are excluded — a negative
+    correctly returning ``NO_EVIDENCE`` should not dilute the rate. Returns
+    ``0.0`` when there is no answerable query (mirrors ``hit_rate``).
+    """
+    answerable = [r for r in rows if r.answerable]
+    if not answerable:
+        return 0.0
+    grounded = sum(1 for r in answerable if r.grounded)
+    return grounded / len(answerable)
+
+
+def fallback_mode_counts(rows: Sequence[PerAnswerResult]) -> dict[str, int]:
+    """Count per ``fallback_mode`` over **all** rows (negatives included).
+
+    The breakdown sums to ``len(rows)`` so an operator can read the full
+    distribution of answer-path outcomes at a glance.
+    """
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[row.fallback_mode] = counts.get(row.fallback_mode, 0) + 1
+    return counts
+
+
 # --------------------------------------------------------------- run loop
 
 
@@ -468,3 +584,60 @@ def run_harness(
         aggregate=aggregate,
         per_query=tuple(per_query_rows),
     )
+
+
+# ----------------------------------------------------- answer-path run loop
+
+
+def run_answer_harness(
+    *,
+    query_service: QueryService,
+    gold: GoldSet,
+) -> GroundednessReport:
+    """Drive ``QueryService.answer`` over every gold query and grade groundedness.
+
+    For each ``GoldQuery`` the harness builds an ``InboundMessage``
+    (``RouteKind.ASK``, ``route_source="command"``) carrying the query text
+    and the gold ``community_id``, calls ``query_service.answer(...)``, and
+    records one ``PerAnswerResult``. ``grounded`` is derived from
+    ``AnswerResult.fallback`` via :func:`is_grounded` — the documented
+    fallback-derived proxy (OP-5.2b / D-058). No gold-handle resolution is
+    needed: groundedness ("supported by *retrieved* evidence") does not
+    depend on gold relevance — handles are already validated by
+    :func:`run_harness` upstream.
+
+    The aggregate ``groundedness_rate`` uses the non-empty-gold
+    (answerable) denominator; ``fallback_mode_counts`` covers all rows.
+    """
+    received_at = datetime.now(tz=UTC)
+    per_answer: list[PerAnswerResult] = []
+    for gq in gold.queries:
+        inbound = InboundMessage(
+            external_message_id=f"eval-ask-{gq.community_id}-{len(per_answer)}",
+            external_chat_id=gq.community_id,
+            external_user_id="eval-user",
+            text=gq.query,
+            payload=gq.query,
+            route=RouteKind.ASK,
+            received_at=received_at,
+            route_source="command",
+        )
+        result = query_service.answer(inbound)
+        per_answer.append(
+            PerAnswerResult(
+                query=gq.query,
+                community_id=gq.community_id,
+                answerable=bool(gq.expected_handles),
+                fallback_mode=result.fallback.value,
+                context_chunk_count=len(result.context.ordered_chunks)
+                if result.context is not None
+                else 0,
+                grounded=is_grounded(result.fallback),
+            )
+        )
+
+    aggregate = GroundednessMetrics(
+        groundedness_rate=groundedness_rate(per_answer),
+        fallback_mode_counts=fallback_mode_counts(per_answer),
+    )
+    return GroundednessReport(aggregate=aggregate, per_answer=tuple(per_answer))

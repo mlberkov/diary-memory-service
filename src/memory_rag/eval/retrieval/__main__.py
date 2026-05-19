@@ -33,12 +33,14 @@ observed metrics (``[[feedback_harness_is_inspection_not_gate]]``).
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import os
 import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from memory_rag.adapters.answers.mock import MockChatClient
 from memory_rag.adapters.embeddings.mock import MockEmbeddingClient
 from memory_rag.core.domain.models import EventChunk
 from memory_rag.core.embeddings.models import EmbeddingStatus
@@ -50,8 +52,10 @@ from memory_rag.eval.retrieval.harness import (
     load_corpus,
     load_gold,
     load_query_embeddings_cache,
+    run_answer_harness,
     run_harness,
 )
+from memory_rag.services.query_service import QueryService
 
 DEFAULT_GOLD = Path("eval/retrieval/gold.json")
 DEFAULT_CORPUS = Path("eval/retrieval/corpus.jsonl")
@@ -60,11 +64,19 @@ DEFAULT_CACHE = Path("eval/retrieval/embeddings_cache.json")
 # Mirrors ``tests/test_search_repository_postgres.py::_truncate``. Kept in
 # the harness so a single ritual covers the four ingest tables the
 # fixture corpus writes to.
+# Postgres-mode ritual: the answer half (``run_answer_harness``) drives
+# ``QueryService.answer`` which writes ``queries`` / ``retrieval_hits`` /
+# ``answer_traces`` rows, so the eval DB must start clean from those too.
+# Order is irrelevant under ``CASCADE`` but is grouped by direction (ingest
+# tables first, answer-path trace tables second) for readability.
 _TRUNCATE_TABLES = (
     "embedding_records",
     "event_chunks",
     "notes",
     "source_messages",
+    "answer_traces",
+    "retrieval_hits",
+    "queries",
 )
 
 
@@ -112,7 +124,7 @@ def _run_mock(
     def lookup(query: str) -> list[float]:
         return embedding_client.embed([query])[0]
 
-    return run_harness(
+    report = run_harness(
         mode="mock",
         store=store,
         gold=gold,
@@ -123,6 +135,14 @@ def _run_mock(
         candidate_k=candidate_k,
         corpus_size=len(corpus),
     )
+    # OP-5.2b groundedness proxy: drive ``QueryService.answer`` over the
+    # same ingested store with the deterministic mock chat provider. The
+    # metric is a fallback-derived proxy, inspection only.
+    query_service = QueryService(
+        store, store, embedding_client, MockChatClient(), top_k=top_k, candidate_k=candidate_k
+    )
+    groundedness = run_answer_harness(query_service=query_service, gold=gold)
+    return dataclasses.replace(report, groundedness=groundedness)
 
 
 def _run_postgres(
@@ -143,12 +163,14 @@ def _run_postgres(
 
     import psycopg
 
+    from memory_rag.adapters.answers.factory import build_chat_client
     from memory_rag.adapters.embeddings.factory import build_embedding_client
     from memory_rag.config import Settings
     from memory_rag.storage.postgres import PostgresDomainStore
 
     settings = Settings()
     embedding_client = build_embedding_client(settings)
+    chat_client = build_chat_client(settings)
     expected_model_name = embedding_client.model_name
     expected_dimension = embedding_client.dimension
 
@@ -205,7 +227,7 @@ def _run_postgres(
                 )
             return cache[query]
 
-        return run_harness(
+        report = run_harness(
             mode="postgres",
             store=store,
             gold=gold,
@@ -216,6 +238,14 @@ def _run_postgres(
             candidate_k=candidate_k,
             corpus_size=len(corpus),
         )
+        # OP-5.2b groundedness proxy: drive ``QueryService.answer`` over the
+        # same ingested Postgres store with the operator-selected chat client
+        # (``CHAT_BACKEND`` env, defaulting to mock — no live API is forced).
+        query_service = QueryService(
+            store, store, embedding_client, chat_client, top_k=top_k, candidate_k=candidate_k
+        )
+        groundedness = run_answer_harness(query_service=query_service, gold=gold)
+        return dataclasses.replace(report, groundedness=groundedness)
     finally:
         store.close()
 
@@ -238,6 +268,23 @@ def _format_human(report: HarnessReport) -> str:
         f"    sparse = {pl.sparse:.3f}",
         f"    fused  = {pl.fused:.3f}",
     ]
+    if report.groundedness is not None:
+        g = report.groundedness.aggregate
+        # Title carries the "proxy" and "fallback-derived" words verbatim so the
+        # rate cannot be misread as a direct factuality or citation-coverage
+        # score (OP-5.2b / D-058).
+        lines.extend(
+            [
+                "",
+                "Groundedness proxy (answer-path, fallback-derived, inspection only):",
+                f"  groundedness_rate = {g.groundedness_rate:.3f}  "
+                f"(proxy: fallback-derived; denominator: non-empty-gold queries only)",
+                "  fallback_mode_counts (over all queries):",
+            ]
+        )
+        # Sort modes alphabetically so the output is stable run-to-run.
+        for mode in sorted(g.fallback_mode_counts):
+            lines.append(f"    {mode:<22s} = {g.fallback_mode_counts[mode]}")
     return "\n".join(lines)
 
 

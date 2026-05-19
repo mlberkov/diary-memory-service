@@ -13,6 +13,7 @@ measured by the Postgres-mode operator-run baseline, not by this test.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import subprocess
 import sys
@@ -22,7 +23,9 @@ from pathlib import Path
 
 import pytest
 
+from memory_rag.adapters.answers.mock import MockChatClient
 from memory_rag.adapters.embeddings.mock import MockEmbeddingClient
+from memory_rag.core.domain import FallbackMode
 from memory_rag.core.domain.models import EventChunk
 from memory_rag.core.embeddings.models import EmbeddingStatus
 from memory_rag.core.routing import InboundMessage, RouteKind
@@ -31,18 +34,24 @@ from memory_rag.eval.retrieval.harness import (
     CorpusMessage,
     GoldQuery,
     GoldSet,
+    GroundednessMetrics,
+    GroundednessReport,
     HarnessReport,
+    PerAnswerResult,
     PerLegRecall,
     PerQueryResult,
     first_relevant_rank,
     ingest_fixture_corpus,
+    is_grounded,
     load_corpus,
     load_gold,
     mrr_at_k,
     recall_at_k,
+    run_answer_harness,
     run_harness,
 )
 from memory_rag.services.domain_service import DomainService
+from memory_rag.services.query_service import QueryService
 from memory_rag.storage.mock.store import MockDomainStore
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -91,7 +100,7 @@ def _run_mock_end_to_end(
     def lookup(query: str) -> list[float]:
         return embedding_client.embed([query])[0]
 
-    return run_harness(
+    report = run_harness(
         mode="mock",
         store=store,
         gold=gold,
@@ -100,6 +109,12 @@ def _run_mock_end_to_end(
         query_embedding_lookup=lookup,
         corpus_size=len(corpus),
     )
+    # OP-5.2b: drive ``QueryService.answer`` over the same ingested store
+    # with the deterministic mock chat provider so the end-to-end shape
+    # test also covers the groundedness-proxy plumbing.
+    query_service = QueryService(store, store, embedding_client, MockChatClient())
+    groundedness = run_answer_harness(query_service=query_service, gold=gold)
+    return dataclasses.replace(report, groundedness=groundedness)
 
 
 # --------------------------------------------------------------- shape tests
@@ -129,6 +144,42 @@ def test_mock_mode_returns_expected_report_shape(gold_path: Path, corpus_path: P
     assert isinstance(agg.per_leg_recall_at_20.dense, float)
     assert isinstance(agg.per_leg_recall_at_20.sparse, float)
     assert isinstance(agg.per_leg_recall_at_20.fused, float)
+
+
+@pytest.mark.parametrize("gold_path,corpus_path", FIXTURE_PAIRS)
+def test_mock_mode_includes_groundedness_proxy_shape(gold_path: Path, corpus_path: Path) -> None:
+    """OP-5.2b: report carries a ``GroundednessReport`` after the CLI helper
+    runs the answer harness. Shape-only — no quality-value assertions
+    (``[[feedback_harness_is_inspection_not_gate]]``)."""
+    report = _run_mock_end_to_end(gold_path, corpus_path)
+    assert isinstance(report.groundedness, GroundednessReport)
+
+    g = report.groundedness.aggregate
+    assert isinstance(g, GroundednessMetrics)
+    assert isinstance(g.groundedness_rate, float)
+    assert 0.0 <= g.groundedness_rate <= 1.0
+    assert isinstance(g.fallback_mode_counts, dict)
+    for mode_value, count in g.fallback_mode_counts.items():
+        assert isinstance(mode_value, str) and mode_value
+        assert isinstance(count, int) and count >= 0
+    # The per-query breakdown sums to the total number of gold queries so an
+    # operator can read the full distribution without arithmetic.
+    assert sum(g.fallback_mode_counts.values()) == report.queries
+
+    per_answer = report.groundedness.per_answer
+    assert len(per_answer) == report.queries
+    for row in per_answer:
+        assert isinstance(row, PerAnswerResult)
+        assert isinstance(row.query, str) and row.query
+        assert isinstance(row.community_id, str) and row.community_id
+        assert isinstance(row.answerable, bool)
+        assert isinstance(row.fallback_mode, str) and row.fallback_mode
+        assert isinstance(row.context_chunk_count, int)
+        assert row.context_chunk_count >= 0
+        assert isinstance(row.grounded, bool)
+        # Per-row ``grounded`` is the documented projection of
+        # ``fallback_mode`` via ``is_grounded`` — they must agree.
+        assert row.grounded is is_grounded(FallbackMode(row.fallback_mode))
 
 
 @pytest.mark.parametrize("gold_path,corpus_path", FIXTURE_PAIRS)

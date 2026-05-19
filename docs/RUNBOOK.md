@@ -265,6 +265,25 @@ uv run python -m memory_rag.eval.retrieval --mode mock \
   --corpus eval/retrieval/observability/corpus.jsonl
 ```
 
+#### Groundedness proxy (answer-path, fallback-derived, inspection only)
+The harness's second half (OP-5.2b / D-058) drives `QueryService.answer` over every gold query (`RouteKind.ASK`) and renders a groundedness section under the retrieval aggregates — title matches this subsection verbatim so an operator reading the CLI report can find this prose at a glance. The section appears in the human report after the retrieval `Aggregate` block, and as a nested `groundedness` object in the `--json` output's top-level `HarnessReport`.
+
+**This is a proxy metric, not a citation-coverage or factuality score.** It is derived from `AnswerResult.fallback`, which by D-035 (one decision per call) is a faithful projection of the I-9 enforcement outcome — the harness does not look at the LLM's `cited_chunk_ids` directly (that field is computed and I-9-validated inside `parse_structured_answer` but discarded; exposing it on `AnswerResult` for true citation-coverage metrics is recorded as a deferred follow-up in D-058). The documented mapping:
+
+- **Grounded** — `FallbackMode ∈ {NONE, WEAK_EVIDENCE, AMBIGUOUS}`. These are exactly the three contours that by the D-035 parse contract carry a **non-empty** `cited_chunk_ids` ⊆ `AnswerContext.ordered_chunks` (the I-9 citation-subset). The answer text is backed by retrieved evidence.
+- **Not grounded** — `NO_EVIDENCE` (empty retrieval or LLM-declared no_evidence — empty citations), `PROVIDER_UNAVAILABLE` (no answer produced), and `PARSE_FAILURE` (catches `FabricatedCitationError` — the I-9 citation-subset *violation* contour — and malformed JSON). The I-9-violation contour is folded into `PARSE_FAILURE` and remains ungrounded, by design.
+
+What the section reports, line by line:
+
+- **`groundedness_rate`** — fraction of **answerable** queries (non-empty `expected_handles`) whose graded answer is grounded. **Denominator is the non-empty-gold queries only**, mirroring `hit_rate` from OP-5.2a — negatives correctly returning `NO_EVIDENCE` are excluded so they do not dilute the rate. The human report annotates the line `(proxy: fallback-derived; denominator: non-empty-gold queries only)`.
+- **`fallback_mode_counts`** — a sorted breakdown of every `FallbackMode.value` seen across **all** queries (negatives included), summing to the total query count. This is the full distribution of answer-path outcomes at a glance.
+
+Caveats to read the number with:
+
+- The proxy reads `≥ hit_rate` in mock mode whenever retrieval surfaces *any* chunk, relevant or not — the `MockChatClient` cites every context chunk confidently and grades `NONE`, which is exactly the proxy's documented limit (it cannot distinguish a citation of a gold-relevant chunk from a citation of an irrelevant one). On the OP-5 observability set (21 queries, 19 non-empty-gold) `groundedness_rate ≈ 0.684` is the mock-mode observed value; real discriminating signal appears with a real chat provider under Postgres mode.
+- Postgres-mode invocation reuses the operator-selected `CHAT_BACKEND` (defaulting to `mock`); the harness does not force a live OpenAI call. The Postgres clean-state ritual extends its `TRUNCATE` to `answer_traces` / `retrieval_hits` / `queries` so an operator answer-harness run starts from a clean eval DB.
+- The metric is **inspection only**. CLI exit stays `0` regardless of `groundedness_rate`. `make check` does not gate on it.
+
 #### Query-embeddings cache (`eval/retrieval/embeddings_cache.json`)
 The cache pins query embeddings to a specific `text-embedding-3-large` @ 3072-dim point-in-time output so the Postgres run is reproducible without contacting OpenAI on the query side. Regenerate is an operator-only ritual:
 
