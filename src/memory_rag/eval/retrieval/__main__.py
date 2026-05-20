@@ -47,8 +47,12 @@ from memory_rag.core.embeddings.models import EmbeddingStatus
 from memory_rag.eval.retrieval.harness import (
     DEFAULT_CANDIDATE_K,
     DEFAULT_TOP_K,
+    CostLatencyMetrics,
     HarnessReport,
+    RecordingChatClient,
+    cost_metrics,
     ingest_fixture_corpus,
+    latency_metrics,
     load_corpus,
     load_gold,
     load_query_embeddings_cache,
@@ -138,11 +142,21 @@ def _run_mock(
     # OP-5.2b groundedness proxy: drive ``QueryService.answer`` over the
     # same ingested store with the deterministic mock chat provider. The
     # metric is a fallback-derived proxy, inspection only.
+    # OP-5.3 / D-059: wrap the chat client in a ``RecordingChatClient`` so
+    # the answer harness can capture provider-reported token counts (the
+    # mock approximates from character counts — honest provenance).
+    recorder = RecordingChatClient(MockChatClient())
     query_service = QueryService(
-        store, store, embedding_client, MockChatClient(), top_k=top_k, candidate_k=candidate_k
+        store, store, embedding_client, recorder, top_k=top_k, candidate_k=candidate_k
     )
-    groundedness = run_answer_harness(query_service=query_service, gold=gold)
-    return dataclasses.replace(report, groundedness=groundedness)
+    groundedness = run_answer_harness(
+        query_service=query_service, gold=gold, chat_recorder=recorder
+    )
+    cost_latency = CostLatencyMetrics(
+        cost=cost_metrics(groundedness.per_answer),
+        latency=latency_metrics(report.per_query, groundedness.per_answer),
+    )
+    return dataclasses.replace(report, groundedness=groundedness, cost_latency=cost_latency)
 
 
 def _run_postgres(
@@ -241,11 +255,20 @@ def _run_postgres(
         # OP-5.2b groundedness proxy: drive ``QueryService.answer`` over the
         # same ingested Postgres store with the operator-selected chat client
         # (``CHAT_BACKEND`` env, defaulting to mock — no live API is forced).
+        # OP-5.3 / D-059: wrap with ``RecordingChatClient`` so the answer
+        # harness can capture provider-reported token counts.
+        recorder = RecordingChatClient(chat_client)
         query_service = QueryService(
-            store, store, embedding_client, chat_client, top_k=top_k, candidate_k=candidate_k
+            store, store, embedding_client, recorder, top_k=top_k, candidate_k=candidate_k
         )
-        groundedness = run_answer_harness(query_service=query_service, gold=gold)
-        return dataclasses.replace(report, groundedness=groundedness)
+        groundedness = run_answer_harness(
+            query_service=query_service, gold=gold, chat_recorder=recorder
+        )
+        cost_latency = CostLatencyMetrics(
+            cost=cost_metrics(groundedness.per_answer),
+            latency=latency_metrics(report.per_query, groundedness.per_answer),
+        )
+        return dataclasses.replace(report, groundedness=groundedness, cost_latency=cost_latency)
     finally:
         store.close()
 
@@ -285,6 +308,35 @@ def _format_human(report: HarnessReport) -> str:
         # Sort modes alphabetically so the output is stable run-to-run.
         for mode in sorted(g.fallback_mode_counts):
             lines.append(f"    {mode:<22s} = {g.fallback_mode_counts[mode]}")
+
+    if report.cost_latency is not None:
+        cl = report.cost_latency
+        c = cl.cost
+        lat = cl.latency
+        # OP-5.3 / D-059: section title matches the RUNBOOK subsection verbatim.
+        # "provider-reported" is the honest framing — the harness reports
+        # whatever the chat client returned in ``ChatResponse.token_counts``,
+        # which for the mock client is character-count-derived.
+        lines.extend(
+            [
+                "",
+                "Cost & latency (wall-clock + provider-reported tokens, inspection only):",
+                f"  total_prompt_tokens     = {c.total_prompt_tokens}",
+                f"  total_completion_tokens = {c.total_completion_tokens}",
+                f"  total_tokens            = {c.total_tokens}",
+                f"  mean_total_tokens_per_call = {c.mean_total_tokens_per_call:.2f}  "
+                f"(denominator: answer-path calls with non-empty token_counts, "
+                f"n={c.answer_calls_with_tokens})",
+                "  retrieval_latency_ms (denominator: all queries):",
+                f"    mean = {lat.mean_retrieval_ms:.2f}",
+                f"    p50  = {lat.p50_retrieval_ms:.2f}",
+                f"    max  = {lat.max_retrieval_ms:.2f}",
+                "  answer_latency_ms (denominator: all queries):",
+                f"    mean = {lat.mean_answer_ms:.2f}",
+                f"    p50  = {lat.p50_answer_ms:.2f}",
+                f"    max  = {lat.max_answer_ms:.2f}",
+            ]
+        )
     return "\n".join(lines)
 
 

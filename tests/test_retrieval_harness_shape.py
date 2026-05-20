@@ -32,17 +32,23 @@ from memory_rag.core.routing import InboundMessage, RouteKind
 from memory_rag.eval.retrieval.harness import (
     AggregateMetrics,
     CorpusMessage,
+    CostLatencyMetrics,
+    CostMetrics,
     GoldQuery,
     GoldSet,
     GroundednessMetrics,
     GroundednessReport,
     HarnessReport,
+    LatencyMetrics,
     PerAnswerResult,
     PerLegRecall,
     PerQueryResult,
+    RecordingChatClient,
+    cost_metrics,
     first_relevant_rank,
     ingest_fixture_corpus,
     is_grounded,
+    latency_metrics,
     load_corpus,
     load_gold,
     mrr_at_k,
@@ -112,9 +118,18 @@ def _run_mock_end_to_end(
     # OP-5.2b: drive ``QueryService.answer`` over the same ingested store
     # with the deterministic mock chat provider so the end-to-end shape
     # test also covers the groundedness-proxy plumbing.
-    query_service = QueryService(store, store, embedding_client, MockChatClient())
-    groundedness = run_answer_harness(query_service=query_service, gold=gold)
-    return dataclasses.replace(report, groundedness=groundedness)
+    # OP-5.3: wrap the chat client in a ``RecordingChatClient`` so the
+    # cost/latency shape can be asserted end-to-end alongside groundedness.
+    recorder = RecordingChatClient(MockChatClient())
+    query_service = QueryService(store, store, embedding_client, recorder)
+    groundedness = run_answer_harness(
+        query_service=query_service, gold=gold, chat_recorder=recorder
+    )
+    cost_latency = CostLatencyMetrics(
+        cost=cost_metrics(groundedness.per_answer),
+        latency=latency_metrics(report.per_query, groundedness.per_answer),
+    )
+    return dataclasses.replace(report, groundedness=groundedness, cost_latency=cost_latency)
 
 
 # --------------------------------------------------------------- shape tests
@@ -214,6 +229,57 @@ def test_per_query_shape_includes_diagnostic_rank_fields(
         assert isinstance(row.recall_at_5, float)
         assert isinstance(row.recall_at_10, float)
         assert isinstance(row.recall_at_20, float)
+        # OP-5.3: per-row wall-clock retrieval latency is populated by
+        # ``run_harness``. Shape-only — no upper bound; wall-clock is
+        # non-deterministic and machine-dependent.
+        assert isinstance(row.retrieval_latency_ms, float)
+        assert row.retrieval_latency_ms >= 0.0
+
+
+@pytest.mark.parametrize("gold_path,corpus_path", FIXTURE_PAIRS)
+def test_mock_mode_includes_cost_and_latency_shape(gold_path: Path, corpus_path: Path) -> None:
+    """OP-5.3 / D-059: report carries a ``CostLatencyMetrics`` after the CLI
+    helper runs the cost/latency aggregation. Shape-only — no quality-value
+    or upper-bound assertions (``[[feedback_harness_is_inspection_not_gate]]``).
+    """
+    report = _run_mock_end_to_end(gold_path, corpus_path)
+    assert isinstance(report.cost_latency, CostLatencyMetrics)
+
+    c = report.cost_latency.cost
+    assert isinstance(c, CostMetrics)
+    assert isinstance(c.total_prompt_tokens, int) and c.total_prompt_tokens >= 0
+    assert isinstance(c.total_completion_tokens, int) and c.total_completion_tokens >= 0
+    assert isinstance(c.total_tokens, int) and c.total_tokens >= 0
+    assert c.total_tokens == c.total_prompt_tokens + c.total_completion_tokens
+    assert isinstance(c.answer_calls_with_tokens, int) and c.answer_calls_with_tokens >= 0
+    assert c.answer_calls_with_tokens <= report.queries
+    assert isinstance(c.mean_total_tokens_per_call, float)
+    assert c.mean_total_tokens_per_call >= 0.0
+
+    lat = report.cost_latency.latency
+    assert isinstance(lat, LatencyMetrics)
+    for value in (
+        lat.mean_retrieval_ms,
+        lat.p50_retrieval_ms,
+        lat.max_retrieval_ms,
+        lat.mean_answer_ms,
+        lat.p50_answer_ms,
+        lat.max_answer_ms,
+    ):
+        assert isinstance(value, float) and value >= 0.0
+    # Distributional sanity: max ≥ mean and max ≥ p50, no upper bound.
+    assert lat.max_retrieval_ms >= lat.mean_retrieval_ms
+    assert lat.max_retrieval_ms >= lat.p50_retrieval_ms
+    assert lat.max_answer_ms >= lat.mean_answer_ms
+    assert lat.max_answer_ms >= lat.p50_answer_ms
+
+    # Per-row answer-path measurements live on PerAnswerResult.
+    assert report.groundedness is not None
+    for row in report.groundedness.per_answer:
+        assert isinstance(row.answer_latency_ms, float)
+        assert row.answer_latency_ms >= 0.0
+        assert isinstance(row.prompt_tokens, int) and row.prompt_tokens >= 0
+        assert isinstance(row.completion_tokens, int) and row.completion_tokens >= 0
 
 
 # --------------------------------------------------------------- pure metric tests

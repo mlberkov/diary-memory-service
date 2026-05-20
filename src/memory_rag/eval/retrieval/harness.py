@@ -23,12 +23,16 @@ because ``chunk_id`` is uuid4 at ingest time and so cannot be pinned in
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from statistics import median
 
+from memory_rag.core.answers import ChatClient, ChatResponse
 from memory_rag.core.domain import FallbackMode
+from memory_rag.core.domain.answer_prompt import AnswerPrompt
 from memory_rag.core.domain.models import EventChunk
 from memory_rag.core.embeddings import EmbeddingClient
 from memory_rag.core.routing import InboundMessage, RouteKind
@@ -115,6 +119,16 @@ class PerQueryResult:
     expected chunk appears). ``reciprocal_rank_in_fused`` is the explicit
     ``mrr@20`` numerator at per-query granularity — equals
     ``1.0 / first_relevant_rank_in_fused`` on a hit, ``0.0`` otherwise.
+
+    ``retrieval_latency_ms`` (OP-5.3 / D-059) is the in-harness
+    ``time.perf_counter`` wall-clock around the dense + sparse + RRF block
+    only. The query-embedding lookup is **intentionally excluded** from
+    this boundary because mock mode obtains query embeddings via a live
+    ``MockEmbeddingClient.embed`` call while Postgres mode reads from the
+    pinned ``embeddings_cache.json`` — including the lookup would
+    contaminate the metric with that mode-asymmetric cost. Defaults to
+    ``0.0`` (unmeasured); test helpers that construct rows by keyword
+    can omit it.
     """
 
     query: str
@@ -130,6 +144,7 @@ class PerQueryResult:
     recall_at_5: float
     recall_at_10: float
     recall_at_20: float
+    retrieval_latency_ms: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +159,18 @@ class PerAnswerResult:
     how many chunks the answer path actually saw post-RRF.
     ``grounded`` is derived from ``fallback_mode`` via ``is_grounded``
     (the documented fallback-derived proxy mapping, OP-5.2b / D-058).
+
+    ``answer_latency_ms`` / ``prompt_tokens`` / ``completion_tokens`` (OP-5.3
+    / D-059) are the eval-harness measurements around the ``QueryService.answer``
+    call. ``answer_latency_ms`` is the in-harness wall-clock around the whole
+    call; ``prompt_tokens`` / ``completion_tokens`` come from
+    ``ChatResponse.token_counts`` (``.get("prompt", 0)`` / ``.get("completion", 0)``)
+    captured by a ``RecordingChatClient`` shim. They are ``0`` whenever no
+    chat call ran — the ``NO_EVIDENCE`` / empty-query / ``PROVIDER_UNAVAILABLE``
+    contours short-circuit before invoking the chat client (D-035), so a row
+    on one of those contours carries zero tokens by design. The
+    ``answer_calls_with_tokens`` denominator in ``CostMetrics`` excludes
+    those rows from the mean. Defaults exist so test helpers can omit them.
     """
 
     query: str
@@ -152,6 +179,9 @@ class PerAnswerResult:
     fallback_mode: str
     context_chunk_count: int
     grounded: bool
+    answer_latency_ms: float = 0.0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,6 +216,71 @@ class GroundednessReport:
 
 
 @dataclass(frozen=True, slots=True)
+class CostMetrics:
+    """Token totals over the answer-path rows (OP-5.3 / D-059).
+
+    Token sums cover the whole gold set; ``answer_calls_with_tokens`` is
+    the count of answer-path rows whose ``prompt_tokens + completion_tokens``
+    is non-zero (the rows where a chat call actually ran). That count is
+    the denominator for ``mean_total_tokens_per_call`` so empty-query /
+    ``NO_EVIDENCE`` / ``PROVIDER_UNAVAILABLE`` short-circuits do not pull
+    the per-call mean toward zero. Tokens are **provider-reported**: under
+    a real provider they come from the API response; under the mock chat
+    client they are character-count approximations (per
+    ``ChatResponse`` docstring) — the metric reports whatever the chat
+    client returned, no more.
+    """
+
+    total_prompt_tokens: int
+    total_completion_tokens: int
+    total_tokens: int
+    answer_calls_with_tokens: int
+    mean_total_tokens_per_call: float
+
+
+@dataclass(frozen=True, slots=True)
+class LatencyMetrics:
+    """Wall-clock latency aggregates measured in the eval harness (OP-5.3 / D-059).
+
+    Both pairs are ``time.perf_counter`` measurements taken inside the
+    harness, around the underlying call:
+
+    - ``retrieval_*_ms`` covers the dense + sparse + RRF block per query
+      inside :func:`run_harness`. The query-embedding lookup is
+      **intentionally excluded** (mode-asymmetric: live ``embed`` vs.
+      cache ``get``).
+    - ``answer_*_ms`` covers the per-query ``QueryService.answer(...)``
+      call inside :func:`run_answer_harness` — the whole answer path
+      (retrieval + chat + persistence), not just the chat call.
+
+    Both denominators are **all queries** (every row contributes one
+    sample). ``p50`` is included as a small-sample robustness check at
+    the current ~20-21 query gold-set size — a single slow outlier
+    pulls the mean but not the median. ``p95`` is intentionally
+    **omitted** at this sample size because it would be noisy and
+    misleading. The provider-attributed ``ChatResponse.latency_ms`` is
+    *not* aggregated here — it remains the canonical chat-call latency
+    persisted on ``AnswerTrace`` (D-034/D-035) and is **trace-level
+    provenance, not an aggregate metric in this report**.
+    """
+
+    mean_retrieval_ms: float
+    p50_retrieval_ms: float
+    max_retrieval_ms: float
+    mean_answer_ms: float
+    p50_answer_ms: float
+    max_answer_ms: float
+
+
+@dataclass(frozen=True, slots=True)
+class CostLatencyMetrics:
+    """OP-5.3 / D-059 cost & latency aggregate, attached to ``HarnessReport``."""
+
+    cost: CostMetrics
+    latency: LatencyMetrics
+
+
+@dataclass(frozen=True, slots=True)
 class HarnessReport:
     mode: str  # "mock" | "postgres"
     corpus_size: int
@@ -196,6 +291,9 @@ class HarnessReport:
     # ``run_harness`` itself computes retrieval only (no chat client). Default
     # ``None`` keeps the JSON additive on top of the OP-5.2a / D-057 shape.
     groundedness: GroundednessReport | None = None
+    # ``cost_latency`` is attached by the CLI after both halves run (OP-5.3 /
+    # D-059). Default ``None`` keeps the JSON additive on top of OP-5.2b.
+    cost_latency: CostLatencyMetrics | None = None
 
 
 # --------------------------------------------------------------------- IO
@@ -450,6 +548,130 @@ def fallback_mode_counts(rows: Sequence[PerAnswerResult]) -> dict[str, int]:
     return counts
 
 
+# ----------------------------------------------------------- cost & latency
+#
+# OP-5.3 / D-059: token + wall-clock latency aggregates for the eval harness.
+# Inspection-only — no thresholds, no gating, no production behavior change.
+
+
+class RecordingChatClient:
+    """Eval-harness ``ChatClient`` shim that captures the most recent response.
+
+    Single-call / single-consumer contract (OP-5.3 / D-059): each
+    :meth:`complete` call **overwrites** an internal one-slot buffer; the
+    harness reads via :meth:`consume_last`, which returns the recorded
+    response *and clears the slot*. The clear-on-read semantics guarantee
+    that a recorded response from one chat call cannot be misattributed to
+    a later answer-path contour that short-circuited without invoking the
+    chat client (``NO_EVIDENCE``, empty-query, ``PROVIDER_UNAVAILABLE`` — see
+    D-035): in that case :meth:`consume_last` returns ``None`` and the
+    harness's per-row token counters stay at zero.
+
+    This shim lives in the eval surface and is not used by production code.
+    It implements the :class:`ChatClient` Protocol structurally so the
+    operator-selected chat client (mock or real) can be wrapped without any
+    change to ``QueryService``.
+    """
+
+    def __init__(self, inner: ChatClient) -> None:
+        self._inner = inner
+        self._last: ChatResponse | None = None
+
+    @property
+    def model_name(self) -> str:
+        return self._inner.model_name
+
+    def complete(self, prompt: AnswerPrompt) -> ChatResponse:
+        response = self._inner.complete(prompt)
+        # Overwrite, not append: a previous unconsumed response on a no-chat
+        # contour would be a contract violation but is also harmlessly
+        # superseded if a later call does run.
+        self._last = response
+        return response
+
+    def consume_last(self) -> ChatResponse | None:
+        """Return the most recent response and clear the slot.
+
+        Returns ``None`` when no chat call has happened since the previous
+        :meth:`consume_last` (or since construction). This is the read
+        side of the single-call / single-consumer contract.
+        """
+        response = self._last
+        self._last = None
+        return response
+
+
+def _latency_stats(values: Sequence[float]) -> tuple[float, float, float]:
+    """Return (mean, p50, max) wall-clock latency. ``(0.0, 0.0, 0.0)`` on empty.
+
+    ``p50`` uses :func:`statistics.median` so an even-length sample averages
+    the two middle values, matching the stdlib convention. ``p95`` is
+    intentionally omitted at the current ~20-query gold-set size — it would
+    be too noisy to be meaningful.
+    """
+    if not values:
+        return (0.0, 0.0, 0.0)
+    total = sum(values)
+    mean = total / len(values)
+    return (mean, float(median(values)), float(max(values)))
+
+
+def cost_metrics(rows: Sequence[PerAnswerResult]) -> CostMetrics:
+    """Sum tokens across answer-path rows and compute the per-call mean.
+
+    ``answer_calls_with_tokens`` is the count of rows whose recorded
+    ``prompt_tokens + completion_tokens`` is non-zero — rows on the
+    no-chat-call contours (``NO_EVIDENCE`` / empty-query /
+    ``PROVIDER_UNAVAILABLE`` — D-035) stay at zero and are excluded from
+    the mean denominator. Returns a zero-valued :class:`CostMetrics` on an
+    empty report (the empty-report → 0 contract).
+    """
+    if not rows:
+        return CostMetrics(
+            total_prompt_tokens=0,
+            total_completion_tokens=0,
+            total_tokens=0,
+            answer_calls_with_tokens=0,
+            mean_total_tokens_per_call=0.0,
+        )
+    total_prompt = sum(r.prompt_tokens for r in rows)
+    total_completion = sum(r.completion_tokens for r in rows)
+    total = total_prompt + total_completion
+    with_tokens = sum(1 for r in rows if (r.prompt_tokens + r.completion_tokens) > 0)
+    mean = total / with_tokens if with_tokens else 0.0
+    return CostMetrics(
+        total_prompt_tokens=total_prompt,
+        total_completion_tokens=total_completion,
+        total_tokens=total,
+        answer_calls_with_tokens=with_tokens,
+        mean_total_tokens_per_call=mean,
+    )
+
+
+def latency_metrics(
+    retrieval_rows: Sequence[PerQueryResult],
+    answer_rows: Sequence[PerAnswerResult],
+) -> LatencyMetrics:
+    """Compute wall-clock mean / p50 / max for the retrieval and answer halves.
+
+    Both denominators are **all rows** in the corresponding sequence — every
+    query contributes one retrieval sample inside :func:`run_harness` and
+    one answer-path sample inside :func:`run_answer_harness`. Returns a
+    zero-valued :class:`LatencyMetrics` on empty input (the empty-report
+    → 0 contract).
+    """
+    r_mean, r_p50, r_max = _latency_stats([r.retrieval_latency_ms for r in retrieval_rows])
+    a_mean, a_p50, a_max = _latency_stats([r.answer_latency_ms for r in answer_rows])
+    return LatencyMetrics(
+        mean_retrieval_ms=r_mean,
+        p50_retrieval_ms=r_p50,
+        max_retrieval_ms=r_max,
+        mean_answer_ms=a_mean,
+        p50_answer_ms=a_p50,
+        max_answer_ms=a_max,
+    )
+
+
 # --------------------------------------------------------------- run loop
 
 
@@ -509,13 +731,20 @@ def run_harness(
             expected_ids.append(handles_to_chunk_ids[handle])
         expected_set = set(expected_ids)
 
+        # The query-embedding lookup is intentionally **outside** the
+        # retrieval-latency wall-clock boundary: mock mode calls
+        # ``MockEmbeddingClient.embed`` live while Postgres mode reads from
+        # the pinned cache — including the lookup would contaminate the
+        # metric with that mode-asymmetric cost (OP-5.3 / D-059).
         query_embedding = query_embedding_lookup(gq.query)
 
+        t0 = time.perf_counter()
         dense_hits = store.dense_candidates(
             gq.community_id, query_embedding, embedding_model_name, candidate_k
         )
         sparse_hits = store.sparse_candidates(gq.community_id, gq.query, candidate_k)
         fused = reciprocal_rank_fusion([dense_hits, sparse_hits], top_k=candidate_k)
+        retrieval_latency_ms = (time.perf_counter() - t0) * 1000.0
 
         dense_ids = tuple(c.chunk_id for c in dense_hits)
         sparse_ids = tuple(c.chunk_id for c in sparse_hits)
@@ -544,6 +773,7 @@ def run_harness(
                 recall_at_5=r5,
                 recall_at_10=r10,
                 recall_at_20=r20,
+                retrieval_latency_ms=retrieval_latency_ms,
             )
         )
 
@@ -593,6 +823,7 @@ def run_answer_harness(
     *,
     query_service: QueryService,
     gold: GoldSet,
+    chat_recorder: RecordingChatClient | None = None,
 ) -> GroundednessReport:
     """Drive ``QueryService.answer`` over every gold query and grade groundedness.
 
@@ -608,6 +839,21 @@ def run_answer_harness(
 
     The aggregate ``groundedness_rate`` uses the non-empty-gold
     (answerable) denominator; ``fallback_mode_counts`` covers all rows.
+
+    OP-5.3 / D-059 — when ``chat_recorder`` is the same
+    :class:`RecordingChatClient` instance the caller wrapped around the
+    chat client passed to ``query_service``, each row carries a wall-clock
+    ``answer_latency_ms`` (``time.perf_counter`` around the whole
+    ``query_service.answer(...)`` call) and, when a chat call ran,
+    ``prompt_tokens`` / ``completion_tokens`` from
+    ``ChatResponse.token_counts``. The harness reads tokens via
+    :meth:`RecordingChatClient.consume_last`, whose read-and-clear
+    semantics guarantee that a no-chat-call answer-path contour
+    (``NO_EVIDENCE`` / empty-query / ``PROVIDER_UNAVAILABLE`` — D-035)
+    cannot misattribute a previous response's tokens to its row: the
+    consume returns ``None`` and the row stays at zero tokens. When
+    ``chat_recorder`` is ``None``, tokens stay at zero on every row but
+    latency is still measured.
     """
     received_at = datetime.now(tz=UTC)
     per_answer: list[PerAnswerResult] = []
@@ -622,7 +868,21 @@ def run_answer_harness(
             received_at=received_at,
             route_source="command",
         )
+        t0 = time.perf_counter()
         result = query_service.answer(inbound)
+        answer_latency_ms = (time.perf_counter() - t0) * 1000.0
+
+        prompt_tokens = 0
+        completion_tokens = 0
+        if chat_recorder is not None:
+            last = chat_recorder.consume_last()
+            if last is not None:
+                # ``ChatResponse.token_counts`` is provider-attributed and
+                # free-form (per docstring); the canonical keys are
+                # ``"prompt"`` / ``"completion"``. Anything else stays 0.
+                prompt_tokens = int(last.token_counts.get("prompt", 0))
+                completion_tokens = int(last.token_counts.get("completion", 0))
+
         per_answer.append(
             PerAnswerResult(
                 query=gq.query,
@@ -633,6 +893,9 @@ def run_answer_harness(
                 if result.context is not None
                 else 0,
                 grounded=is_grounded(result.fallback),
+                answer_latency_ms=answer_latency_ms,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
             )
         )
 
