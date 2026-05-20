@@ -230,7 +230,7 @@ Multi-worker caveat: each uvicorn worker / pod holds its own dispatcher singleto
 ### Retrieval-quality inspection harness (D-038)
 `src/memory_rag/eval/retrieval/` ships a hand-curated harness that measures the D-025 baseline contour against a small fixture corpus + gold-query set. It is **inspection, not a gate** — the CLI exit code is always `0` regardless of the observed metrics.
 
-Two modes share one metric shape (aggregate `recall@{5,10,20}`, `mrr@20`, `per_leg_recall@20.{dense,sparse,fused}`; per-query top-`candidate_k` chunk-id lists, diagnostic per-leg first-relevant-rank fields, and an explicit `reciprocal_rank_in_fused` numerator):
+Two modes share one metric shape (aggregate `recall@{5,10,20}`, `mrr@20`, `hit_rate`, `empty_rate`, `per_leg_recall@20.{dense,sparse,fused}`; per-query top-`candidate_k` chunk-id lists, diagnostic per-leg first-relevant-rank fields, and an explicit `reciprocal_rank_in_fused` numerator). See "Retrieval hit-rate / empty-rate" below for the two OP-5.2a metrics:
 
 - **Mock mode.** Runs under `make check` via `tests/test_retrieval_harness_shape.py`. Shape-only assertions, no quality thresholds. Also smokeable directly:
 
@@ -251,6 +251,59 @@ Two modes share one metric shape (aggregate `recall@{5,10,20}`, `mrr@20`, `per_l
 
   After the run, paste the aggregate metrics plus 2–3 illustrative per-query rows into the D-038 "Baseline snapshot (observed)" subsection in `docs/decision-log.md` — framed as observed values for the D-025 contour, not as a must-beat threshold for any future packet.
 
+#### Retrieval hit-rate / empty-rate (OP-5.2a / D-057)
+The harness report carries two retrieval-coverage aggregates alongside recall / MRR. Both are **inspection only** — observed values, no thresholds, the CLI exit code stays `0`. They appear in the human report under the `Aggregate (...)` block and in the `--json` output's `aggregate` object.
+
+- **`hit_rate`** — of the gold queries that *have* expected chunks, the fraction whose fused result list surfaced at least one of them. Answers "of the answerable queries, how often did retrieval surface something relevant?" Its **denominator is the non-empty-gold queries only** — negative queries (empty `expected_handles`) are excluded because they cannot produce a hit, and counting them would only dilute the rate. This non-empty-gold denominator is what keeps `hit_rate` distinct from `per_leg_recall@20.fused`, which divides by *all* queries. The human report annotates the line `(denominator: non-empty-gold queries only)`.
+- **`empty_rate`** — the fraction of *all* gold queries whose fused result list came back empty (retrieval returned zero candidates — both the dense and sparse legs empty). It counts every query, answerable or negative. The human report annotates the line `(denominator: all queries)`.
+
+Where to look: run the harness in mock mode and read the `hit_rate` / `empty_rate` lines, or inspect `aggregate.hit_rate` / `aggregate.empty_rate` in `--json`. For the OP-5 observability set the denominator split is explicit — that set has **21 total gold queries, 19 of them non-empty** (2 negatives, "did I go skiing this winter" and "notes about my tax return"), so `hit_rate` is computed over **19** while `empty_rate` is computed over **21**:
+
+```bash
+uv run python -m memory_rag.eval.retrieval --mode mock \
+  --gold eval/retrieval/observability/gold.json \
+  --corpus eval/retrieval/observability/corpus.jsonl
+```
+
+#### Groundedness proxy (answer-path, fallback-derived, inspection only)
+The harness's second half (OP-5.2b / D-058) drives `QueryService.answer` over every gold query (`RouteKind.ASK`) and renders a groundedness section under the retrieval aggregates — title matches this subsection verbatim so an operator reading the CLI report can find this prose at a glance. The section appears in the human report after the retrieval `Aggregate` block, and as a nested `groundedness` object in the `--json` output's top-level `HarnessReport`.
+
+**This is a proxy metric, not a citation-coverage or factuality score.** It is derived from `AnswerResult.fallback`, which by D-035 (one decision per call) is a faithful projection of the I-9 enforcement outcome — the harness does not look at the LLM's `cited_chunk_ids` directly (that field is computed and I-9-validated inside `parse_structured_answer` but discarded; exposing it on `AnswerResult` for true citation-coverage metrics is recorded as a deferred follow-up in D-058). The documented mapping:
+
+- **Grounded** — `FallbackMode ∈ {NONE, WEAK_EVIDENCE, AMBIGUOUS}`. These are exactly the three contours that by the D-035 parse contract carry a **non-empty** `cited_chunk_ids` ⊆ `AnswerContext.ordered_chunks` (the I-9 citation-subset). The answer text is backed by retrieved evidence.
+- **Not grounded** — `NO_EVIDENCE` (empty retrieval or LLM-declared no_evidence — empty citations), `PROVIDER_UNAVAILABLE` (no answer produced), and `PARSE_FAILURE` (catches `FabricatedCitationError` — the I-9 citation-subset *violation* contour — and malformed JSON). The I-9-violation contour is folded into `PARSE_FAILURE` and remains ungrounded, by design.
+
+What the section reports, line by line:
+
+- **`groundedness_rate`** — fraction of **answerable** queries (non-empty `expected_handles`) whose graded answer is grounded. **Denominator is the non-empty-gold queries only**, mirroring `hit_rate` from OP-5.2a — negatives correctly returning `NO_EVIDENCE` are excluded so they do not dilute the rate. The human report annotates the line `(proxy: fallback-derived; denominator: non-empty-gold queries only)`.
+- **`fallback_mode_counts`** — a sorted breakdown of every `FallbackMode.value` seen across **all** queries (negatives included), summing to the total query count. This is the full distribution of answer-path outcomes at a glance.
+
+Caveats to read the number with:
+
+- The proxy reads `≥ hit_rate` in mock mode whenever retrieval surfaces *any* chunk, relevant or not — the `MockChatClient` cites every context chunk confidently and grades `NONE`, which is exactly the proxy's documented limit (it cannot distinguish a citation of a gold-relevant chunk from a citation of an irrelevant one). On the OP-5 observability set (21 queries, 19 non-empty-gold) `groundedness_rate ≈ 0.684` is the mock-mode observed value; real discriminating signal appears with a real chat provider under Postgres mode.
+- Postgres-mode invocation reuses the operator-selected `CHAT_BACKEND` (defaulting to `mock`); the harness does not force a live OpenAI call. The Postgres clean-state ritual extends its `TRUNCATE` to `answer_traces` / `retrieval_hits` / `queries` so an operator answer-harness run starts from a clean eval DB.
+- The metric is **inspection only**. CLI exit stays `0` regardless of `groundedness_rate`. `make check` does not gate on it.
+
+#### Cost & latency (wall-clock + provider-reported tokens, inspection only)
+The harness's third aggregate (OP-5.3 / D-059) reports provider-reported token totals and wall-clock latency at two boundaries. Title matches the CLI section verbatim so an operator reading the human report can find this prose at a glance. The section appears in the human report after the groundedness block, and as a nested `cost_latency` object in the `--json` output's top-level `HarnessReport`.
+
+**What is measured, line by line:**
+
+- **`total_prompt_tokens` / `total_completion_tokens` / `total_tokens`** — sums of provider-reported token counts across every answer-path call, derived from `ChatResponse.token_counts` (`.get("prompt", 0)` + `.get("completion", 0)`) captured per call by a `RecordingChatClient` shim that wraps the operator-selected chat client. "Provider-reported" is the honest framing: the harness reports whatever the chat client returned. Under `MockChatClient` the counts are character-count approximations (per `ChatResponse` docstring), **not** real-tokenizer counts — read mock-mode numbers as deterministic but not comparable to real-provider tokens. Under a real chat backend (operator-selected via `CHAT_BACKEND` in Postgres mode), the counts come from the provider's API response.
+- **`mean_total_tokens_per_call`** — mean of `prompt_tokens + completion_tokens` over the rows that recorded tokens. The line carries `(denominator: answer-path calls with non-empty token_counts, n=<int>)`. `n` excludes rows whose contour short-circuited before invoking the chat client (`NO_EVIDENCE` / empty-query / `PROVIDER_UNAVAILABLE` — D-035), so those rows do not pull the per-call mean downward.
+- **`retrieval_latency_ms` mean / p50 / max** — wall-clock around the per-query `dense + sparse + RRF` block inside `run_harness`, measured with `time.perf_counter`. **The query-embedding lookup is intentionally excluded from this boundary** because mock mode obtains query embeddings via a live `MockEmbeddingClient.embed` call while Postgres mode reads from the pinned `eval/retrieval/embeddings_cache.json` — including the lookup would contaminate the metric with that mode-asymmetric cost. Denominator is **all queries** (every row contributes one sample); the line carries `(denominator: all queries)`.
+- **`answer_latency_ms` mean / p50 / max** — wall-clock around the per-query `QueryService.answer(...)` call inside `run_answer_harness`, measured with `time.perf_counter`. This covers the whole answer path (retrieval + chat + persistence), not just the chat call. Denominator is **all queries**.
+
+**Read the numbers with these caveats:**
+
+- **`p50` is included as a small-sample robustness check at the current ~20-21 query gold-set size.** Median resists a single slow outlier that would pull the mean. **`p95` is intentionally omitted** — at ~20 samples it would be too noisy to be meaningful. A future packet may add p95 when the gold set grows.
+- **Aggregate latency is wall-clock only.** The provider-attributed `ChatResponse.latency_ms` is still the canonical chat-call latency persisted on `AnswerTrace` (D-034 / D-035) — that is **trace-level provenance, not an aggregate metric in this report**. The wall-clock around `query_service.answer(...)` and the persisted `ChatResponse.latency_ms` measure different layers (whole answer-call vs provider call) and are deliberately not surfaced as co-equal aggregate signals.
+- **Latency numbers are non-deterministic and machine-dependent.** They reflect the host running the harness; do not read them as regression targets. Mock-mode token totals, by contrast, are deterministic (mock derives `token_counts` from character counts).
+- **No misattribution across calls.** The `RecordingChatClient` shim's `consume_last()` returns the most recent `ChatResponse` *and clears the slot*; the harness reads one consume per row. On a no-chat-call contour the consume returns `None`, the row gets zero tokens, and a prior response cannot leak onto it. `tests/test_retrieval_harness_cost_latency.py::test_recorder_no_misattribution_across_calls` pins this contract.
+- **Inspection only.** CLI exit stays `0` regardless of any observed value. `make check` does not gate on cost or latency. No production telemetry change, no live OpenAI in `make check`, no schema or migration. `_TRUNCATE_TABLES` is unchanged — OP-5.2b already covers the answer-path tables.
+
+Where to look: run the harness in mock mode and read the `Cost & latency (...)` block, or inspect `cost_latency.cost` / `cost_latency.latency` in `--json`. The same Postgres-mode invocation as for the groundedness proxy renders cost/latency over the same operator-selected chat client (no live OpenAI is forced).
+
 #### Query-embeddings cache (`eval/retrieval/embeddings_cache.json`)
 The cache pins query embeddings to a specific `text-embedding-3-large` @ 3072-dim point-in-time output so the Postgres run is reproducible without contacting OpenAI on the query side. Regenerate is an operator-only ritual:
 
@@ -263,7 +316,31 @@ OPENAI_API_KEY=... uv run python -m memory_rag.eval.retrieval.regenerate_embeddi
 The cache is **not** committed by the D-038 implementation packet — it is produced by this ritual. Postgres-mode refuses to start if the cache is missing.
 
 #### Gold-set handle contract
-`expected_handles` entries in `eval/retrieval/gold.json` use the form `"{external_message_id}#{event_index}"` where `event_index` is the 0-based ordinal of the produced `EventChunk` within the source message after `DomainService.ingest` chunks it. This is internal to the harness only — it is **not** a business event id, **not** a Telegram message id, **not** any external domain identifier. It exists because `chunk_id` is uuid4 at ingest time.
+`expected_handles` entries in `eval/retrieval/gold.json` use the form `"{external_message_id}#{event_index}"` where `event_index` is the 0-based ordinal of the produced `EventChunk` within the source message after `DomainService.ingest` chunks it. This is internal to the harness only — it is **not** a business event id, **not** a Telegram message id, **not** any external domain identifier. It exists because `chunk_id` is uuid4 at ingest time. The same contract applies unchanged to the OP-5 observability set below.
+
+#### Gold-set fixtures — D-038 baseline vs OP-5 observability (D-056)
+The harness ships **two** fixture pairs, kept distinct:
+
+- **Frozen D-038 baseline set** — `eval/retrieval/gold.json` + `eval/retrieval/corpus.jsonl` (12 queries). Role: the D-025 baseline-measurement set. Used by the still-pending D-038 Postgres baseline capture above and later baseline-vs-quality comparisons. Frozen — do not edit it to grow coverage.
+- **OP-5 observability set** — `eval/retrieval/observability/gold.json` + `eval/retrieval/observability/corpus.jsonl` (~21 queries / 19-message corpus, curated for coverage diversity: negatives, multilingual, paraphrase, single/multi-hit). Role: the expanded evaluability set the rest of OP-5 builds on.
+
+**Invocation contract — default vs explicit.** The **default** mock invocation (`--mode mock`, no path flags) loads the **frozen D-038 baseline** pair. The **observability** set must always be selected explicitly:
+
+```bash
+uv run python -m memory_rag.eval.retrieval --mode mock \
+  --gold eval/retrieval/observability/gold.json \
+  --corpus eval/retrieval/observability/corpus.jsonl
+```
+
+A Postgres-mode run over the observability set additionally points `--embeddings-cache` at `eval/retrieval/observability/embeddings_cache.json`, and its cache is regenerated with the matching paths:
+
+```bash
+OPENAI_API_KEY=... uv run python -m memory_rag.eval.retrieval.regenerate_embeddings \
+  --gold eval/retrieval/observability/gold.json \
+  --cache eval/retrieval/observability/embeddings_cache.json [--force]
+```
+
+Mock-mode shape coverage in `tests/test_retrieval_harness_shape.py` is parametrized over **both** pairs under `make check`.
 
 ### Hybrid retrieval (D-025)
 `/ask` runs the baseline hybrid path: a single query-embedding call followed by dense + sparse legs against `SearchRepository`, fused with service-layer RRF. Every retrieval call logs `retrieval.hybrid community_id=… model=… dense_n=… sparse_n=… merged_n=…` so an operator can confirm both legs ran. The dispatcher reply trailer for a successful answer is `(hybrid retrieval — dense+sparse RRF)`; an empty merged set returns `FallbackMode.NO_EVIDENCE` with the plain "No memories matched 'X'." reply.

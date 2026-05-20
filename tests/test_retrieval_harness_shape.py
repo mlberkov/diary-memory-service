@@ -13,6 +13,7 @@ measured by the Postgres-mode operator-run baseline, not by this test.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import subprocess
 import sys
@@ -22,32 +23,60 @@ from pathlib import Path
 
 import pytest
 
+from memory_rag.adapters.answers.mock import MockChatClient
 from memory_rag.adapters.embeddings.mock import MockEmbeddingClient
+from memory_rag.core.domain import FallbackMode
 from memory_rag.core.domain.models import EventChunk
 from memory_rag.core.embeddings.models import EmbeddingStatus
 from memory_rag.core.routing import InboundMessage, RouteKind
 from memory_rag.eval.retrieval.harness import (
     AggregateMetrics,
     CorpusMessage,
+    CostLatencyMetrics,
+    CostMetrics,
     GoldQuery,
     GoldSet,
+    GroundednessMetrics,
+    GroundednessReport,
     HarnessReport,
+    LatencyMetrics,
+    PerAnswerResult,
     PerLegRecall,
     PerQueryResult,
+    RecordingChatClient,
+    cost_metrics,
     first_relevant_rank,
     ingest_fixture_corpus,
+    is_grounded,
+    latency_metrics,
     load_corpus,
     load_gold,
     mrr_at_k,
     recall_at_k,
+    run_answer_harness,
     run_harness,
 )
 from memory_rag.services.domain_service import DomainService
+from memory_rag.services.query_service import QueryService
 from memory_rag.storage.mock.store import MockDomainStore
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GOLD_PATH = REPO_ROOT / "eval" / "retrieval" / "gold.json"
 CORPUS_PATH = REPO_ROOT / "eval" / "retrieval" / "corpus.jsonl"
+OBS_GOLD_PATH = REPO_ROOT / "eval" / "retrieval" / "observability" / "gold.json"
+OBS_CORPUS_PATH = REPO_ROOT / "eval" / "retrieval" / "observability" / "corpus.jsonl"
+
+# The two fixture pairs the harness ships: the frozen D-038 baseline set and
+# the OP-5 observability set (D-056). Mock-mode shape coverage runs over both —
+# the end-to-end run also resolves every gold handle, so a bad handle fails here.
+FIXTURE_PAIRS = [
+    pytest.param(GOLD_PATH, CORPUS_PATH, id="d038-baseline"),
+    pytest.param(OBS_GOLD_PATH, OBS_CORPUS_PATH, id="op5-observability"),
+]
+CORPUS_PATHS = [
+    pytest.param(CORPUS_PATH, id="d038-baseline"),
+    pytest.param(OBS_CORPUS_PATH, id="op5-observability"),
+]
 
 
 def _build_chunks_for_source(
@@ -64,9 +93,11 @@ def _build_chunks_for_source(
     return chunks_for_source
 
 
-def _run_mock_end_to_end() -> HarnessReport:
-    gold = load_gold(GOLD_PATH)
-    corpus = load_corpus(CORPUS_PATH)
+def _run_mock_end_to_end(
+    gold_path: Path = GOLD_PATH, corpus_path: Path = CORPUS_PATH
+) -> HarnessReport:
+    gold = load_gold(gold_path)
+    corpus = load_corpus(corpus_path)
     store = MockDomainStore()
     embedding_client = MockEmbeddingClient()
     chunks_for_source = _build_chunks_for_source(store)
@@ -75,7 +106,7 @@ def _run_mock_end_to_end() -> HarnessReport:
     def lookup(query: str) -> list[float]:
         return embedding_client.embed([query])[0]
 
-    return run_harness(
+    report = run_harness(
         mode="mock",
         store=store,
         gold=gold,
@@ -84,18 +115,34 @@ def _run_mock_end_to_end() -> HarnessReport:
         query_embedding_lookup=lookup,
         corpus_size=len(corpus),
     )
+    # OP-5.2b: drive ``QueryService.answer`` over the same ingested store
+    # with the deterministic mock chat provider so the end-to-end shape
+    # test also covers the groundedness-proxy plumbing.
+    # OP-5.3: wrap the chat client in a ``RecordingChatClient`` so the
+    # cost/latency shape can be asserted end-to-end alongside groundedness.
+    recorder = RecordingChatClient(MockChatClient())
+    query_service = QueryService(store, store, embedding_client, recorder)
+    groundedness = run_answer_harness(
+        query_service=query_service, gold=gold, chat_recorder=recorder
+    )
+    cost_latency = CostLatencyMetrics(
+        cost=cost_metrics(groundedness.per_answer),
+        latency=latency_metrics(report.per_query, groundedness.per_answer),
+    )
+    return dataclasses.replace(report, groundedness=groundedness, cost_latency=cost_latency)
 
 
 # --------------------------------------------------------------- shape tests
 
 
-def test_mock_mode_returns_expected_report_shape() -> None:
-    report = _run_mock_end_to_end()
+@pytest.mark.parametrize("gold_path,corpus_path", FIXTURE_PAIRS)
+def test_mock_mode_returns_expected_report_shape(gold_path: Path, corpus_path: Path) -> None:
+    report = _run_mock_end_to_end(gold_path, corpus_path)
     assert isinstance(report, HarnessReport)
     assert report.mode == "mock"
     assert isinstance(report.corpus_size, int) and report.corpus_size > 0
 
-    gold = load_gold(GOLD_PATH)
+    gold = load_gold(gold_path)
     assert report.queries == len(gold.queries)
 
     agg = report.aggregate
@@ -104,14 +151,57 @@ def test_mock_mode_returns_expected_report_shape() -> None:
     assert isinstance(agg.recall_at_10, float)
     assert isinstance(agg.recall_at_20, float)
     assert isinstance(agg.mrr_at_20, float)
+    assert isinstance(agg.hit_rate, float)
+    assert 0.0 <= agg.hit_rate <= 1.0
+    assert isinstance(agg.empty_rate, float)
+    assert 0.0 <= agg.empty_rate <= 1.0
     assert isinstance(agg.per_leg_recall_at_20, PerLegRecall)
     assert isinstance(agg.per_leg_recall_at_20.dense, float)
     assert isinstance(agg.per_leg_recall_at_20.sparse, float)
     assert isinstance(agg.per_leg_recall_at_20.fused, float)
 
 
-def test_per_query_shape_includes_diagnostic_rank_fields() -> None:
-    report = _run_mock_end_to_end()
+@pytest.mark.parametrize("gold_path,corpus_path", FIXTURE_PAIRS)
+def test_mock_mode_includes_groundedness_proxy_shape(gold_path: Path, corpus_path: Path) -> None:
+    """OP-5.2b: report carries a ``GroundednessReport`` after the CLI helper
+    runs the answer harness. Shape-only — no quality-value assertions
+    (``[[feedback_harness_is_inspection_not_gate]]``)."""
+    report = _run_mock_end_to_end(gold_path, corpus_path)
+    assert isinstance(report.groundedness, GroundednessReport)
+
+    g = report.groundedness.aggregate
+    assert isinstance(g, GroundednessMetrics)
+    assert isinstance(g.groundedness_rate, float)
+    assert 0.0 <= g.groundedness_rate <= 1.0
+    assert isinstance(g.fallback_mode_counts, dict)
+    for mode_value, count in g.fallback_mode_counts.items():
+        assert isinstance(mode_value, str) and mode_value
+        assert isinstance(count, int) and count >= 0
+    # The per-query breakdown sums to the total number of gold queries so an
+    # operator can read the full distribution without arithmetic.
+    assert sum(g.fallback_mode_counts.values()) == report.queries
+
+    per_answer = report.groundedness.per_answer
+    assert len(per_answer) == report.queries
+    for row in per_answer:
+        assert isinstance(row, PerAnswerResult)
+        assert isinstance(row.query, str) and row.query
+        assert isinstance(row.community_id, str) and row.community_id
+        assert isinstance(row.answerable, bool)
+        assert isinstance(row.fallback_mode, str) and row.fallback_mode
+        assert isinstance(row.context_chunk_count, int)
+        assert row.context_chunk_count >= 0
+        assert isinstance(row.grounded, bool)
+        # Per-row ``grounded`` is the documented projection of
+        # ``fallback_mode`` via ``is_grounded`` — they must agree.
+        assert row.grounded is is_grounded(FallbackMode(row.fallback_mode))
+
+
+@pytest.mark.parametrize("gold_path,corpus_path", FIXTURE_PAIRS)
+def test_per_query_shape_includes_diagnostic_rank_fields(
+    gold_path: Path, corpus_path: Path
+) -> None:
+    report = _run_mock_end_to_end(gold_path, corpus_path)
     assert report.per_query, "expected at least one per-query row"
     for row in report.per_query:
         assert isinstance(row, PerQueryResult)
@@ -139,6 +229,57 @@ def test_per_query_shape_includes_diagnostic_rank_fields() -> None:
         assert isinstance(row.recall_at_5, float)
         assert isinstance(row.recall_at_10, float)
         assert isinstance(row.recall_at_20, float)
+        # OP-5.3: per-row wall-clock retrieval latency is populated by
+        # ``run_harness``. Shape-only — no upper bound; wall-clock is
+        # non-deterministic and machine-dependent.
+        assert isinstance(row.retrieval_latency_ms, float)
+        assert row.retrieval_latency_ms >= 0.0
+
+
+@pytest.mark.parametrize("gold_path,corpus_path", FIXTURE_PAIRS)
+def test_mock_mode_includes_cost_and_latency_shape(gold_path: Path, corpus_path: Path) -> None:
+    """OP-5.3 / D-059: report carries a ``CostLatencyMetrics`` after the CLI
+    helper runs the cost/latency aggregation. Shape-only — no quality-value
+    or upper-bound assertions (``[[feedback_harness_is_inspection_not_gate]]``).
+    """
+    report = _run_mock_end_to_end(gold_path, corpus_path)
+    assert isinstance(report.cost_latency, CostLatencyMetrics)
+
+    c = report.cost_latency.cost
+    assert isinstance(c, CostMetrics)
+    assert isinstance(c.total_prompt_tokens, int) and c.total_prompt_tokens >= 0
+    assert isinstance(c.total_completion_tokens, int) and c.total_completion_tokens >= 0
+    assert isinstance(c.total_tokens, int) and c.total_tokens >= 0
+    assert c.total_tokens == c.total_prompt_tokens + c.total_completion_tokens
+    assert isinstance(c.answer_calls_with_tokens, int) and c.answer_calls_with_tokens >= 0
+    assert c.answer_calls_with_tokens <= report.queries
+    assert isinstance(c.mean_total_tokens_per_call, float)
+    assert c.mean_total_tokens_per_call >= 0.0
+
+    lat = report.cost_latency.latency
+    assert isinstance(lat, LatencyMetrics)
+    for value in (
+        lat.mean_retrieval_ms,
+        lat.p50_retrieval_ms,
+        lat.max_retrieval_ms,
+        lat.mean_answer_ms,
+        lat.p50_answer_ms,
+        lat.max_answer_ms,
+    ):
+        assert isinstance(value, float) and value >= 0.0
+    # Distributional sanity: max ≥ mean and max ≥ p50, no upper bound.
+    assert lat.max_retrieval_ms >= lat.mean_retrieval_ms
+    assert lat.max_retrieval_ms >= lat.p50_retrieval_ms
+    assert lat.max_answer_ms >= lat.mean_answer_ms
+    assert lat.max_answer_ms >= lat.p50_answer_ms
+
+    # Per-row answer-path measurements live on PerAnswerResult.
+    assert report.groundedness is not None
+    for row in report.groundedness.per_answer:
+        assert isinstance(row.answer_latency_ms, float)
+        assert row.answer_latency_ms >= 0.0
+        assert isinstance(row.prompt_tokens, int) and row.prompt_tokens >= 0
+        assert isinstance(row.completion_tokens, int) and row.completion_tokens >= 0
 
 
 # --------------------------------------------------------------- pure metric tests
@@ -194,10 +335,11 @@ def test_ingest_fixture_corpus_resolves_handles() -> None:
         assert store.get_event_chunk(chunk_id) is not None
 
 
-def test_mock_corpus_embeddings_have_honest_provenance() -> None:
+@pytest.mark.parametrize("corpus_path", CORPUS_PATHS)
+def test_mock_corpus_embeddings_have_honest_provenance(corpus_path: Path) -> None:
     store = MockDomainStore()
     embedding_client = MockEmbeddingClient()
-    corpus = load_corpus(CORPUS_PATH)
+    corpus = load_corpus(corpus_path)
     chunks_for_source = _build_chunks_for_source(store)
     ingest_fixture_corpus(store, chunks_for_source, embedding_client, corpus)
     assert store._embeddings, "expected at least one persisted embedding"
@@ -262,13 +404,14 @@ def test_postgres_mode_imports_cleanly_without_dsn() -> None:
 # -------------------------------------------------------------- smoke: ingest
 
 
-def test_domain_service_drives_corpus_ingestion() -> None:
+@pytest.mark.parametrize("corpus_path", CORPUS_PATHS)
+def test_domain_service_drives_corpus_ingestion(corpus_path: Path) -> None:
     """Sanity: ``DomainService.ingest`` succeeds on every fixture corpus message."""
     store = MockDomainStore()
     embedding_client = MockEmbeddingClient()
     service = DomainService(store, embedding_client=embedding_client)
     received_at = datetime.now(tz=UTC)
-    corpus = load_corpus(CORPUS_PATH)
+    corpus = load_corpus(corpus_path)
     for cm in corpus:
         inbound = InboundMessage(
             external_message_id=cm.external_message_id,
