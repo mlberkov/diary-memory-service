@@ -10,8 +10,9 @@ ordered set of bounded follow-up packets, and records the deferred
 
 **Status: DEPLOY-1.1 landed (D-060) — decision + roadmap. DEPLOY-1.2 landed
 (D-061) — VPS runtime shape (Dockerfile + docker-compose `vps` profile;
-opt-in via `docker compose --profile vps up`). DEPLOY-1.3..1.x are not
-started.**
+opt-in via `docker compose --profile vps up`). DEPLOY-1.3 landed (D-062) —
+reverse-proxy + TLS contour (Caddy + ACME automation, gated by the same
+`vps` profile). DEPLOY-1.4..1.x are not started.**
 
 This mirrors the D-042 / `docs/RENAMING-ROADMAP.md` and D-044 /
 `docs/OPERATIONALIZATION-ROADMAP.md` precedent: the decision entry (D-060)
@@ -58,8 +59,8 @@ Revisable in DEPLOY-1.x as long as the invariants above remain intact. A
 revision must surface itself either as a small follow-up decision-log note or
 as the revising packet's docs update explicitly naming the default it revises:
 
-- **Reverse proxy / TLS terminator** — candidate set: Caddy / nginx / other
-  ACME-capable proxy. Pinned in the proxy packet (§4).
+- **Reverse proxy / TLS terminator** — **Caddy** (pinned in DEPLOY-1.3 /
+  D-062 from the candidate set Caddy / nginx / other ACME-capable proxy).
 - **Backup tool** — candidate set: restic / custom scripts around rclone /
   `pg_dump` / `pg_basebackup`. Pinned in the backup-sink packet (§4).
 - **Installer implementation** — bash vs Python CLI; interactive vs
@@ -85,7 +86,7 @@ DEPLOY-1 invariants — A-22 updated by D-060".
 | --- | --- | --- |
 | **DEPLOY-1.1 — decision + roadmap** | This doc; D-060; `assumptions.md` (A-22 closed / A-41 deferred / A-42 / A-43); `execution-map.md`; `todo.md`; `RUNBOOK.md`; `OPERATIONALIZATION-ROADMAP.md` (see-also); `BuildPlan.md` (target-state shape). Docs-only. | **Landed (D-060).** |
 | **DEPLOY-1.2 — VPS runtime shape** | `Dockerfile` + a docker-compose `vps` profile (opt-in: `docker compose --profile vps up`) — `app_init` one-shot for OP-1 migrations + `app` running uvicorn behind FastAPI, both gated by `profiles: ["vps"]` — bringing the app and OP-1 / OP-4-shaped Postgres up on a clean Debian / Ubuntu LTS VPS. App port loopback-only until DEPLOY-1.3. No proxy, no installer wrapping yet. | **Landed (D-061).** |
-| **DEPLOY-1.3 — reverse-proxy + TLS contour** | The proxy / TLS terminator default (§3) plus ACME automation in front of the VPS runtime. Pins the proxy default. | To be planned. Depends on DEPLOY-1.2. |
+| **DEPLOY-1.3 — reverse-proxy + TLS contour** | A new `configs/caddy/Caddyfile` and a new `caddy` service in `docker-compose.yml` gated by `profiles: ["vps"]`, plus two new `.env.example` knobs (`PUBLIC_HOSTNAME`, `ACME_EMAIL`) and a new "Reverse-proxy + TLS contour (DEPLOY-1.3 / D-062)" subsection in `docs/RUNBOOK.md`. Pins **Caddy** as the §3 reverse-proxy / TLS terminator default. The DEPLOY-1.2 loopback `127.0.0.1:8000:8000` publish on `app` is retained as operator-only bypass-the-proxy inspection, not a closure signal. No `src/` change. | **Landed (D-062).** |
 | **DEPLOY-1.4 — installer / upgrade script** | Operator-facing, idempotent install/upgrade script bringing a clean VPS to a working deployment and upgrading it later with a clear status outcome. Pins the installer default and designs the configuration-versioning seam + documented upgrade path mitigation (§3). | To be planned. Depends on DEPLOY-1.2 and DEPLOY-1.3. |
 | **DEPLOY-1.5 — Telegram webhook registration automation** | Operator-driven registration of the Telegram webhook against the public DNS contour established by DEPLOY-1.3, wired into the installer's status outcome. | To be planned. Depends on DEPLOY-1.3 and DEPLOY-1.4. |
 | **DEPLOY-1.6 — off-box backup sink wiring** | Operator-side wiring of the OP-4 WAL / base-backup primitives to the off-box destination required by §2 (S3-compatible or equivalent). Pins the backup-tool default. Re-uses OP-4 outputs; does not re-decide them. May fold in a logs-first observability scope for the first VPS contour — see A-43. | To be planned. Depends on DEPLOY-1.2. |

@@ -451,7 +451,86 @@ curl -fsS http://127.0.0.1:8000/health
 
 Teardown: `docker compose --profile vps down` (without `-v` to preserve the Postgres / archive volumes).
 
-The app port is bound to `127.0.0.1` on the VPS host only — public exposure + TLS land in DEPLOY-1.3 (reverse proxy / ACME). Off-box backup wiring lands in DEPLOY-1.6 — the archive volume `memory_rag_pg_archive` and the OP-4 base / WAL primitives are unchanged from OP-4. The compose-level `STORAGE_BACKEND=postgres` and `POSTGRES_HOST=postgres` overrides on both `app_init` and `app` ensure the VPS contour boots against the real Postgres backend regardless of operator `.env` defaults; the migrations runner is idempotent, so re-issuing `up -d --build` re-runs `app_init` and exits 0 a second time without touching a head-already database.
+The app port is bound to `127.0.0.1` on the VPS host only. DEPLOY-1.3 (D-062) fronts the app with Caddy and adds the public DNS + HTTPS surface; the loopback publish is retained as an operator-only bypass-the-proxy inspection path. Off-box backup wiring lands in DEPLOY-1.6 — the archive volume `memory_rag_pg_archive` and the OP-4 base / WAL primitives are unchanged from OP-4. The compose-level `STORAGE_BACKEND=postgres` and `POSTGRES_HOST=postgres` overrides on both `app_init` and `app` ensure the VPS contour boots against the real Postgres backend regardless of operator `.env` defaults; the migrations runner is idempotent, so re-issuing `up -d --build` re-runs `app_init` and exits 0 a second time without touching a head-already database.
+
+### Reverse-proxy + TLS contour (DEPLOY-1.3 / D-062)
+
+DEPLOY-1.3 fronts the DEPLOY-1.2 `app` service with a Caddy reverse-proxy that terminates TLS and obtains / renews Let's Encrypt certificates automatically. The `caddy` service is gated by the same `profiles: ["vps"]` as `app_init` / `app`, so a bare `docker compose up` stays byte-equivalent to today (postgres + pg_archive_init only) and the single canonical bring-up path is unchanged: `docker compose --profile vps up -d --build`.
+
+Only two Caddy defaults are relied on: automatic HTTPS for the declared site (provisions + renews a certificate via ACME against `ACME_EMAIL`) and the automatic HTTP → HTTPS redirect for a site declared with an HTTPS host. **No HSTS, no security headers, no rate limits, no `tls internal` fallback** — any further hardening is out of scope for DEPLOY-1.3.
+
+**Operator pre-conditions for the public-TLS contour:**
+
+- A DNS A and/or AAAA record for `$PUBLIC_HOSTNAME` resolves to the VPS host.
+- Inbound TCP `80` and `443` are open on the VPS firewall (Caddy needs `:80` for the ACME HTTP-01 challenge and for the HTTP → HTTPS redirect, and `:443` for HTTPS itself).
+- `PUBLIC_HOSTNAME` and `ACME_EMAIL` are set in `.env`. **If either is empty or invalid, the public-TLS contour does not come up cleanly and there is no HTTP-only fallback path** — this is an intentional honest failure of the VPS public-TLS contour, not silent degradation.
+
+**Loopback `http://127.0.0.1:8000/health` is operator-only bypass-the-proxy inspection, not a packet-acceptance signal.** A successful loopback `/health` only means `app` itself is up; it does **not** mean the DEPLOY-1.3 public-TLS contour is healthy. The decisive public-contour evidence is the operator smoke below: `https://$PUBLIC_HOSTNAME/health` + HTTP → HTTPS redirect on `:80`.
+
+**Packet-closing local inspection (does not require real DNS or a real-VPS host):**
+
+```bash
+# 1. Operator env. PUBLIC_HOSTNAME and ACME_EMAIL must be set for the full
+#    --profile vps bring-up; the compose-config parse below uses whatever
+#    values .env contains.
+cp .env.example .env
+
+# 2. Compose-config parse — confirms the caddy service is declared, the
+#    .env knobs interpolate, ports 80:80 + 443:443 are mapped, and the
+#    Caddyfile + caddy_data + caddy_config mounts are present.
+docker compose --profile vps config
+
+# 3. Caddyfile syntactic validity, with operator-shaped sample values.
+docker run --rm \
+    -e PUBLIC_HOSTNAME=example.com \
+    -e ACME_EMAIL=ops@example.com \
+    -v "$PWD/configs/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+    caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
+#   expected: "Valid configuration" and exit 0.
+
+# 4. Bare-`up` byte-equivalence — confirms `caddy` is profile-gated and
+#    does not regress the DEPLOY-1.2 property that a bare `up` is
+#    unchanged from today.
+docker compose up -d
+docker compose ps
+#   expected: postgres (healthy) + pg_archive_init (exited 0) only —
+#   no app_init / app / caddy.
+docker compose down
+
+# 5. Operator-side convenience (NOT the closure signal): full vps bring-up
+#    + loopback inspection still works.
+docker compose --profile vps up -d --build
+docker compose --profile vps ps
+#   expected: postgres running (healthy), app_init exited (0),
+#             app running, caddy running.
+curl -fsS http://127.0.0.1:8000/health
+#   expected (HTTP 200): {"status":"ok","version":"<pkg-version>","env":"local"}
+#   This is operator-only bypass-the-proxy inspection, not closure evidence.
+```
+
+**Real-VPS operator smoke (the decisive public-contour evidence; NOT a packet-closing gate — clean-VPS pilot smoke is DEPLOY-1.7's responsibility):**
+
+Run from a host outside the VPS (laptop, separate cloud host, etc.), with `$PUBLIC_HOSTNAME` resolving to the VPS and inbound 80/443 open:
+
+```bash
+# Public HTTPS probe — terminates at Caddy on the VPS and reverse-proxies
+# to app:8000 over the compose network.
+curl -fsS -o /dev/null -w '%{http_code}\n' "https://$PUBLIC_HOSTNAME/health"
+#   expected: 200
+
+# HTTP -> HTTPS redirect — Caddy's automatic redirect for a site declared
+# with an HTTPS host.
+curl -sI "http://$PUBLIC_HOSTNAME/health"
+#   expected: HTTP/1.1 301 (or 308) with `Location: https://$PUBLIC_HOSTNAME/health`.
+
+# Caddy cert-obtained / TLS handshake-success evidence — read the logs
+# (the exact log-line shape is not pinned).
+docker compose --profile vps logs caddy
+```
+
+If either the public HTTPS probe or the HTTP → HTTPS redirect probe fails, the contour is **not** healthy regardless of what `curl http://127.0.0.1:8000/health` returns on the VPS itself.
+
+Teardown: `docker compose --profile vps down` (without `-v` — Caddy cert + ACME state lives in the `caddy_data` named volume, and `down -v` would force a fresh ACME issuance on the next bring-up, eventually hitting Let's Encrypt rate limits).
 
 ## Useful reads when stuck
 - Workflow & recovery: this file.

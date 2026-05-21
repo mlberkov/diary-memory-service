@@ -1,0 +1,20 @@
+# DEPLOY-1.3 / D-062 — public reverse-proxy + ACME (Caddy) in front of the
+# DEPLOY-1.2 (D-061) VPS runtime. Operates within DEPLOY-1 invariants —
+# A-22 updated by D-060. Mounted read-only at /etc/caddy/Caddyfile inside the
+# caddy:2-alpine service in the docker-compose `vps` profile.
+#
+# Only two Caddy defaults are relied on: automatic HTTPS for the declared
+# site (provisions + renews a Let's Encrypt cert against {$ACME_EMAIL}) and
+# the automatic HTTP -> HTTPS redirect for a site declared with an HTTPS
+# host. No HSTS, no security headers, no rate limits, no `tls internal`
+# fallback — any further hardening is deferred.
+#
+# If PUBLIC_HOSTNAME or ACME_EMAIL is empty / invalid, the public-TLS
+# contour does not come up cleanly and there is no HTTP-only fallback path.
+{
+	email {$ACME_EMAIL}
+}
+
+{$PUBLIC_HOSTNAME} {
+	reverse_proxy app:8000
+}
