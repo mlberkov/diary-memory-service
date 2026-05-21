@@ -780,6 +780,108 @@ Run from the VPS itself, after all five required keys are filled (with a real bo
 
 A real Telegram update sent to `https://<host>/telegram/webhook` after the canonical install is then handled by the FastAPI receiver per D-019 / A-26 (the existing webhook secret comparison is fail-closed). The end-to-end round-trip is exercised by DEPLOY-1.7.
 
+### Off-box backup sink (DEPLOY-1.6 / D-065)
+
+DEPLOY-1.6 wires the existing OP-4.2 `/archive/base` + `/archive/wal` artifacts to an operator-supplied S3-compatible destination via a new `pg_offbox_uploader` sidecar service running `rclone sync`. The DEPLOY-1 §2 invariant ("off-box backup destination required") is the closure signal for DEPLOY-1.7's clean-VPS pilot smoke; DEPLOY-1.6 wires the seam and surfaces honest probe / upload outcomes.
+
+**Operator pre-conditions (additive to the DEPLOY-1.4 / 1.5 pre-conditions):**
+
+- An S3-compatible bucket exists (AWS S3, Cloudflare R2, Backblaze B2, Wasabi, MinIO, …) and the operator has access-key credentials with object read / write on it.
+- `.env` carries the off-box knobs in the new "Off-box backup sink (DEPLOY-1.6 / D-065)" section (see `.env.example`):
+  - `BACKUP_S3_BUCKET` — target bucket name (required to enable off-box).
+  - `BACKUP_S3_ENDPOINT` — S3-compatible endpoint URL; leave blank for AWS S3 itself; set for R2 / B2 / Wasabi / MinIO.
+  - `BACKUP_S3_PATH_PREFIX` — object prefix; defaults to `archive` (artifacts land at `<prefix>/base/...` and `<prefix>/wal/...`).
+  - `BACKUP_S3_ACCESS_KEY_ID` / `BACKUP_S3_SECRET_ACCESS_KEY` — credentials.
+  All five knobs are **optional** — none join `REQUIRED_ENV_KEYS`. With them unset, both the installer probe and the uploader log `skipped (...)` outcomes and `pg_backup.cycle.ok` semantics are unaffected.
+
+**Installer probe (`offbox_backup_probe`).** The canonical `./scripts/installer/deploy.sh` (DEPLOY-1.4) runs an active off-box probe after the DEPLOY-1.5 webhook-registration step: a one-shot `timeout 6 docker run --rm -e RCLONE_CONFIG_OFFBOX_* rclone/rclone:1.66 lsd offbox:<bucket>` against the configured remote, preceded by a separate `timeout 60 docker pull -q rclone/rclone:1.66` step that runs only when `docker image inspect` reports the image absent. The probe is best-effort — a non-`ok` outcome never fails the install; `last_outcome="success"` still requires only the mandatory loopback `/health` to be `"ok"` (mirrors `public_tls_probe` / `webhook_registration` semantics). The outcome is recorded in `.installer-state.json` under `offbox_backup_probe` as one of:
+
+```
+"ok"                                          # bucket reachable, credentials accepted
+"skipped (BACKUP_S3_BUCKET unset)"            # operator opted out
+"skipped (BACKUP_S3_ACCESS_KEY_ID unset)"     # bucket set, credentials missing
+"skipped (BACKUP_S3_SECRET_ACCESS_KEY unset)" # bucket set, credentials missing
+"failed (<short reason ≤200 chars>)"          # rclone lsd did not return 0
+```
+
+…and surfaced in the final `deploy.install.ok ... offbox_backup_probe="..."` log line alongside `public_tls_probe` and `webhook_registration`. The first invocation pays up to the 60 s pull budget for the rclone image; subsequent invocations reuse the cached image and only spend the 6 s probe budget.
+
+**Off-box uploader lifecycle.** The `pg_offbox_uploader` service (image `rclone/rclone:1.66`, gated by `profiles: ["backup"]`) starts alongside the existing `pg_backup` sidecar when the operator runs:
+
+```sh
+docker compose --profile backup up -d
+#   memory_rag_pg_backup           (OP-4.2 nightly base-backup runner)
+#   memory_rag_pg_offbox_uploader  (DEPLOY-1.6 / D-065 off-box uploader)
+```
+
+The uploader is a long-running poll loop (polls `/archive/last_success.json` every 600 s). When it observes a previously-unseen cycle timestamp, it runs `rclone sync /archive/base remote:<bucket>/<prefix>/base` then `rclone sync /archive/wal remote:<bucket>/<prefix>/wal` and records the outcome in `/archive/last_offbox.json`. `rclone sync` is idempotent — already-present files at the remote are skipped, so a cold-start re-upload only transfers what has changed. The uploader **never writes** to `/archive/base`, `/archive/wal`, or `/archive/last_success.json` — only `/archive/last_offbox.json`. A sink failure does NOT degrade `pg_backup.cycle.ok` or the OP-4.2 durable signal at `/archive/last_success.json`.
+
+**Inspect what the uploader is doing.**
+
+```sh
+docker compose logs pg_offbox_uploader
+#   healthy cycle:
+#     pg_backup.offbox.start bucket=<…> endpoint=<…> prefix=archive poll_seconds=600
+#     pg_backup.offbox.begin base=base-2026-05-21T03:00:00Z ts=<…>
+#     pg_backup.offbox.ok base=base-2026-05-21T03:00:00Z
+#   missing credentials (logged once per state change, not once per poll):
+#     pg_backup.offbox.skipped reason=BACKUP_S3_BUCKET unset
+#     pg_backup.offbox.skipped reason=BACKUP_S3_ACCESS_KEY_ID unset
+#     pg_backup.offbox.skipped reason=BACKUP_S3_SECRET_ACCESS_KEY unset
+#   sink failure (categorized — never echoes credentials):
+#     pg_backup.offbox.error stage=<base|wal> reason=<auth_failed|network|remote_error|temporary|fatal> rc=<n>
+
+docker compose exec pg_backup cat /archive/last_offbox.json
+#   {
+#     "timestamp": "<UTC ISO matching last_success.json>",
+#     "base_backup": "base-2026-05-21T03:00:00Z",
+#     "status": "ok",
+#     "error": null
+#   }
+```
+
+**What to do when the sink probe says `failed (...)`.**
+
+1. Re-read the reason text on the `deploy.install.ok ... offbox_backup_probe="failed (...)"` log line — it is the first 200 characters of rclone's stderr. Common causes: bucket does not exist; credentials denied; endpoint URL typo; bucket region mismatch.
+2. Confirm the five `BACKUP_S3_*` knobs are filled correctly in `.env` — secrets are never auto-rotated by the installer (the installer reads `.env` and does not write it, per D-063).
+3. Re-run `./scripts/installer/deploy.sh` after the fix — the probe re-runs and the state file is rewritten with the new verdict.
+4. If the canonical install reported `offbox_backup_probe="ok"` but the uploader subsequently logs `pg_backup.offbox.error`, the most common cause is a credential rotation between the install and the next cycle. Update `.env`, then `docker compose --profile backup restart pg_offbox_uploader` to pick up the new values.
+
+**Packet-closing local inspection (no real S3 endpoint required).** Mirrors the DEPLOY-1.4 / 1.5 packet-closing blocks above; included here so an operator can verify the DEPLOY-1.6 seam shape on a dev host before pointing it at a real bucket.
+
+```sh
+./scripts/installer/deploy.sh --version
+#   expected (exit 0):
+#   3
+
+# Profile parity — pg_offbox_uploader must NOT appear under --profile vps
+# (the installer's bring-up) and must appear under --profile backup.
+docker compose --profile vps config --services | sort
+#   expected (exit 0):
+#   app app_init caddy pg_archive_init postgres
+docker compose --profile backup config --services | sort
+#   expected (exit 0):
+#   pg_archive_init pg_backup pg_offbox_uploader postgres
+
+# Bare-up byte-equivalence preserved.
+docker compose config --services | sort
+#   expected (exit 0):
+#   pg_archive_init postgres
+
+# Future-version refusal still works at v3.
+# 1) hand-edit .installer-state.json:installer_config_version to 99
+# 2) ./scripts/installer/deploy.sh
+#   expected (exit 1):
+#   deploy.upgrade.error deployed config v99 is newer than this installer v3 ...
+#   (.installer-state.last_failure.json written; .installer-state.json byte-equivalent to input)
+```
+
+**Real-VPS operator smoke (NOT a packet-closing gate; clean-VPS pilot smoke + the off-box-backup §2-invariant verification is DEPLOY-1.7's responsibility):**
+
+- From a clean Debian / Ubuntu LTS VPS with the DEPLOY-1.5 pre-conditions plus the five `BACKUP_S3_*` knobs filled against a reachable S3-compatible bucket: `./scripts/installer/deploy.sh` exits 0 with `deploy.install.ok ... offbox_backup_probe="ok"`; `--status` shows the v3 state file with `"selected_defaults.backup_tool": "rclone"` and `"offbox_backup_probe": "ok"`.
+- `docker compose --profile backup up -d` starts both `pg_backup` and `pg_offbox_uploader`; after the next nightly cycle (or a manual `make backup-run`), `docker compose logs pg_offbox_uploader` shows the `pg_backup.offbox.begin → pg_backup.offbox.ok` sequence; the remote bucket contains `<prefix>/base/base-<ts>/...` and `<prefix>/wal/...`; `/archive/last_offbox.json` records `status=ok` with the same `timestamp` and `base_backup` as `/archive/last_success.json`.
+- Sink-failure additivity smoke: stopping the S3 endpoint mid-upload (or rotating in a bogus credential) yields `pg_backup.offbox.error stage=<base|wal> reason=<class> rc=<n>`; `/archive/last_success.json` is unchanged; `pg_backup.cycle.ok` is still the most recent cycle outcome in `docker compose logs pg_backup`; `/archive/last_offbox.json` records `status=error` with a categorized reason — no credential text appears in the log.
+
 ## Useful reads when stuck
 - Workflow & recovery: this file.
 - Architecture, adapter axes, deployment shapes: `docs/ARCHITECTURE.md`.

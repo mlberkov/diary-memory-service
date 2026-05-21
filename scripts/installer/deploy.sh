@@ -21,13 +21,23 @@
 # `--unregister-webhook` teardown subcommand. INSTALLER_CONFIG_VERSION bumps
 # 1 → 2 with a new `migrate_v1_to_v2` no-op stamp.
 #
+# DEPLOY-1.6 / D-065 extends the install path with a best-effort off-box
+# backup-sink probe against the operator-supplied S3-compatible target,
+# pins the §3 backup-tool default to `rclone`, and adds the new
+# `offbox_backup_probe` field to `.installer-state.json`.
+# INSTALLER_CONFIG_VERSION bumps 2 → 3 with a new `migrate_v2_to_v3` no-op
+# stamp (the new state-file shape — `selected_defaults.backup_tool="rclone"`
+# plus the `offbox_backup_probe` field — is materialized by the next
+# `write_state_success` call, mirroring the D-064 precedent).
+#
 # Single canonical operator command: ./scripts/installer/deploy.sh
-# See docs/RUNBOOK.md "Installer / upgrade script (DEPLOY-1.4 / D-063)" and
-# "Telegram webhook registration (DEPLOY-1.5 / D-064)".
+# See docs/RUNBOOK.md "Installer / upgrade script (DEPLOY-1.4 / D-063)",
+# "Telegram webhook registration (DEPLOY-1.5 / D-064)", and "Off-box
+# backup sink (DEPLOY-1.6 / D-065)".
 
 set -eu
 
-INSTALLER_CONFIG_VERSION=2
+INSTALLER_CONFIG_VERSION=3
 
 STATE_FILE_NAME=".installer-state.json"
 FAILURE_FILE_NAME=".installer-state.last_failure.json"
@@ -51,7 +61,10 @@ usage: deploy.sh [--check | --status | --version | --unregister-webhook | --help
                         loopback /health (mandatory) and public-TLS /health
                         (best-effort); registers the Telegram webhook against
                         the public-TLS contour (best-effort, DEPLOY-1.5 /
-                        D-064); writes .installer-state.json on success.
+                        D-064); probes the off-box backup sink against the
+                        operator-supplied S3-compatible target (best-effort,
+                        DEPLOY-1.6 / D-065); writes .installer-state.json on
+                        success.
   --check               Preflight only. Reads inputs, writes nothing. Exit 0
                         if all preconditions are satisfied; non-zero with
                         diagnostics otherwise.
@@ -64,8 +77,9 @@ usage: deploy.sh [--check | --status | --version | --unregister-webhook | --help
                         on success, non-zero on Telegram or filesystem error.
   --help                Print this usage.
 
-Documented in docs/RUNBOOK.md "Installer / upgrade script (DEPLOY-1.4 / D-063)"
-and "Telegram webhook registration (DEPLOY-1.5 / D-064)".
+Documented in docs/RUNBOOK.md "Installer / upgrade script (DEPLOY-1.4 / D-063)",
+"Telegram webhook registration (DEPLOY-1.5 / D-064)", and "Off-box backup sink
+(DEPLOY-1.6 / D-065)".
 USAGE
 }
 
@@ -196,16 +210,19 @@ read_state_string() {
   ' "${path}"
 }
 
-# write_state_success <loopback> <public_tls> <webhook_status> <webhook_url>
+# write_state_success <loopback> <public_tls> <webhook_status> <webhook_url> <offbox>
 #
 # <webhook_url> is the literal registered URL on a "registered (...)"
 # status and the empty string for every other status; the writer emits
-# JSON `null` in the empty case.
+# JSON `null` in the empty case. <offbox> is the off-box backup-sink probe
+# verdict — one of "ok", "skipped (...)", or "failed (...)" per
+# probe_offbox_backup (DEPLOY-1.6 / D-065).
 write_state_success() {
   loopback="$1"
   public_tls="$2"
   webhook_status="$3"
   webhook_url="$4"
+  offbox="$5"
   ts=$(now_utc_iso)
   if [ -z "${webhook_url}" ]; then
     webhook_url_field="null"
@@ -218,12 +235,13 @@ write_state_success() {
   "selected_defaults": {
     "reverse_proxy": "caddy",
     "installer_impl": "bash",
-    "backup_tool": null
+    "backup_tool": "rclone"
   },
   "last_install_timestamp": "${ts}",
   "last_outcome": "success",
   "loopback_health": "${loopback}",
   "public_tls_probe": "${public_tls}",
+  "offbox_backup_probe": "${offbox}",
   "webhook_registration": {
     "status": "${webhook_status}",
     "url": ${webhook_url_field},
@@ -246,21 +264,24 @@ write_state_unregistered() {
   prev_ts=$(read_state_string last_install_timestamp)
   loopback=$(read_state_string loopback_health)
   public_tls=$(read_state_string public_tls_probe)
+  offbox=$(read_state_string offbox_backup_probe)
   [ -z "${prev_ts}" ] && prev_ts="${ts}"
   [ -z "${loopback}" ] && loopback="unknown"
   [ -z "${public_tls}" ] && public_tls="unknown"
+  [ -z "${offbox}" ] && offbox="unknown"
   cat > "${path}" <<EOF
 {
   "installer_config_version": ${INSTALLER_CONFIG_VERSION},
   "selected_defaults": {
     "reverse_proxy": "caddy",
     "installer_impl": "bash",
-    "backup_tool": null
+    "backup_tool": "rclone"
   },
   "last_install_timestamp": "${prev_ts}",
   "last_outcome": "success",
   "loopback_health": "${loopback}",
   "public_tls_probe": "${public_tls}",
+  "offbox_backup_probe": "${offbox}",
   "webhook_registration": {
     "status": "unregistered",
     "url": null,
@@ -304,6 +325,15 @@ migrate_v1_to_v2() {
   return 0
 }
 
+# DEPLOY-1.6 / D-065 — v2 → v3 stamp. No-op: the new state-file shape
+# (`selected_defaults.backup_tool="rclone"` plus the `offbox_backup_probe`
+# field) is materialized by the next `write_state_success` call. Mirrors
+# the migrate_v1_to_v2 precedent — the seam is exercised by appending a
+# named helper, not by rewriting the installer.
+migrate_v2_to_v3() {
+  return 0
+}
+
 # run_migrations <deployed_version>
 run_migrations() {
   deployed="$1"
@@ -319,7 +349,10 @@ run_migrations() {
   if [ "${deployed}" -lt 2 ]; then
     migrate_v1_to_v2
   fi
-  # When DEPLOY-1.x packets add migrate_v2_to_v3 etc., extend this chain.
+  if [ "${deployed}" -lt 3 ]; then
+    migrate_v2_to_v3
+  fi
+  # When DEPLOY-1.x packets add migrate_v3_to_v4 etc., extend this chain.
 }
 
 bring_up_vps_profile() {
@@ -404,6 +437,75 @@ register_telegram_webhook() {
   return 0
 }
 
+# DEPLOY-1.6 / D-065 — probe the operator-supplied off-box backup sink.
+# Returns one of:
+#   "ok"
+#   "skipped (BACKUP_S3_BUCKET unset)"
+#   "skipped (BACKUP_S3_ACCESS_KEY_ID unset)"
+#   "skipped (BACKUP_S3_SECRET_ACCESS_KEY unset)"
+#   "failed (<short reason ≤200 chars>)"
+# Active probe via a one-shot `docker run --rm rclone/rclone:1.66 lsd`
+# against the configured bucket — mirrors probe_public_tls's active shape so
+# all three status variants are reachable. Two-step budget so a cold-pull
+# of the rclone image does not consume the probe budget:
+#   - pull step (only if image absent): `timeout 60 docker pull -q ...`,
+#     best-effort — a pull failure is intentionally not fatal; the rclone
+#     run that follows will surface a clean reason.
+#   - probe step: `timeout 6 docker run --rm ... lsd offbox:${bucket}` —
+#     same 6 s wall-clock budget as `register_telegram_webhook`. Subsequent
+#     invocations skip the pull (image is cached) and only spend the 6 s.
+# Best-effort — never fails the run on its own (clean-VPS off-box
+# verification is DEPLOY-1.7's responsibility). Credentials are passed via
+# `-e` env flags only; the operator's .env file is the credential source.
+probe_offbox_backup() {
+  bucket=$(read_env_value BACKUP_S3_BUCKET)
+  if [ -z "${bucket}" ]; then
+    printf 'skipped (BACKUP_S3_BUCKET unset)'
+    return 0
+  fi
+  access_key=$(read_env_value BACKUP_S3_ACCESS_KEY_ID)
+  if [ -z "${access_key}" ]; then
+    printf 'skipped (BACKUP_S3_ACCESS_KEY_ID unset)'
+    return 0
+  fi
+  secret_key=$(read_env_value BACKUP_S3_SECRET_ACCESS_KEY)
+  if [ -z "${secret_key}" ]; then
+    printf 'skipped (BACKUP_S3_SECRET_ACCESS_KEY unset)'
+    return 0
+  fi
+  endpoint=$(read_env_value BACKUP_S3_ENDPOINT)
+  if ! docker image inspect rclone/rclone:1.66 >/dev/null 2>&1; then
+    timeout 60 docker pull -q rclone/rclone:1.66 >/dev/null 2>&1 || true
+  fi
+  rc=0
+  if [ -n "${endpoint}" ]; then
+    body=$(timeout 6 docker run --rm \
+      -e RCLONE_CONFIG_OFFBOX_TYPE=s3 \
+      -e RCLONE_CONFIG_OFFBOX_PROVIDER=Other \
+      -e RCLONE_CONFIG_OFFBOX_ACCESS_KEY_ID="${access_key}" \
+      -e RCLONE_CONFIG_OFFBOX_SECRET_ACCESS_KEY="${secret_key}" \
+      -e RCLONE_CONFIG_OFFBOX_ENDPOINT="${endpoint}" \
+      rclone/rclone:1.66 lsd "offbox:${bucket}" 2>&1) || rc=$?
+  else
+    body=$(timeout 6 docker run --rm \
+      -e RCLONE_CONFIG_OFFBOX_TYPE=s3 \
+      -e RCLONE_CONFIG_OFFBOX_PROVIDER=AWS \
+      -e RCLONE_CONFIG_OFFBOX_ACCESS_KEY_ID="${access_key}" \
+      -e RCLONE_CONFIG_OFFBOX_SECRET_ACCESS_KEY="${secret_key}" \
+      rclone/rclone:1.66 lsd "offbox:${bucket}" 2>&1) || rc=$?
+  fi
+  if [ "${rc}" -eq 0 ]; then
+    printf 'ok'
+    return 0
+  fi
+  reason=$(printf '%s' "${body}" | tr '\n\r' '  ' | cut -c1-200)
+  if [ -z "${reason}" ]; then
+    reason="rclone lsd offbox:${bucket} did not return 0 within the 6s budget"
+  fi
+  printf 'failed (%s)' "${reason}"
+  return 0
+}
+
 cmd_version() {
   printf '%s\n' "${INSTALLER_CONFIG_VERSION}"
 }
@@ -474,12 +576,14 @@ cmd_install() {
       ;;
   esac
 
-  write_state_success "${loop}" "${pub}" "${webhook}" "${webhook_url}"
+  offbox=$(probe_offbox_backup)
+
+  write_state_success "${loop}" "${pub}" "${webhook}" "${webhook_url}" "${offbox}"
 
   if [ "${deployed}" -lt "${INSTALLER_CONFIG_VERSION}" ]; then
-    echo "deploy.install.ok upgraded v${deployed}->v${INSTALLER_CONFIG_VERSION} loopback_health=${loop} public_tls_probe=\"${pub}\" webhook_registration=\"${webhook}\""
+    echo "deploy.install.ok upgraded v${deployed}->v${INSTALLER_CONFIG_VERSION} loopback_health=${loop} public_tls_probe=\"${pub}\" webhook_registration=\"${webhook}\" offbox_backup_probe=\"${offbox}\""
   else
-    echo "deploy.install.ok already_at_v${INSTALLER_CONFIG_VERSION} re-applied loopback_health=${loop} public_tls_probe=\"${pub}\" webhook_registration=\"${webhook}\""
+    echo "deploy.install.ok already_at_v${INSTALLER_CONFIG_VERSION} re-applied loopback_health=${loop} public_tls_probe=\"${pub}\" webhook_registration=\"${webhook}\" offbox_backup_probe=\"${offbox}\""
   fi
 }
 
