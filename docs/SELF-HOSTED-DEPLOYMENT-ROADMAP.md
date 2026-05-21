@@ -8,8 +8,10 @@ self-hosted VPS + Telegram contour for a single-community pilot** — into an
 ordered set of bounded follow-up packets, and records the deferred
 **DEPLOY-2** managed-cloud reference deployment as the second peer shape.
 
-**Status: DEPLOY-1.1 landed (D-060) — decision + roadmap only. DEPLOY-1.2..1.x
-are not started.**
+**Status: DEPLOY-1.1 landed (D-060) — decision + roadmap. DEPLOY-1.2 landed
+(D-061) — VPS runtime shape (Dockerfile + docker-compose `vps` profile;
+opt-in via `docker compose --profile vps up`). DEPLOY-1.3..1.x are not
+started.**
 
 This mirrors the D-042 / `docs/RENAMING-ROADMAP.md` and D-044 /
 `docs/OPERATIONALIZATION-ROADMAP.md` precedent: the decision entry (D-060)
@@ -82,7 +84,7 @@ DEPLOY-1 invariants — A-22 updated by D-060".
 | Packet | Surfaces it touches | Status |
 | --- | --- | --- |
 | **DEPLOY-1.1 — decision + roadmap** | This doc; D-060; `assumptions.md` (A-22 closed / A-41 deferred / A-42 / A-43); `execution-map.md`; `todo.md`; `RUNBOOK.md`; `OPERATIONALIZATION-ROADMAP.md` (see-also); `BuildPlan.md` (target-state shape). Docs-only. | **Landed (D-060).** |
-| **DEPLOY-1.2 — VPS runtime shape** | Dockerfile + a docker-compose VPS profile bringing the app and OP-1 / OP-4-shaped Postgres up on a clean Debian / Ubuntu LTS VPS. No proxy, no installer wrapping yet. | To be planned. |
+| **DEPLOY-1.2 — VPS runtime shape** | `Dockerfile` + a docker-compose `vps` profile (opt-in: `docker compose --profile vps up`) — `app_init` one-shot for OP-1 migrations + `app` running uvicorn behind FastAPI, both gated by `profiles: ["vps"]` — bringing the app and OP-1 / OP-4-shaped Postgres up on a clean Debian / Ubuntu LTS VPS. App port loopback-only until DEPLOY-1.3. No proxy, no installer wrapping yet. | **Landed (D-061).** |
 | **DEPLOY-1.3 — reverse-proxy + TLS contour** | The proxy / TLS terminator default (§3) plus ACME automation in front of the VPS runtime. Pins the proxy default. | To be planned. Depends on DEPLOY-1.2. |
 | **DEPLOY-1.4 — installer / upgrade script** | Operator-facing, idempotent install/upgrade script bringing a clean VPS to a working deployment and upgrading it later with a clear status outcome. Pins the installer default and designs the configuration-versioning seam + documented upgrade path mitigation (§3). | To be planned. Depends on DEPLOY-1.2 and DEPLOY-1.3. |
 | **DEPLOY-1.5 — Telegram webhook registration automation** | Operator-driven registration of the Telegram webhook against the public DNS contour established by DEPLOY-1.3, wired into the installer's status outcome. | To be planned. Depends on DEPLOY-1.3 and DEPLOY-1.4. |

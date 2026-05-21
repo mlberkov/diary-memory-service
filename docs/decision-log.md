@@ -1446,3 +1446,47 @@ DEPLOY-1 is the next non-local deployment the owner is bringing up — a real si
 - **DEPLOY-1.1 is complete; DEPLOY-1 is in progress.** Every DEPLOY-1.x packet must cite "operates within DEPLOY-1 invariants — A-22 updated by D-060" in its own implementation plan.
 - **Mitigation for the invariant-vs-default split.** The DEPLOY-1.x packet that ships the installer must design a configuration-versioning seam and a documented upgrade path so a later DEPLOY-1.x packet can swap a default (proxy / backup tool / installer implementation) within the invariant set without rewriting the installer. Recorded as a packet-design constraint here and in the roadmap doc; not work performed by DEPLOY-1.1.
 - Out of scope (deferred to DEPLOY-1.2..DEPLOY-1.x or DEPLOY-2): Dockerfile, docker-compose VPS profile, reverse-proxy config + ACME automation, install/upgrade scripts and their UX, Telegram webhook registration automation, off-box backup sink implementation (integrates with the OP-4 WAL/base-backup primitives), observability sinks beyond a logs-first contour, end-to-end smoke for a clean-VPS → running-pilot run, the managed-cloud reference deployment (DEPLOY-2 reopens A-41); any schema / migration or `src/` change; any unrelated cleanup or refactor.
+
+## D-061 — DEPLOY-1.2: VPS runtime shape (Dockerfile + docker-compose `vps` profile)
+
+### Decision
+DEPLOY-1.2 lands the first runnable VPS runtime contour. Operates within DEPLOY-1 invariants — A-22 updated by D-060. It adds:
+
+- A `Dockerfile` for the application, built from the repo's `pyproject.toml` + `uv.lock` against `python:3.11-slim` (matches the `>=3.11,<3.12` interpreter requirement) using `uv sync --frozen --no-dev`. The image runs as a non-root user (UID 10001). The Dockerfile carries no `CMD`; each docker-compose service supplies its own command.
+- A `.dockerignore` to keep the build context small and to prevent operator secrets (`.env`) and local caches (`.venv`, `.ruff_cache`, …) from leaking into the image.
+- Two new docker-compose services, both gated by `profiles: ["vps"]` so a bare `docker compose up` is byte-equivalent to today (postgres + pg_archive_init only):
+  - **`app_init`** — one-shot caller of `python -m memory_rag.storage.postgres.migrations_runner apply`. `depends_on: postgres: { condition: service_healthy }`; `restart: "no"`. Mirrors the existing `pg_archive_init` one-shot precedent. On a fresh volume this is what creates `CREATE EXTENSION vector` and the baseline schema, so the `_verify_pgvector` boot gate in `create_app()` succeeds once `app` starts.
+  - **`app`** — uvicorn behind FastAPI. `depends_on: app_init: { condition: service_completed_successfully }`. Host port bound to `127.0.0.1:8000:8000` only — public exposure + TLS land in DEPLOY-1.3. `STORAGE_BACKEND=postgres` and `POSTGRES_HOST=postgres` are set at the compose level (compose-network/contour-specific overrides, not new knobs in `src/memory_rag/config.py`).
+
+**User-confirmed choices for this packet (per `[[feedback_separate_confirmed_from_proposed]]`):**
+- A separate one-shot compose service `app_init` is the migration bootstrap shape (not an entrypoint script inside the app image).
+- Both new services are gated by `profiles: ["vps"]` (opt-in compose profile, mirroring the existing `backup` / `restore` profiles); the single canonical bring-up path is `docker compose --profile vps up -d --build`.
+- The bounded runtime-shape validation is a docs-only manual smoke in `docs/RUNBOOK.md`; no new Make target.
+
+**Runtime-shape choices made in this packet (revisable in later DEPLOY-1.x as long as DEPLOY-1 invariants hold):**
+- Base image: `python:3.11-slim`.
+- Dependency install: `uv sync --frozen --no-dev` (matches the repo's UV-based workflow; consumes `uv.lock`).
+- Non-root runtime user: UID 10001.
+- Host port binding: `127.0.0.1:8000:8000` (loopback only) until DEPLOY-1.3 fronts the app with a reverse proxy.
+
+**Bounded runtime-shape validation evidence (per `[[feedback_harness_is_inspection_not_gate]]`).** "Smoke was run" is not a sufficient claim. The inspection evidence captured for DEPLOY-1.2 is:
+1. `docker compose --profile vps ps` shows `postgres` running (healthy), `app_init` exited (0), `app` running.
+2. `docker compose --profile vps logs app_init` contains the line `Postgres migrations applied to head.` (the migrations runner prints this on success).
+3. `docker compose --profile vps logs app` contains the `app.created env=... version=... embedding_backend=...` line emitted by `create_app()` at startup.
+4. `curl -fsS http://127.0.0.1:8000/health` returns HTTP 200 with the JSON `{"status":"ok","version":"<pkg-version>","env":"local"}`.
+
+### Why
+DEPLOY-1.1 fixed the contract (D-060 invariants + roadmap). The next dependency-ordered step is to produce something runnable: DEPLOY-1.3 (proxy), DEPLOY-1.4 (installer), DEPLOY-1.5 (webhook automation), and DEPLOY-1.6 (off-box backup sink) all need a runnable VPS runtime to terminate against — DEPLOY-1.2 is that termination point. Keeping the new services behind a `vps` profile preserves the current "docker compose up = postgres-only local dev" behavior, so DEPLOY-1.2 imposes no new burden on existing Stage-2 workflows (the OP-4 `backup` / `restore` profiles continue to work unchanged). Separating migration bootstrap into the `app_init` one-shot keeps the app image free of orchestration concerns and mirrors the existing `pg_archive_init` precedent (`[[feedback_packet_scope_discipline]]`).
+
+### Consequence
+- New: `Dockerfile`, `.dockerignore`.
+- Changed: `docker-compose.yml` — appended `app_init` + `app` services, both gated by `profiles: ["vps"]`; no changes to existing `postgres`, `pg_archive_init`, `pg_backup`, `pg_restore`, or the `volumes:` block; OP-1 migrations and the OP-4 archive volume shape are reused unchanged.
+- Changed: `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` — DEPLOY-1.2 row status set to "Landed (D-061)"; "Purpose & status" updated; no invariant or default changes.
+- Changed: `docs/execution-map.md` — DEPLOY-1.2 row updated to a landed-shape pointer at `Dockerfile`, `.dockerignore`, the new compose services, and the RUNBOOK subsection.
+- Changed: `docs/todo.md` — DEPLOY-1.2 marked done (D-061); **DEPLOY-1.3 is the only canonical "next"**; DEPLOY-1.6 keeps its existing wording with a short note that it is newly unblocked by DEPLOY-1.2 and may be pulled in parallel with the proxy / installer / webhook line, without elevating it to a co-canonical next.
+- Changed: `docs/RUNBOOK.md` — new "VPS runtime shape (DEPLOY-1.2 / D-061)" subsection inside the existing "Self-hosted VPS reference shape (DEPLOY-1 / D-060)" section, containing the numbered, copy-paste-procedural manual smoke under the single canonical `docker compose --profile vps` path with explicit expected outputs.
+- **No `src/` change**, no schema change, no migration change, no `pyproject.toml` / `uv.lock` change, no `Makefile` change, no `.env.example` change, no `tests/` change.
+- `docs/INVARIANTS.md` / `docs/RUNTIME-INVARIANTS.md` deliberately **not** touched — the DEPLOY-1 invariants remain deployment-level expectations carried by D-060 + the roadmap doc until DEPLOY-1.x ships code that enforces them at runtime (`[[feedback_invariants_match_enforcement]]`).
+- `docs/assumptions.md`, `docs/assumption-audit.md`, `docs/ARCHITECTURE.md`, `docs/product/{PRD,BuildPlan,TechSpec}.md`, `AGENTS.md`, `README.md`, `QUICKSTART.md`, `docs/GLOSSARY.md` — also not touched; D-060 already framed DEPLOY-1.x as not requiring further changes to canonical docs and DEPLOY-1.2 honors that.
+- **DEPLOY-1.2 is complete; DEPLOY-1.3 is unblocked and is the canonical next packet; DEPLOY-1.6 is also unblocked and may be pulled in parallel with the proxy / installer / webhook line (per the roadmap §5 dependency graph), not co-canonical next.**
+- Out of scope (deferred to DEPLOY-1.3..DEPLOY-1.7 or DEPLOY-2): reverse proxy + TLS + ACME (DEPLOY-1.3); operator-facing idempotent install/upgrade script + the configuration-versioning seam (DEPLOY-1.4); Telegram webhook auto-registration (DEPLOY-1.5); off-box backup sink wiring (DEPLOY-1.6, reuses OP-4 primitives unchanged); clean-VPS → working-pilot end-to-end smoke + upgrade drill (DEPLOY-1.7); managed-cloud reference deployment (DEPLOY-2 reopens A-41); any `src/`, schema, migration, retrieval, answer-path, or domain logic change; any pinning of future DEPLOY-1.x tool defaults (proxy / backup tool / installer language) beyond the runtime-shape choices DEPLOY-1.2 strictly needed; a `make app-up` / `make app-smoke` convenience target; a container-level healthcheck on the app service; any unrelated cleanup or refactor.

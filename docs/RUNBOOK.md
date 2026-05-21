@@ -419,6 +419,40 @@ Tool-level details (which reverse proxy / TLS terminator, which backup tool, ins
 
 See `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` for the invariants (mirrored), current defaults, and the DEPLOY-1.x packet sequence; the managed-cloud reference deployment (DEPLOY-2) is deferred there and reopens A-41 when pulled.
 
+### VPS runtime shape (DEPLOY-1.2 / D-061)
+
+DEPLOY-1.2 lands the first runnable VPS runtime contour: an app container plus a one-shot `app_init` migration runner that reuses OP-1 migrations and the OP-4 archive volume shape unchanged. No reverse proxy, no public TLS, no installer, and no off-box backup wiring yet — those land in DEPLOY-1.3..1.6. The two new compose services (`app_init` and `app`) are gated by `profiles: ["vps"]`, so a bare `docker compose up` is unchanged from today (postgres + pg_archive_init only).
+
+The bounded runtime-shape validation uses the **single canonical `docker compose --profile vps` path**:
+
+```bash
+# Step 1 — operator env. OPENAI_API_KEY may stay empty for /health.
+cp .env.example .env
+
+# Step 2 — build the app image and bring up the vps profile.
+docker compose --profile vps up -d --build
+
+# Step 3 — confirm service states.
+docker compose --profile vps ps
+#   expected:
+#     postgres   running (healthy)
+#     app_init   exited (0)
+#     app        running
+
+# Step 4 — confirm migrations were applied.
+docker compose --profile vps logs app_init | grep -F \
+  "Postgres migrations applied to head."
+
+# Step 5 — confirm /health.
+curl -fsS http://127.0.0.1:8000/health
+#   expected (HTTP 200):
+#   {"status":"ok","version":"<pkg-version>","env":"local"}
+```
+
+Teardown: `docker compose --profile vps down` (without `-v` to preserve the Postgres / archive volumes).
+
+The app port is bound to `127.0.0.1` on the VPS host only — public exposure + TLS land in DEPLOY-1.3 (reverse proxy / ACME). Off-box backup wiring lands in DEPLOY-1.6 — the archive volume `memory_rag_pg_archive` and the OP-4 base / WAL primitives are unchanged from OP-4. The compose-level `STORAGE_BACKEND=postgres` and `POSTGRES_HOST=postgres` overrides on both `app_init` and `app` ensure the VPS contour boots against the real Postgres backend regardless of operator `.env` defaults; the migrations runner is idempotent, so re-issuing `up -d --build` re-runs `app_init` and exits 0 a second time without touching a head-already database.
+
 ## Useful reads when stuck
 - Workflow & recovery: this file.
 - Architecture, adapter axes, deployment shapes: `docs/ARCHITECTURE.md`.

@@ -162,7 +162,7 @@ pointers that will be filled when each packet is planned.
 | Slice | Files / artifacts |
 | --- | --- |
 | DEPLOY-1.1 decision + roadmap | `docs/decision-log.md` (D-060), `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` (new), `docs/assumptions.md` (A-22 closed / A-41 deferred / A-42 / A-43), `docs/assumption-audit.md`, this map, `docs/todo.md`, `docs/RUNBOOK.md`, `docs/OPERATIONALIZATION-ROADMAP.md` (see-also), `docs/product/BuildPlan.md` (target-state shape). Docs-only. → DEPLOY-1.1 (D-060). |
-| DEPLOY-1.2 VPS runtime shape | TBD when planned — Dockerfile + docker-compose VPS profile bringing the app and OP-1 / OP-4-shaped Postgres up on a clean Debian / Ubuntu LTS VPS. See `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` §4. |
+| DEPLOY-1.2 VPS runtime shape | `Dockerfile`, `.dockerignore`, new `app_init` + `app` services in `docker-compose.yml` gated by `profiles: ["vps"]` (single canonical bring-up: `docker compose --profile vps up -d --build`), new "VPS runtime shape (DEPLOY-1.2 / D-061)" subsection in `docs/RUNBOOK.md`. App port loopback-only (`127.0.0.1:8000`) until DEPLOY-1.3. OP-1 migrations + OP-4 archive volume shape reused unchanged. No `src/` change. → DEPLOY-1.2 (D-061). |
 | DEPLOY-1.3 reverse-proxy + TLS | TBD when planned — pins the proxy / TLS terminator default; ACME automation. See `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` §4. |
 | DEPLOY-1.4 installer / upgrade script | TBD when planned — operator-facing idempotent install/upgrade script; configuration-versioning seam and documented upgrade path mitigation (D-060). See `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` §4. |
 | DEPLOY-1.5 Telegram webhook automation | TBD when planned — webhook registration against the public DNS contour. See `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` §4. |
