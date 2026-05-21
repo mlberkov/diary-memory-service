@@ -406,6 +406,257 @@ The user can export their raw `SourceMessage` data on demand in JSON (stable fie
 
 Per-host delivery channels (Telegram file reply, HTTP download endpoint, host-app screen) and the request shape are bracketed as A-39. The implementation lands in its own packet.
 
+## Self-hosted VPS reference shape (DEPLOY-1 / D-060)
+D-060 (DEPLOY-1.1) establishes the self-hosted VPS + Telegram contour as the first implemented reference deployment shape, for a single-community pilot. Implementation lands in the DEPLOY-1.x follow-up packets; this section names the **invariants** an operator can rely on for the DEPLOY-1 shape regardless of which DEPLOY-1.x packet ultimately wires it.
+
+- **OS family:** Debian / Ubuntu LTS.
+- **Tenancy:** single-community / single-tenant default for the first pilot.
+- **Reachability:** public DNS + HTTPS required (not optional). Plain-HTTP pilots are not a DEPLOY-1 shape.
+- **Raw-data durability:** off-box backup destination required (S3-compatible or equivalent). A local-only backup is not a sufficient DEPLOY-1 contour — the off-box sink wires the OP-4 WAL + base-backup primitives ("Raw-data durability and recovery" above) to off-box storage.
+- **Operator model:** an operator-facing, idempotent install/upgrade script is the canonical bootstrap path. It brings a clean VPS from zero to a working deployment and upgrades it later with a clear status outcome.
+
+Tool-level details (which reverse proxy / TLS terminator, which backup tool, installer language and UX) are **current defaults** revisable in DEPLOY-1.x and not yet pinned. Operator-facing commands and the install script land alongside DEPLOY-1.4 / DEPLOY-1.5 / DEPLOY-1.6.
+
+See `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` for the invariants (mirrored), current defaults, and the DEPLOY-1.x packet sequence; the managed-cloud reference deployment (DEPLOY-2) is deferred there and reopens A-41 when pulled.
+
+### VPS runtime shape (DEPLOY-1.2 / D-061)
+
+DEPLOY-1.2 lands the first runnable VPS runtime contour: an app container plus a one-shot `app_init` migration runner that reuses OP-1 migrations and the OP-4 archive volume shape unchanged. No reverse proxy, no public TLS, no installer, and no off-box backup wiring yet — those land in DEPLOY-1.3..1.6. The two new compose services (`app_init` and `app`) are gated by `profiles: ["vps"]`, so a bare `docker compose up` is unchanged from today (postgres + pg_archive_init only).
+
+The bounded runtime-shape validation uses the **single canonical `docker compose --profile vps` path**:
+
+```bash
+# Step 1 — operator env. OPENAI_API_KEY may stay empty for /health.
+cp .env.example .env
+
+# Step 2 — build the app image and bring up the vps profile.
+docker compose --profile vps up -d --build
+
+# Step 3 — confirm service states.
+docker compose --profile vps ps
+#   expected:
+#     postgres   running (healthy)
+#     app_init   exited (0)
+#     app        running
+
+# Step 4 — confirm migrations were applied.
+docker compose --profile vps logs app_init | grep -F \
+  "Postgres migrations applied to head."
+
+# Step 5 — confirm /health.
+curl -fsS http://127.0.0.1:8000/health
+#   expected (HTTP 200):
+#   {"status":"ok","version":"<pkg-version>","env":"local"}
+```
+
+Teardown: `docker compose --profile vps down` (without `-v` to preserve the Postgres / archive volumes).
+
+The app port is bound to `127.0.0.1` on the VPS host only. DEPLOY-1.3 (D-062) fronts the app with Caddy and adds the public DNS + HTTPS surface; the loopback publish is retained as an operator-only bypass-the-proxy inspection path. Off-box backup wiring lands in DEPLOY-1.6 — the archive volume `memory_rag_pg_archive` and the OP-4 base / WAL primitives are unchanged from OP-4. The compose-level `STORAGE_BACKEND=postgres` and `POSTGRES_HOST=postgres` overrides on both `app_init` and `app` ensure the VPS contour boots against the real Postgres backend regardless of operator `.env` defaults; the migrations runner is idempotent, so re-issuing `up -d --build` re-runs `app_init` and exits 0 a second time without touching a head-already database.
+
+### Reverse-proxy + TLS contour (DEPLOY-1.3 / D-062)
+
+DEPLOY-1.3 fronts the DEPLOY-1.2 `app` service with a Caddy reverse-proxy that terminates TLS and obtains / renews Let's Encrypt certificates automatically. The `caddy` service is gated by the same `profiles: ["vps"]` as `app_init` / `app`, so a bare `docker compose up` stays byte-equivalent to today (postgres + pg_archive_init only) and the single canonical bring-up path is unchanged: `docker compose --profile vps up -d --build`.
+
+Only two Caddy defaults are relied on: automatic HTTPS for the declared site (provisions + renews a certificate via ACME against `ACME_EMAIL`) and the automatic HTTP → HTTPS redirect for a site declared with an HTTPS host. **No HSTS, no security headers, no rate limits, no `tls internal` fallback** — any further hardening is out of scope for DEPLOY-1.3.
+
+**Operator pre-conditions for the public-TLS contour:**
+
+- A DNS A and/or AAAA record for `$PUBLIC_HOSTNAME` resolves to the VPS host.
+- Inbound TCP `80` and `443` are open on the VPS firewall (Caddy needs `:80` for the ACME HTTP-01 challenge and for the HTTP → HTTPS redirect, and `:443` for HTTPS itself).
+- `PUBLIC_HOSTNAME` and `ACME_EMAIL` are set in `.env`. **If either is empty or invalid, the public-TLS contour does not come up cleanly and there is no HTTP-only fallback path** — this is an intentional honest failure of the VPS public-TLS contour, not silent degradation.
+
+**Loopback `http://127.0.0.1:8000/health` is operator-only bypass-the-proxy inspection, not a packet-acceptance signal.** A successful loopback `/health` only means `app` itself is up; it does **not** mean the DEPLOY-1.3 public-TLS contour is healthy. The decisive public-contour evidence is the operator smoke below: `https://$PUBLIC_HOSTNAME/health` + HTTP → HTTPS redirect on `:80`.
+
+**Packet-closing local inspection (does not require real DNS or a real-VPS host):**
+
+```bash
+# 1. Operator env. PUBLIC_HOSTNAME and ACME_EMAIL must be set for the full
+#    --profile vps bring-up; the compose-config parse below uses whatever
+#    values .env contains.
+cp .env.example .env
+
+# 2. Compose-config parse — confirms the caddy service is declared, the
+#    .env knobs interpolate, ports 80:80 + 443:443 are mapped, and the
+#    Caddyfile + caddy_data + caddy_config mounts are present.
+docker compose --profile vps config
+
+# 3. Caddyfile syntactic validity, with operator-shaped sample values.
+docker run --rm \
+    -e PUBLIC_HOSTNAME=example.com \
+    -e ACME_EMAIL=ops@example.com \
+    -v "$PWD/configs/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+    caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
+#   expected: "Valid configuration" and exit 0.
+
+# 4. Bare-`up` byte-equivalence — confirms `caddy` is profile-gated and
+#    does not regress the DEPLOY-1.2 property that a bare `up` is
+#    unchanged from today.
+docker compose up -d
+docker compose ps
+#   expected: postgres (healthy) + pg_archive_init (exited 0) only —
+#   no app_init / app / caddy.
+docker compose down
+
+# 5. Operator-side convenience (NOT the closure signal): full vps bring-up
+#    + loopback inspection still works.
+docker compose --profile vps up -d --build
+docker compose --profile vps ps
+#   expected: postgres running (healthy), app_init exited (0),
+#             app running, caddy running.
+curl -fsS http://127.0.0.1:8000/health
+#   expected (HTTP 200): {"status":"ok","version":"<pkg-version>","env":"local"}
+#   This is operator-only bypass-the-proxy inspection, not closure evidence.
+```
+
+**Real-VPS operator smoke (the decisive public-contour evidence; NOT a packet-closing gate — clean-VPS pilot smoke is DEPLOY-1.7's responsibility):**
+
+Run from a host outside the VPS (laptop, separate cloud host, etc.), with `$PUBLIC_HOSTNAME` resolving to the VPS and inbound 80/443 open:
+
+```bash
+# Public HTTPS probe — terminates at Caddy on the VPS and reverse-proxies
+# to app:8000 over the compose network.
+curl -fsS -o /dev/null -w '%{http_code}\n' "https://$PUBLIC_HOSTNAME/health"
+#   expected: 200
+
+# HTTP -> HTTPS redirect — Caddy's automatic redirect for a site declared
+# with an HTTPS host.
+curl -sI "http://$PUBLIC_HOSTNAME/health"
+#   expected: HTTP/1.1 301 (or 308) with `Location: https://$PUBLIC_HOSTNAME/health`.
+
+# Caddy cert-obtained / TLS handshake-success evidence — read the logs
+# (the exact log-line shape is not pinned).
+docker compose --profile vps logs caddy
+```
+
+If either the public HTTPS probe or the HTTP → HTTPS redirect probe fails, the contour is **not** healthy regardless of what `curl http://127.0.0.1:8000/health` returns on the VPS itself.
+
+Teardown: `docker compose --profile vps down` (without `-v` — Caddy cert + ACME state lives in the `caddy_data` named volume, and `down -v` would force a fresh ACME issuance on the next bring-up, eventually hitting Let's Encrypt rate limits).
+
+### Installer / upgrade script (DEPLOY-1.4 / D-063)
+
+DEPLOY-1.4 wraps the DEPLOY-1.2 + DEPLOY-1.3 bring-up in an operator-facing, idempotent, non-interactive bash installer at `scripts/installer/deploy.sh`. The single canonical operator command becomes `./scripts/installer/deploy.sh` — the installer reads the operator-filled `.env`, preflights, runs the unchanged `docker compose --profile vps up -d --build`, probes the result honestly, and records its outcome in an installer-owned per-host state file. Re-running the installer on an already-installed VPS is non-destructive and idempotent.
+
+**Operator pre-conditions (mirror DEPLOY-1.2 / 1.3, plus the installer surface):**
+
+- Docker and the **Docker Compose v2 plugin** are installed on the host (the installer refuses if `docker compose version` exits non-zero — legacy `docker-compose` v1 is unsupported).
+- The repo is cloned to a working directory on the VPS — `Dockerfile`, `docker-compose.yml`, and `pyproject.toml` are co-located (the installer auto-`cd`s to that directory from any cwd).
+- `.env` exists at the repo root and has non-empty values for `POSTGRES_PASSWORD`, `PUBLIC_HOSTNAME`, and `ACME_EMAIL` — the three keys the `vps`-profile public-TLS contour requires per DEPLOY-1.3 / D-062. Empty values fail preflight; there is no degraded fallback path.
+- DNS for `$PUBLIC_HOSTNAME` resolves to the VPS host and inbound TCP 80 + 443 are open on the VPS firewall — same conditions as the DEPLOY-1.3 real-VPS operator smoke.
+
+**Configuration-versioning seam (the D-060 mitigation):**
+
+- The script carries an `INSTALLER_CONFIG_VERSION=1` constant.
+- The state file `.installer-state.json` next to the repo root carries the deployed view as `installer_config_version`. It is installer-owned — operators do not edit it. It is gitignored alongside its sibling failure marker `.installer-state.last_failure.json`.
+- On each run the script compares the two views:
+  - Equal → idempotent re-run; reapplies the canonical bring-up and refreshes `last_install_timestamp`.
+  - Deployed < script → applies the appropriate `migrate_v<old>_to_v<new>` helpers in order, then re-applies, then bumps the stored version. At v1 only `migrate_to_v1` exists (a no-op stamp on a fresh install).
+  - Deployed > script → **refused** with `deploy.upgrade.error deployed config v<N> is newer than this installer v1; upgrade the installer before re-running`; exits non-zero without invoking `docker compose up`; writes `.installer-state.last_failure.json`; leaves `.installer-state.json` byte-equivalent.
+- Future DEPLOY-1.x packets that swap or add a default (e.g., DEPLOY-1.6 pinning the backup-tool default) bump `INSTALLER_CONFIG_VERSION` and add a new `migrate_v<old>_to_v<new>` helper rather than rewriting the installer.
+
+**Honest status outcome — `loopback_health` is mandatory; `public_tls_probe` is best-effort.** Consistent with DEPLOY-1.3 / D-062, the installer never inflates the loopback `/health` success into a public-TLS claim:
+
+- After a successful `docker compose up`, the installer polls `http://127.0.0.1:8000/health` (bounded retry: 15 × 2 s = up to 30 s). A non-200 result fails the run, writes the failure marker, and exits non-zero. This loopback probe confirms `app` came up — it is **not** public-TLS closure evidence.
+- The installer then attempts `https://$PUBLIC_HOSTNAME/health` only when `PUBLIC_HOSTNAME` is set AND resolves on the host (a single `getent hosts` lookup). The outcome is recorded as one of `"ok"` / `"failed"` / `"skipped (PUBLIC_HOSTNAME unset)"` / `"skipped (hostname did not resolve)"`. A skipped or failed public-TLS probe does **not** fail the run — the decisive clean-VPS public-contour evidence remains DEPLOY-1.7's responsibility.
+
+**Subcommands:**
+
+```bash
+# Canonical operator command — install on a fresh host, idempotent re-run
+# on an installed host, runs migration helpers when the deployed config is
+# older than the installer.
+./scripts/installer/deploy.sh
+
+# Preflight only — reads inputs, writes nothing. Exits 0 if all
+# preconditions are satisfied; non-zero with the same `deploy.preflight.error
+# ...` diagnostic as the install path otherwise.
+./scripts/installer/deploy.sh --check
+
+# Print .installer-state.json, or "not installed (no .installer-state.json
+# at <repo>)" if absent. Exits 0.
+./scripts/installer/deploy.sh --status
+
+# Print INSTALLER_CONFIG_VERSION (the installer's view). Exits 0.
+./scripts/installer/deploy.sh --version
+
+# Print usage.
+./scripts/installer/deploy.sh --help
+```
+
+**Packet-closing local inspection (does not require a real VPS or real DNS):**
+
+```bash
+# 1. Syntactic validity.
+bash -n scripts/installer/deploy.sh
+#   expected: exit 0, no output.
+
+# 2. Subcommand smoke (no state writes).
+./scripts/installer/deploy.sh --version    # expected: "1"
+./scripts/installer/deploy.sh --help       # expected: usage block
+./scripts/installer/deploy.sh --status     # expected: "not installed (...)" on first run
+
+# 3. Preflight error path — missing .env. Writes neither state file.
+rm -f .env .installer-state.json .installer-state.last_failure.json
+./scripts/installer/deploy.sh --check
+#   expected (exit 1):
+#   deploy.preflight.error missing .env at <repo>/.env — copy .env.example ...
+
+# 4. Preflight error path — required keys empty. Writes neither state file.
+cp .env.example .env
+./scripts/installer/deploy.sh --check
+#   expected (exit 1):
+#   deploy.preflight.error .env is missing or empty for required keys:
+#     PUBLIC_HOSTNAME ACME_EMAIL — fill them ...
+
+# 5. Preflight ok path — three required keys filled. Writes nothing.
+sed -i 's/^PUBLIC_HOSTNAME=$/PUBLIC_HOSTNAME=example.com/; \
+        s/^ACME_EMAIL=$/ACME_EMAIL=ops@example.com/' .env
+./scripts/installer/deploy.sh --check
+#   expected (exit 0):
+#   deploy.preflight.ok installer_config_version=1 repo_root=<repo>
+
+# 6. Bare-up byte-equivalence — DEPLOY-1.4 does not regress DEPLOY-1.2 / 1.3.
+docker compose config --services | sort
+#   expected: pg_archive_init, postgres
+docker compose --profile vps config --services | sort
+#   expected: app, app_init, caddy, pg_archive_init, postgres
+
+# 7. Future-version refusal — does not invoke `docker compose up`.
+cat > .installer-state.json <<'JSON'
+{ "installer_config_version": 99,
+  "selected_defaults": { "reverse_proxy": "caddy", "installer_impl": "bash", "backup_tool": null },
+  "last_install_timestamp": "2099-01-01T00:00:00Z",
+  "last_outcome": "success",
+  "loopback_health": "ok", "public_tls_probe": "ok" }
+JSON
+./scripts/installer/deploy.sh
+#   expected (exit 1):
+#   deploy.upgrade.error deployed config v99 is newer than this installer
+#     v1; upgrade the installer before re-running
+#   .installer-state.last_failure.json is written; .installer-state.json is
+#   left byte-equivalent to the hand-edited input.
+rm -f .installer-state.json .installer-state.last_failure.json
+```
+
+**Real-VPS operator smoke (the decisive public-contour evidence; NOT a packet-closing gate — clean-VPS pilot smoke + the upgrade drill is DEPLOY-1.7's responsibility):**
+
+Run from the VPS itself, after the operator pre-conditions are satisfied:
+
+```bash
+./scripts/installer/deploy.sh
+#   expected (exit 0):
+#   deploy.install.ok upgraded v0->v1 loopback_health=ok public_tls_probe="ok"
+#   (or "already_at_v1 re-applied ..." on a second invocation)
+
+./scripts/installer/deploy.sh --status
+#   expected: .installer-state.json contents with
+#   "installer_config_version": 1, "last_outcome": "success",
+#   "loopback_health": "ok", "public_tls_probe": "ok".
+```
+
+The decisive public-contour evidence (HTTPS `/health` probe + HTTP → HTTPS redirect) remains as documented in the DEPLOY-1.3 subsection above — the installer wraps the bring-up; it does not redefine that closure evidence.
+
+**Teardown** is unchanged from DEPLOY-1.3: `docker compose --profile vps down` (without `-v`). `.installer-state.json` survives a teardown, so the next `./scripts/installer/deploy.sh` is an idempotent re-run, not a fresh install. To force a true fresh install, also remove `.installer-state.json` (this does not delete data — the Postgres / archive / Caddy named volumes still survive).
+
 ## Useful reads when stuck
 - Workflow & recovery: this file.
 - Architecture, adapter axes, deployment shapes: `docs/ARCHITECTURE.md`.

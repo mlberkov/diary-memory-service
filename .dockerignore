@@ -1,0 +1,36 @@
+# DEPLOY-1.2 (D-061) — keep the build context small and prevent operator
+# secrets / local caches from leaking into the image.
+
+.git
+.gitignore
+.gitattributes
+
+.venv
+.ruff_cache
+.mypy_cache
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+*.egg-info
+dist
+build
+
+data
+node_modules
+
+.env
+.env.*
+!.env.example
+
+.idea
+.vscode
+.DS_Store
+
+docs
+tests
+scripts/pg_backup
+scripts/pg_restore
+configs

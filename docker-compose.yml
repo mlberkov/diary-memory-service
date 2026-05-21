@@ -106,7 +106,92 @@ services:
       timeout: 5s
       retries: 30
 
+  # DEPLOY-1.2 / D-061 — one-shot: apply OP-1 schema migrations to head.
+  # Gated by the `vps` profile so a bare `docker compose up` is byte-equivalent
+  # to today (postgres + pg_archive_init only). Runs after `postgres` reports
+  # healthy; `app` waits for this service to exit 0 before starting. The
+  # migrations runner (`python -m memory_rag.storage.postgres.migrations_runner
+  # apply`) is idempotent — a database already at head is left untouched.
+  app_init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: memory_rag_app
+    container_name: memory_rag_app_init
+    profiles: ["vps"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      STORAGE_BACKEND: postgres
+    command:
+      ["python", "-m", "memory_rag.storage.postgres.migrations_runner", "apply"]
+    restart: "no"
+
+  # DEPLOY-1.2 / D-061 — FastAPI app behind uvicorn. Gated by the `vps`
+  # profile. The host port is bound to 127.0.0.1 only — public reachability
+  # + TLS land with DEPLOY-1.3 (reverse proxy / ACME). STORAGE_BACKEND and
+  # POSTGRES_HOST are set at the compose level so the VPS contour boots with
+  # the real Postgres backend (the canonical `_verify_pgvector` boot gate
+  # then succeeds once `app_init` has applied migration 0001's
+  # `CREATE EXTENSION vector`).
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: memory_rag_app
+    container_name: memory_rag_app
+    profiles: ["vps"]
+    depends_on:
+      app_init:
+        condition: service_completed_successfully
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      STORAGE_BACKEND: postgres
+    command:
+      ["uvicorn", "memory_rag.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+
+  # DEPLOY-1.3 / D-062 — public reverse-proxy + ACME automation in front of
+  # the DEPLOY-1.2 `app` service. Gated by the `vps` profile so a bare
+  # `docker compose up` stays byte-equivalent to today. Operator-facing
+  # knobs PUBLIC_HOSTNAME and ACME_EMAIL flow in from .env; with either
+  # empty / invalid the public-TLS contour does not come up cleanly and
+  # there is no HTTP-only fallback (see configs/caddy/Caddyfile).
+  #
+  # The `app` service above keeps its 127.0.0.1:8000:8000 loopback publish
+  # as an operator-only bypass-the-proxy inspection path on the VPS host —
+  # it is NOT a closure signal for the DEPLOY-1.3 public-TLS contour. The
+  # decisive evidence is `https://$PUBLIC_HOSTNAME/health` + the
+  # HTTP -> HTTPS redirect on :80, documented in
+  # docs/RUNBOOK.md "Reverse-proxy + TLS contour (DEPLOY-1.3 / D-062)".
+  caddy:
+    image: caddy:2-alpine
+    container_name: memory_rag_caddy
+    profiles: ["vps"]
+    depends_on:
+      app:
+        condition: service_started
+    environment:
+      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./configs/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+    restart: unless-stopped
+
 volumes:
   memory_rag_pg_data:
   memory_rag_pg_archive:
   memory_rag_pg_restore_data:
+  caddy_data:
+  caddy_config:

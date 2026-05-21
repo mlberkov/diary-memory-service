@@ -151,3 +151,21 @@ Stage 3 — every slice below is gated on the Stage-2 exit criteria (D-043).
 | 9.1 internal API/SDK | non-Telegram client surface (assumption A-21) |
 | 9.2 identity mapping | family / child mapping into TheyGrow identities |
 | 9.3 isolation audit | confirm no Telegram leakage outside the adapter (I-1) |
+
+## Deployment-shape rollout *(sequenced separately from the Phase/Stage axis)*
+Deployment-shape rollout is sequenced separately from Phase 0..9 and Stages 1..3:
+**DEPLOY-1** is the first implemented reference deployment shape (self-hosted
+VPS + Telegram, single-community pilot); **DEPLOY-2** is the deferred
+managed-cloud peer shape. The refinable packet sequence and dependencies live in
+`docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` (D-060); the rows below are placeholder
+pointers that will be filled when each packet is planned.
+| Slice | Files / artifacts |
+| --- | --- |
+| DEPLOY-1.1 decision + roadmap | `docs/decision-log.md` (D-060), `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` (new), `docs/assumptions.md` (A-22 closed / A-41 deferred / A-42 / A-43), `docs/assumption-audit.md`, this map, `docs/todo.md`, `docs/RUNBOOK.md`, `docs/OPERATIONALIZATION-ROADMAP.md` (see-also), `docs/product/BuildPlan.md` (target-state shape). Docs-only. → DEPLOY-1.1 (D-060). |
+| DEPLOY-1.2 VPS runtime shape | `Dockerfile`, `.dockerignore`, new `app_init` + `app` services in `docker-compose.yml` gated by `profiles: ["vps"]` (single canonical bring-up: `docker compose --profile vps up -d --build`), new "VPS runtime shape (DEPLOY-1.2 / D-061)" subsection in `docs/RUNBOOK.md`. App port loopback-only (`127.0.0.1:8000`) until DEPLOY-1.3. OP-1 migrations + OP-4 archive volume shape reused unchanged. No `src/` change. → DEPLOY-1.2 (D-061). |
+| DEPLOY-1.3 reverse-proxy + TLS | `configs/caddy/Caddyfile`, new `caddy` service in `docker-compose.yml` gated by `profiles: ["vps"]` (single canonical bring-up unchanged: `docker compose --profile vps up -d --build`), two new `.env.example` knobs (`PUBLIC_HOSTNAME`, `ACME_EMAIL`), new "Reverse-proxy + TLS contour (DEPLOY-1.3 / D-062)" subsection in `docs/RUNBOOK.md`. Pins Caddy as the proxy / TLS terminator default. Loopback `127.0.0.1:8000:8000` on `app` retained as operator-only inspection, not a closure signal. No `src/` change. → DEPLOY-1.3 (D-062). |
+| DEPLOY-1.4 installer / upgrade script | `scripts/installer/deploy.sh` (new; bash, non-interactive; carries `INSTALLER_CONFIG_VERSION=1` + `migrate_to_v1`), `.gitignore` entries for `.installer-state.json` and `.installer-state.last_failure.json` (installer-owned per-host state — the D-060 configuration-versioning seam), new "Installer / upgrade script (DEPLOY-1.4 / D-063)" subsection in `docs/RUNBOOK.md`. Pins **bash, non-interactive** as the §3 installer-implementation default. No `src/`, schema, migration, `docker-compose.yml`, or `.env.example` change. → DEPLOY-1.4 (D-063). |
+| DEPLOY-1.5 Telegram webhook automation | TBD when planned — webhook registration against the public DNS contour. See `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` §4. |
+| DEPLOY-1.6 off-box backup sink wiring | TBD when planned — wires OP-4 WAL / base-backup primitives to the off-box destination (S3-compatible or equivalent); pins the backup-tool default; may fold in logs-first observability for the first VPS contour (A-43). See `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` §4. |
+| DEPLOY-1.7 end-to-end smoke + drill | TBD when planned — clean-VPS → working-pilot smoke + upgrade drill exercising DEPLOY-1.2..1.6. Closes DEPLOY-1. See `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` §4. |
+| DEPLOY-2 managed-cloud reference deployment *(deferred)* | Deferred — managed-cloud peer shape. Resolves A-41. Gets its own roadmap doc when pulled. |
