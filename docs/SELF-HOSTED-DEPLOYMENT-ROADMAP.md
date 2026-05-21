@@ -12,7 +12,10 @@ ordered set of bounded follow-up packets, and records the deferred
 (D-061) — VPS runtime shape (Dockerfile + docker-compose `vps` profile;
 opt-in via `docker compose --profile vps up`). DEPLOY-1.3 landed (D-062) —
 reverse-proxy + TLS contour (Caddy + ACME automation, gated by the same
-`vps` profile). DEPLOY-1.4..1.x are not started.**
+`vps` profile). DEPLOY-1.4 landed (D-063) — installer / upgrade script
+(bash, non-interactive) at `scripts/installer/deploy.sh`, carrying the
+configuration-versioning seam (`INSTALLER_CONFIG_VERSION` + an
+installer-owned `.installer-state.json`). DEPLOY-1.5..1.x are not started.**
 
 This mirrors the D-042 / `docs/RENAMING-ROADMAP.md` and D-044 /
 `docs/OPERATIONALIZATION-ROADMAP.md` precedent: the decision entry (D-060)
@@ -63,14 +66,22 @@ as the revising packet's docs update explicitly naming the default it revises:
   D-062 from the candidate set Caddy / nginx / other ACME-capable proxy).
 - **Backup tool** — candidate set: restic / custom scripts around rclone /
   `pg_dump` / `pg_basebackup`. Pinned in the backup-sink packet (§4).
-- **Installer implementation** — bash vs Python CLI; interactive vs
-  non-interactive UX. Pinned in the installer packet (§4).
+- **Installer implementation** — **bash, non-interactive** (pinned in
+  DEPLOY-1.4 / D-063 from the candidate set bash / Python CLI;
+  interactive / non-interactive — the candidate set is preserved as the
+  source).
 
-**Default-stability mitigation.** The installer packet must design a
-configuration-versioning seam and a documented upgrade path so a later
-DEPLOY-1.x packet can swap any of the three defaults above without rewriting
-the installer. This is a packet-design constraint on the installer packet, not
-a deliverable of DEPLOY-1.1.
+**Default-stability mitigation (realized in DEPLOY-1.4 / D-063).** The
+installer carries an `INSTALLER_CONFIG_VERSION` constant in
+`scripts/installer/deploy.sh` paired with an installer-owned
+`.installer-state.json` next to the repo root (gitignored). The script
+compares the two views and applies named `migrate_v<old>_to_v<new>` helpers
+in order; a deployed config newer than the installer is refused without
+invoking `docker compose up`. Later DEPLOY-1.x packets that swap or add a
+default (proxy / backup tool / installer implementation) bump
+`INSTALLER_CONFIG_VERSION` and add a new helper rather than rewriting the
+installer. At DEPLOY-1.4 only `migrate_to_v1` exists (the v1 stamp written
+on a successful fresh install).
 
 ---
 
@@ -87,7 +98,7 @@ DEPLOY-1 invariants — A-22 updated by D-060".
 | **DEPLOY-1.1 — decision + roadmap** | This doc; D-060; `assumptions.md` (A-22 closed / A-41 deferred / A-42 / A-43); `execution-map.md`; `todo.md`; `RUNBOOK.md`; `OPERATIONALIZATION-ROADMAP.md` (see-also); `BuildPlan.md` (target-state shape). Docs-only. | **Landed (D-060).** |
 | **DEPLOY-1.2 — VPS runtime shape** | `Dockerfile` + a docker-compose `vps` profile (opt-in: `docker compose --profile vps up`) — `app_init` one-shot for OP-1 migrations + `app` running uvicorn behind FastAPI, both gated by `profiles: ["vps"]` — bringing the app and OP-1 / OP-4-shaped Postgres up on a clean Debian / Ubuntu LTS VPS. App port loopback-only until DEPLOY-1.3. No proxy, no installer wrapping yet. | **Landed (D-061).** |
 | **DEPLOY-1.3 — reverse-proxy + TLS contour** | A new `configs/caddy/Caddyfile` and a new `caddy` service in `docker-compose.yml` gated by `profiles: ["vps"]`, plus two new `.env.example` knobs (`PUBLIC_HOSTNAME`, `ACME_EMAIL`) and a new "Reverse-proxy + TLS contour (DEPLOY-1.3 / D-062)" subsection in `docs/RUNBOOK.md`. Pins **Caddy** as the §3 reverse-proxy / TLS terminator default. The DEPLOY-1.2 loopback `127.0.0.1:8000:8000` publish on `app` is retained as operator-only bypass-the-proxy inspection, not a closure signal. No `src/` change. | **Landed (D-062).** |
-| **DEPLOY-1.4 — installer / upgrade script** | Operator-facing, idempotent install/upgrade script bringing a clean VPS to a working deployment and upgrading it later with a clear status outcome. Pins the installer default and designs the configuration-versioning seam + documented upgrade path mitigation (§3). | To be planned. Depends on DEPLOY-1.2 and DEPLOY-1.3. |
+| **DEPLOY-1.4 — installer / upgrade script** | `scripts/installer/deploy.sh` — operator-facing, idempotent, non-interactive bash installer that wraps the canonical `docker compose --profile vps up -d --build` bring-up with preflight, a state-machine driven by `.installer-state.json` + `INSTALLER_CONFIG_VERSION` (the configuration-versioning seam realized here), and an honest status outcome that distinguishes the mandatory loopback `/health` probe from the best-effort public-TLS probe. Pins **bash, non-interactive** as the §3 installer-implementation default. Also adds `.installer-state.json` / `.installer-state.last_failure.json` `.gitignore` entries and a new `docs/RUNBOOK.md` "Installer / upgrade script (DEPLOY-1.4 / D-063)" subsection. No `src/` / schema / migration / `docker-compose.yml` change. | **Landed (D-063).** |
 | **DEPLOY-1.5 — Telegram webhook registration automation** | Operator-driven registration of the Telegram webhook against the public DNS contour established by DEPLOY-1.3, wired into the installer's status outcome. | To be planned. Depends on DEPLOY-1.3 and DEPLOY-1.4. |
 | **DEPLOY-1.6 — off-box backup sink wiring** | Operator-side wiring of the OP-4 WAL / base-backup primitives to the off-box destination required by §2 (S3-compatible or equivalent). Pins the backup-tool default. Re-uses OP-4 outputs; does not re-decide them. May fold in a logs-first observability scope for the first VPS contour — see A-43. | To be planned. Depends on DEPLOY-1.2. |
 | **DEPLOY-1.7 — end-to-end smoke + drill** | Clean-VPS → working-pilot smoke and a one-shot upgrade drill exercising DEPLOY-1.2..1.6. Closes DEPLOY-1. | To be planned. Depends on DEPLOY-1.2..1.6. |
