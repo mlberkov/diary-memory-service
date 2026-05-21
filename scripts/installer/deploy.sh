@@ -16,39 +16,56 @@
 #     NOT public-TLS closure evidence on its own; the decisive clean-VPS
 #     pilot smoke is DEPLOY-1.7's responsibility.
 #
+# DEPLOY-1.5 / D-064 extends the install path with best-effort Telegram
+# webhook auto-registration against the public-TLS contour and adds the
+# `--unregister-webhook` teardown subcommand. INSTALLER_CONFIG_VERSION bumps
+# 1 → 2 with a new `migrate_v1_to_v2` no-op stamp.
+#
 # Single canonical operator command: ./scripts/installer/deploy.sh
-# See docs/RUNBOOK.md "Installer / upgrade script (DEPLOY-1.4 / D-063)".
+# See docs/RUNBOOK.md "Installer / upgrade script (DEPLOY-1.4 / D-063)" and
+# "Telegram webhook registration (DEPLOY-1.5 / D-064)".
 
 set -eu
 
-INSTALLER_CONFIG_VERSION=1
+INSTALLER_CONFIG_VERSION=2
 
 STATE_FILE_NAME=".installer-state.json"
 FAILURE_FILE_NAME=".installer-state.last_failure.json"
 
-# Required keys for the vps-profile public-TLS contour (DEPLOY-1.3 / D-062).
-REQUIRED_ENV_KEYS="POSTGRES_PASSWORD PUBLIC_HOSTNAME ACME_EMAIL"
+# Required keys for the vps-profile public-TLS contour
+# (DEPLOY-1.3 / D-062) plus the Telegram pilot credentials the DEPLOY-1.5 /
+# D-064 webhook-registration path needs to call setWebhook.
+REQUIRED_ENV_KEYS="POSTGRES_PASSWORD PUBLIC_HOSTNAME ACME_EMAIL TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET"
 
 # Set later by resolve_repo_root.
 REPO_ROOT=""
 
 usage() {
   cat <<'USAGE'
-usage: deploy.sh [--check | --status | --version | --help]
+usage: deploy.sh [--check | --status | --version | --unregister-webhook | --help]
 
-  (none)      Install or upgrade depending on .installer-state.json state.
-              The canonical operator command. Non-interactive: reads .env;
-              runs `docker compose --profile vps up -d --build`; probes
-              loopback /health (mandatory) and public-TLS /health
-              (best-effort); writes .installer-state.json on success.
-  --check     Preflight only. Reads inputs, writes nothing. Exit 0 if all
-              preconditions are satisfied; non-zero with diagnostics otherwise.
-  --status    Print the current .installer-state.json (or "not installed"
-              if absent). Exits 0.
-  --version   Print INSTALLER_CONFIG_VERSION. Exits 0.
-  --help      Print this usage.
+  (none)                Install or upgrade depending on .installer-state.json
+                        state. The canonical operator command. Non-interactive:
+                        reads .env; runs
+                        `docker compose --profile vps up -d --build`; probes
+                        loopback /health (mandatory) and public-TLS /health
+                        (best-effort); registers the Telegram webhook against
+                        the public-TLS contour (best-effort, DEPLOY-1.5 /
+                        D-064); writes .installer-state.json on success.
+  --check               Preflight only. Reads inputs, writes nothing. Exit 0
+                        if all preconditions are satisfied; non-zero with
+                        diagnostics otherwise.
+  --status              Print the current .installer-state.json (or
+                        "not installed" if absent). Exits 0.
+  --version             Print INSTALLER_CONFIG_VERSION. Exits 0.
+  --unregister-webhook  Call Telegram deleteWebhook against the bot token in
+                        .env, then clear the webhook_registration block in
+                        .installer-state.json (DEPLOY-1.5 / D-064). Exits 0
+                        on success, non-zero on Telegram or filesystem error.
+  --help                Print this usage.
 
-Documented in docs/RUNBOOK.md "Installer / upgrade script (DEPLOY-1.4 / D-063)".
+Documented in docs/RUNBOOK.md "Installer / upgrade script (DEPLOY-1.4 / D-063)"
+and "Telegram webhook registration (DEPLOY-1.5 / D-064)".
 USAGE
 }
 
@@ -157,11 +174,44 @@ read_state_version() {
   ' "${path}"
 }
 
-# write_state_success <loopback> <public_tls>
+# Read a top-level scalar JSON string field from .installer-state.json.
+# Empty if absent, null, or the file is missing. Only matches single-line
+# `"key": "value"` rows — sufficient for the installer-owned shape this
+# script always emits.
+read_state_string() {
+  key="$1"
+  path=$(state_path)
+  [ -f "${path}" ] || return 0
+  awk -v k="${key}" '
+    {
+      pat = "\"" k "\"[[:space:]]*:[[:space:]]*\"[^\"]*\""
+      if (match($0, pat)) {
+        s = substr($0, RSTART, RLENGTH)
+        sub(/.*:[[:space:]]*"/, "", s)
+        sub(/"$/, "", s)
+        print s
+        exit
+      }
+    }
+  ' "${path}"
+}
+
+# write_state_success <loopback> <public_tls> <webhook_status> <webhook_url>
+#
+# <webhook_url> is the literal registered URL on a "registered (...)"
+# status and the empty string for every other status; the writer emits
+# JSON `null` in the empty case.
 write_state_success() {
   loopback="$1"
   public_tls="$2"
+  webhook_status="$3"
+  webhook_url="$4"
   ts=$(now_utc_iso)
+  if [ -z "${webhook_url}" ]; then
+    webhook_url_field="null"
+  else
+    webhook_url_field="\"${webhook_url}\""
+  fi
   cat > "$(state_path)" <<EOF
 {
   "installer_config_version": ${INSTALLER_CONFIG_VERSION},
@@ -173,10 +223,51 @@ write_state_success() {
   "last_install_timestamp": "${ts}",
   "last_outcome": "success",
   "loopback_health": "${loopback}",
-  "public_tls_probe": "${public_tls}"
+  "public_tls_probe": "${public_tls}",
+  "webhook_registration": {
+    "status": "${webhook_status}",
+    "url": ${webhook_url_field},
+    "attempted_at": "${ts}"
+  }
 }
 EOF
   rm -f "$(failure_path)"
+}
+
+# write_state_unregistered — re-emit .installer-state.json with the
+# webhook_registration block set to the "unregistered" shape, preserving
+# the rest of the file. Reads existing fields via read_state_string;
+# missing fields are written as null / empty so the file stays
+# JSON-parseable.
+write_state_unregistered() {
+  path=$(state_path)
+  [ -f "${path}" ] || return 0
+  ts=$(now_utc_iso)
+  prev_ts=$(read_state_string last_install_timestamp)
+  loopback=$(read_state_string loopback_health)
+  public_tls=$(read_state_string public_tls_probe)
+  [ -z "${prev_ts}" ] && prev_ts="${ts}"
+  [ -z "${loopback}" ] && loopback="unknown"
+  [ -z "${public_tls}" ] && public_tls="unknown"
+  cat > "${path}" <<EOF
+{
+  "installer_config_version": ${INSTALLER_CONFIG_VERSION},
+  "selected_defaults": {
+    "reverse_proxy": "caddy",
+    "installer_impl": "bash",
+    "backup_tool": null
+  },
+  "last_install_timestamp": "${prev_ts}",
+  "last_outcome": "success",
+  "loopback_health": "${loopback}",
+  "public_tls_probe": "${public_tls}",
+  "webhook_registration": {
+    "status": "unregistered",
+    "url": null,
+    "attempted_at": "${ts}"
+  }
+}
+EOF
 }
 
 # write_failure <phase> <reason>
@@ -205,6 +296,14 @@ migrate_to_v1() {
   return 0
 }
 
+# DEPLOY-1.5 / D-064 — v1 → v2 stamp. No-op: the new state-file shape (with
+# the `webhook_registration` block) is materialized by the next
+# `write_state_success` call. This helper exists so the appended-chain
+# contract from D-063 is observable in the script.
+migrate_v1_to_v2() {
+  return 0
+}
+
 # run_migrations <deployed_version>
 run_migrations() {
   deployed="$1"
@@ -217,7 +316,10 @@ run_migrations() {
   if [ "${deployed}" -lt 1 ]; then
     migrate_to_v1
   fi
-  # When DEPLOY-1.x packets add migrate_v1_to_v2 etc., extend this chain.
+  if [ "${deployed}" -lt 2 ]; then
+    migrate_v1_to_v2
+  fi
+  # When DEPLOY-1.x packets add migrate_v2_to_v3 etc., extend this chain.
 }
 
 bring_up_vps_profile() {
@@ -257,6 +359,49 @@ probe_public_tls() {
   else
     printf 'failed'
   fi
+}
+
+# DEPLOY-1.5 / D-064 — register the Telegram webhook against the public-TLS
+# contour. Returns one of:
+#   "registered (https://<host>/telegram/webhook)"
+#   "skipped (public_tls_probe=<value>)"
+#   "failed (<short reason ≤200 chars>)"
+# Bounded retry: 3 attempts × 2 s = up to 6 s budget. Best-effort — never
+# fails the run on its own (mirrors public_tls_probe semantics). Telegram
+# Bot API setWebhook is idempotent — a repeated call overwrites the prior
+# URL and secret.
+register_telegram_webhook() {
+  public_tls="$1"
+  if [ "${public_tls}" != "ok" ]; then
+    printf 'skipped (public_tls_probe=%s)' "${public_tls}"
+    return 0
+  fi
+  token=$(read_env_value TELEGRAM_BOT_TOKEN)
+  secret=$(read_env_value TELEGRAM_WEBHOOK_SECRET)
+  host=$(read_env_value PUBLIC_HOSTNAME)
+  url="https://${host}/telegram/webhook"
+  body=""
+  i=0
+  while [ "${i}" -lt 3 ]; do
+    body=$(curl -fsS \
+      --data-urlencode "url=${url}" \
+      --data-urlencode "secret_token=${secret}" \
+      "https://api.telegram.org/bot${token}/setWebhook" 2>/dev/null) || body=""
+    case "${body}" in
+      *'"ok":true'*)
+        printf 'registered (%s)' "${url}"
+        return 0
+        ;;
+    esac
+    i=$((i + 1))
+    [ "${i}" -lt 3 ] && sleep 2
+  done
+  reason=$(printf '%s' "${body}" | tr -d '\n' | cut -c1-200)
+  if [ -z "${reason}" ]; then
+    reason="setWebhook did not return ok:true within the 6s budget"
+  fi
+  printf 'failed (%s)' "${reason}"
+  return 0
 }
 
 cmd_version() {
@@ -320,13 +465,50 @@ cmd_install() {
     exit 1
   fi
 
-  write_state_success "${loop}" "${pub}"
+  webhook=$(register_telegram_webhook "${pub}")
+  webhook_url=""
+  case "${webhook}" in
+    registered\ \(*\))
+      webhook_url=${webhook#registered \(}
+      webhook_url=${webhook_url%\)}
+      ;;
+  esac
+
+  write_state_success "${loop}" "${pub}" "${webhook}" "${webhook_url}"
 
   if [ "${deployed}" -lt "${INSTALLER_CONFIG_VERSION}" ]; then
-    echo "deploy.install.ok upgraded v${deployed}->v${INSTALLER_CONFIG_VERSION} loopback_health=${loop} public_tls_probe=\"${pub}\""
+    echo "deploy.install.ok upgraded v${deployed}->v${INSTALLER_CONFIG_VERSION} loopback_health=${loop} public_tls_probe=\"${pub}\" webhook_registration=\"${webhook}\""
   else
-    echo "deploy.install.ok already_at_v${INSTALLER_CONFIG_VERSION} re-applied loopback_health=${loop} public_tls_probe=\"${pub}\""
+    echo "deploy.install.ok already_at_v${INSTALLER_CONFIG_VERSION} re-applied loopback_health=${loop} public_tls_probe=\"${pub}\" webhook_registration=\"${webhook}\""
   fi
+}
+
+cmd_unregister_webhook() {
+  resolve_repo_root
+  if [ ! -f "${REPO_ROOT}/.env" ]; then
+    echo "deploy.webhook.error missing .env at ${REPO_ROOT}/.env — fill TELEGRAM_BOT_TOKEN before unregistering" >&2
+    exit 1
+  fi
+  token=$(read_env_value TELEGRAM_BOT_TOKEN)
+  if [ -z "${token}" ]; then
+    echo "deploy.webhook.error TELEGRAM_BOT_TOKEN unset in .env — cannot call deleteWebhook" >&2
+    exit 1
+  fi
+  body=$(curl -fsS "https://api.telegram.org/bot${token}/deleteWebhook" 2>/dev/null) || body=""
+  case "${body}" in
+    *'"ok":true'*)
+      ;;
+    *)
+      reason=$(printf '%s' "${body}" | tr -d '\n' | cut -c1-200)
+      [ -z "${reason}" ] && reason="deleteWebhook did not return ok:true"
+      echo "deploy.webhook.error ${reason}" >&2
+      exit 1
+      ;;
+  esac
+  if [ -f "$(state_path)" ]; then
+    write_state_unregistered
+  fi
+  echo "deploy.webhook.unregistered ok"
 }
 
 # --- entry point ---------------------------------------------------------
@@ -335,10 +517,11 @@ if [ "$#" -eq 0 ]; then
   cmd_install
 else
   case "$1" in
-    --check)   cmd_check ;;
-    --status)  cmd_status ;;
-    --version) cmd_version ;;
-    -h|--help) cmd_help ;;
+    --check)               cmd_check ;;
+    --status)              cmd_status ;;
+    --version)             cmd_version ;;
+    --unregister-webhook)  cmd_unregister_webhook ;;
+    -h|--help)             cmd_help ;;
     *)
       echo "deploy.args.error unknown argument: $1" >&2
       usage >&2

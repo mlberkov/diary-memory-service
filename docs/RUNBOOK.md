@@ -590,8 +590,8 @@ bash -n scripts/installer/deploy.sh
 #   expected: exit 0, no output.
 
 # 2. Subcommand smoke (no state writes).
-./scripts/installer/deploy.sh --version    # expected: "1"
-./scripts/installer/deploy.sh --help       # expected: usage block
+./scripts/installer/deploy.sh --version    # expected: "2" (was "1" pre-DEPLOY-1.5 / D-064)
+./scripts/installer/deploy.sh --help       # expected: usage block (includes --unregister-webhook)
 ./scripts/installer/deploy.sh --status     # expected: "not installed (...)" on first run
 
 # 3. Preflight error path — missing .env. Writes neither state file.
@@ -605,16 +605,18 @@ cp .env.example .env
 ./scripts/installer/deploy.sh --check
 #   expected (exit 1):
 #   deploy.preflight.error .env is missing or empty for required keys:
-#     PUBLIC_HOSTNAME ACME_EMAIL — fill them ...
+#     PUBLIC_HOSTNAME ACME_EMAIL TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET — fill them ...
 
-# 5. Preflight ok path — three required keys filled. Writes nothing.
+# 5. Preflight ok path — all five required keys filled. Writes nothing.
 sed -i 's/^PUBLIC_HOSTNAME=$/PUBLIC_HOSTNAME=example.com/; \
-        s/^ACME_EMAIL=$/ACME_EMAIL=ops@example.com/' .env
+        s/^ACME_EMAIL=$/ACME_EMAIL=ops@example.com/; \
+        s/^TELEGRAM_BOT_TOKEN=$/TELEGRAM_BOT_TOKEN=placeholder-bot-token/; \
+        s/^TELEGRAM_WEBHOOK_SECRET=$/TELEGRAM_WEBHOOK_SECRET=placeholder-secret/' .env
 ./scripts/installer/deploy.sh --check
 #   expected (exit 0):
-#   deploy.preflight.ok installer_config_version=1 repo_root=<repo>
+#   deploy.preflight.ok installer_config_version=2 repo_root=<repo>
 
-# 6. Bare-up byte-equivalence — DEPLOY-1.4 does not regress DEPLOY-1.2 / 1.3.
+# 6. Bare-up byte-equivalence — DEPLOY-1.4 / 1.5 do not regress DEPLOY-1.2 / 1.3.
 docker compose config --services | sort
 #   expected: pg_archive_init, postgres
 docker compose --profile vps config --services | sort
@@ -626,12 +628,13 @@ cat > .installer-state.json <<'JSON'
   "selected_defaults": { "reverse_proxy": "caddy", "installer_impl": "bash", "backup_tool": null },
   "last_install_timestamp": "2099-01-01T00:00:00Z",
   "last_outcome": "success",
-  "loopback_health": "ok", "public_tls_probe": "ok" }
+  "loopback_health": "ok", "public_tls_probe": "ok",
+  "webhook_registration": { "status": "registered (https://example.com/telegram/webhook)", "url": "https://example.com/telegram/webhook", "attempted_at": "2099-01-01T00:00:00Z" } }
 JSON
 ./scripts/installer/deploy.sh
 #   expected (exit 1):
 #   deploy.upgrade.error deployed config v99 is newer than this installer
-#     v1; upgrade the installer before re-running
+#     v2; upgrade the installer before re-running
 #   .installer-state.last_failure.json is written; .installer-state.json is
 #   left byte-equivalent to the hand-edited input.
 rm -f .installer-state.json .installer-state.last_failure.json
@@ -639,23 +642,143 @@ rm -f .installer-state.json .installer-state.last_failure.json
 
 **Real-VPS operator smoke (the decisive public-contour evidence; NOT a packet-closing gate — clean-VPS pilot smoke + the upgrade drill is DEPLOY-1.7's responsibility):**
 
-Run from the VPS itself, after the operator pre-conditions are satisfied:
+Run from the VPS itself, after the operator pre-conditions are satisfied (now also including the two Telegram credential keys per DEPLOY-1.5 / D-064):
 
 ```bash
 ./scripts/installer/deploy.sh
 #   expected (exit 0):
-#   deploy.install.ok upgraded v0->v1 loopback_health=ok public_tls_probe="ok"
-#   (or "already_at_v1 re-applied ..." on a second invocation)
+#   deploy.install.ok upgraded v0->v2 loopback_health=ok public_tls_probe="ok"
+#     webhook_registration="registered (https://<host>/telegram/webhook)"
+#   (or "already_at_v2 re-applied ..." on a second invocation)
 
 ./scripts/installer/deploy.sh --status
 #   expected: .installer-state.json contents with
-#   "installer_config_version": 1, "last_outcome": "success",
-#   "loopback_health": "ok", "public_tls_probe": "ok".
+#   "installer_config_version": 2, "last_outcome": "success",
+#   "loopback_health": "ok", "public_tls_probe": "ok",
+#   "webhook_registration": { "status": "registered (...)", "url": "...", "attempted_at": "..." }.
 ```
 
 The decisive public-contour evidence (HTTPS `/health` probe + HTTP → HTTPS redirect) remains as documented in the DEPLOY-1.3 subsection above — the installer wraps the bring-up; it does not redefine that closure evidence.
 
 **Teardown** is unchanged from DEPLOY-1.3: `docker compose --profile vps down` (without `-v`). `.installer-state.json` survives a teardown, so the next `./scripts/installer/deploy.sh` is an idempotent re-run, not a fresh install. To force a true fresh install, also remove `.installer-state.json` (this does not delete data — the Postgres / archive / Caddy named volumes still survive).
+
+### Telegram webhook registration (DEPLOY-1.5 / D-064)
+
+DEPLOY-1.5 folds Telegram webhook registration into the canonical install flow and adds an `--unregister-webhook` teardown subcommand. The webhook is registered against the DEPLOY-1.3 public-TLS contour (`https://$PUBLIC_HOSTNAME/telegram/webhook`) using the operator-filled `TELEGRAM_WEBHOOK_SECRET`; the result is recorded honestly in `.installer-state.json` under a new `webhook_registration` block. `INSTALLER_CONFIG_VERSION` bumps `1 → 2`; existing v1 deployments advance via the no-op `migrate_v1_to_v2` stamp on the next install run.
+
+**Operator pre-conditions (extend DEPLOY-1.4's set):**
+
+- `.env` has non-empty values for `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` — both are now part of `REQUIRED_ENV_KEYS` and empty values fail preflight (same error shape as the existing three keys).
+- The operator generates `TELEGRAM_WEBHOOK_SECRET` out of band (e.g. `openssl rand -hex 32`) and writes it into `.env`. The installer reads `.env` and does not write it (D-063-confirmed UX).
+- The DEPLOY-1.3 public-TLS contour is reachable (`https://$PUBLIC_HOSTNAME/health` returns 200) — webhook registration depends on it.
+
+**Lifecycle (initial / rotation / teardown):**
+
+- **Initial registration.** `./scripts/installer/deploy.sh` runs `setWebhook` against `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook` with `url=https://${PUBLIC_HOSTNAME}/telegram/webhook` and `secret_token=${TELEGRAM_WEBHOOK_SECRET}` after the loopback + public-TLS probes succeed. Bounded retry: 3 attempts × 2 s = up to 6 s. The `webhook_registration` block in `.installer-state.json` records one of:
+  - `"registered (https://<host>/telegram/webhook)"` — Telegram returned `"ok":true`.
+  - `"skipped (public_tls_probe=<value>)"` — the upstream public-TLS probe was not `ok`, so webhook registration was not attempted.
+  - `"failed (<short reason ≤200 chars>)"` — Telegram returned a non-ok response or the 6 s budget expired. The reason field is the first 200 characters of the response body (or a synthetic timeout message).
+- **Rotation.** Re-run `./scripts/installer/deploy.sh`. Telegram's `setWebhook` is idempotent — a repeated call overwrites the prior URL and secret. To rotate the webhook secret: edit `TELEGRAM_WEBHOOK_SECRET` in `.env`, then re-run the installer; `docker compose --profile vps up -d --build` recreates the `app` container so the new secret takes effect on the receiving side at the same time.
+- **Teardown.** `./scripts/installer/deploy.sh --unregister-webhook` calls `deleteWebhook` against the bot token in `.env`. On `"ok":true` it clears the `webhook_registration` block in `.installer-state.json` (setting `status="unregistered"`, `url=null`, fresh `attempted_at`) and exits 0 with `deploy.webhook.unregistered ok`. On a Telegram non-ok response or filesystem error it exits non-zero and leaves the state file untouched. The clearing step is skipped when `.installer-state.json` is absent (the API call still runs).
+
+**Honest registration outcome.** Webhook registration is **best-effort** — a failure does not fail the install run on its own; `last_outcome="success"` still requires only the mandatory loopback `/health` to be `"ok"`. This mirrors the DEPLOY-1.4 honest-distinction contract for `public_tls_probe`. The three honest verdicts are surfaced separately in the state file and in the `deploy.install.ok ...` log line.
+
+**Packet-closing local inspection (does not require a real VPS, real DNS, or a real Telegram bot):**
+
+```bash
+# 1. Syntactic validity.
+bash -n scripts/installer/deploy.sh
+#   expected: exit 0, no output.
+
+# 2. Version + help reflect the bump.
+./scripts/installer/deploy.sh --version    # expected: "2"
+./scripts/installer/deploy.sh --help       # expected: usage block lists --unregister-webhook
+
+# 3. Preflight surfaces the two new keys.
+rm -f .env .installer-state.json .installer-state.last_failure.json
+cp .env.example .env
+./scripts/installer/deploy.sh --check
+#   expected (exit 1):
+#   deploy.preflight.error .env is missing or empty for required keys:
+#     POSTGRES_PASSWORD PUBLIC_HOSTNAME ACME_EMAIL TELEGRAM_BOT_TOKEN
+#     TELEGRAM_WEBHOOK_SECRET — fill them ...
+#   (POSTGRES_PASSWORD only appears here if .env.example's "postgres" default
+#   was overwritten with an empty value; the unmodified .env.example carries
+#   POSTGRES_PASSWORD=postgres, which passes preflight non-empty.)
+
+# 4. Preflight passes once all five keys are filled.
+sed -i 's/^POSTGRES_PASSWORD=postgres$/POSTGRES_PASSWORD=postgres-secret/; \
+        s/^PUBLIC_HOSTNAME=$/PUBLIC_HOSTNAME=example.com/; \
+        s/^ACME_EMAIL=$/ACME_EMAIL=ops@example.com/; \
+        s/^TELEGRAM_BOT_TOKEN=$/TELEGRAM_BOT_TOKEN=placeholder-bot-token/; \
+        s/^TELEGRAM_WEBHOOK_SECRET=$/TELEGRAM_WEBHOOK_SECRET=placeholder-secret/' .env
+./scripts/installer/deploy.sh --check
+#   expected (exit 0):
+#   deploy.preflight.ok installer_config_version=2 repo_root=<repo>
+
+# 5. --unregister-webhook refuses cleanly when credentials are absent.
+rm -f .env
+./scripts/installer/deploy.sh --unregister-webhook
+#   expected (exit 1):
+#   deploy.webhook.error missing .env at <repo>/.env — fill TELEGRAM_BOT_TOKEN before unregistering
+
+cp .env.example .env   # TELEGRAM_BOT_TOKEN is still empty in .env.example
+./scripts/installer/deploy.sh --unregister-webhook
+#   expected (exit 1):
+#   deploy.webhook.error TELEGRAM_BOT_TOKEN unset in .env — cannot call deleteWebhook
+
+rm -f .env
+
+# 6. Forward-version refusal at the v2 installer.
+cat > .installer-state.json <<'JSON'
+{ "installer_config_version": 99,
+  "selected_defaults": { "reverse_proxy": "caddy", "installer_impl": "bash", "backup_tool": null },
+  "last_install_timestamp": "2099-01-01T00:00:00Z",
+  "last_outcome": "success",
+  "loopback_health": "ok", "public_tls_probe": "ok",
+  "webhook_registration": { "status": "registered (https://example.com/telegram/webhook)", "url": "https://example.com/telegram/webhook", "attempted_at": "2099-01-01T00:00:00Z" } }
+JSON
+./scripts/installer/deploy.sh
+#   expected (exit 1):
+#   deploy.upgrade.error deployed config v99 is newer than this installer
+#     v2; upgrade the installer before re-running
+rm -f .installer-state.json .installer-state.last_failure.json
+
+# 7. Bare-up byte-equivalence preserved at the v2 installer.
+docker compose config --services | sort
+#   expected: pg_archive_init, postgres
+docker compose --profile vps config --services | sort
+#   expected: app, app_init, caddy, pg_archive_init, postgres
+```
+
+**Real-VPS operator smoke (NOT a packet-closing gate — clean-VPS pilot smoke + the upgrade drill is DEPLOY-1.7's responsibility):**
+
+Run from the VPS itself, after all five required keys are filled (with a real bot token + secret):
+
+```bash
+./scripts/installer/deploy.sh
+#   expected (exit 0):
+#   deploy.install.ok upgraded v0->v2 loopback_health=ok public_tls_probe="ok"
+#     webhook_registration="registered (https://<host>/telegram/webhook)"
+
+./scripts/installer/deploy.sh --status
+#   expected: .installer-state.json with
+#   "installer_config_version": 2, "last_outcome": "success",
+#   "loopback_health": "ok", "public_tls_probe": "ok",
+#   "webhook_registration": {
+#     "status": "registered (https://<host>/telegram/webhook)",
+#     "url": "https://<host>/telegram/webhook",
+#     "attempted_at": "<ISO>"
+#   }.
+
+./scripts/installer/deploy.sh --unregister-webhook
+#   expected (exit 0):
+#   deploy.webhook.unregistered ok
+#   (.installer-state.json now records webhook_registration.status="unregistered",
+#   url=null, attempted_at=<now>; Telegram getWebhookInfo returns an empty URL.)
+```
+
+A real Telegram update sent to `https://<host>/telegram/webhook` after the canonical install is then handled by the FastAPI receiver per D-019 / A-26 (the existing webhook secret comparison is fail-closed). The end-to-end round-trip is exercised by DEPLOY-1.7.
 
 ## Useful reads when stuck
 - Workflow & recovery: this file.
