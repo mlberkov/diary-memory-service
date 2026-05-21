@@ -13,7 +13,7 @@ Target-state shape (D-027) — bound here so future slices stay consistent, not 
 - Draft-by-default safety: explicit `/note`, `/ask`, `/drafts` commands; absence of command defaults to draft so no inbound message is silently discarded. The explicit `/draft` command was removed in D-030 — drafts are created only by the no-command default and recalled via `/drafts`.
 - Raw-data durability with a daily backup window (`03:00–05:00` target) and stronger-than-nightly recovery.
 - Raw export on demand in JSON or TXT.
-- Managed cloud as the default reference deployment shape, with self-hosted OSS and embedded (TheyGrow) as peer shapes.
+- Managed cloud, self-hosted OSS, and embedded (TheyGrow) are peer deployment shapes (D-026 / D-027 peer parity). **D-060 (DEPLOY-1.1) fixes the implementation order**: the self-hosted VPS contour ships first as **DEPLOY-1** (the first implemented reference deployment shape), and the managed-cloud reference deployment is the deferred second peer (**DEPLOY-2**, resolves A-41). Peer parity is preserved; only build order changes. The refinable sequence lives in `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md`.
 
 ## Build Strategy
 

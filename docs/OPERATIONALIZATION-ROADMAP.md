@@ -190,4 +190,11 @@ may start before then.
   Definitions of Done referenced above.
 - `docs/execution-map.md` — Phase 6 / 7 / 8 slice rows tagged with `OP-` IDs.
 - `docs/RENAMING-ROADMAP.md` — the structurally analogous D-042 roadmap doc.
+- `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` — the structurally analogous D-060
+  roadmap doc for **DEPLOY-1** (self-hosted VPS + Telegram, the first
+  implemented reference deployment shape) and the deferred DEPLOY-2
+  managed-cloud reference deployment. Deployment-shape rollout is sequenced
+  there, separately from the OP-1..OP-5 Stage-2 axis decomposed in this doc;
+  DEPLOY-1.6 (off-box backup sink wiring) reuses the OP-4 WAL / base-backup
+  primitives.
 - A-34, A-35, A-40 in `docs/assumptions.md` / `docs/assumption-audit.md`.

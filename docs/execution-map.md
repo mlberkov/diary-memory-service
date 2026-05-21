@@ -151,3 +151,21 @@ Stage 3 — every slice below is gated on the Stage-2 exit criteria (D-043).
 | 9.1 internal API/SDK | non-Telegram client surface (assumption A-21) |
 | 9.2 identity mapping | family / child mapping into TheyGrow identities |
 | 9.3 isolation audit | confirm no Telegram leakage outside the adapter (I-1) |
+
+## Deployment-shape rollout *(sequenced separately from the Phase/Stage axis)*
+Deployment-shape rollout is sequenced separately from Phase 0..9 and Stages 1..3:
+**DEPLOY-1** is the first implemented reference deployment shape (self-hosted
+VPS + Telegram, single-community pilot); **DEPLOY-2** is the deferred
+managed-cloud peer shape. The refinable packet sequence and dependencies live in
+`docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` (D-060); the rows below are placeholder
+pointers that will be filled when each packet is planned.
+| Slice | Files / artifacts |
+| --- | --- |
+| DEPLOY-1.1 decision + roadmap | `docs/decision-log.md` (D-060), `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` (new), `docs/assumptions.md` (A-22 closed / A-41 deferred / A-42 / A-43), `docs/assumption-audit.md`, this map, `docs/todo.md`, `docs/RUNBOOK.md`, `docs/OPERATIONALIZATION-ROADMAP.md` (see-also), `docs/product/BuildPlan.md` (target-state shape). Docs-only. → DEPLOY-1.1 (D-060). |
+| DEPLOY-1.2 VPS runtime shape | TBD when planned — Dockerfile + docker-compose VPS profile bringing the app and OP-1 / OP-4-shaped Postgres up on a clean Debian / Ubuntu LTS VPS. See `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` §4. |
+| DEPLOY-1.3 reverse-proxy + TLS | TBD when planned — pins the proxy / TLS terminator default; ACME automation. See `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` §4. |
+| DEPLOY-1.4 installer / upgrade script | TBD when planned — operator-facing idempotent install/upgrade script; configuration-versioning seam and documented upgrade path mitigation (D-060). See `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` §4. |
+| DEPLOY-1.5 Telegram webhook automation | TBD when planned — webhook registration against the public DNS contour. See `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` §4. |
+| DEPLOY-1.6 off-box backup sink wiring | TBD when planned — wires OP-4 WAL / base-backup primitives to the off-box destination (S3-compatible or equivalent); pins the backup-tool default; may fold in logs-first observability for the first VPS contour (A-43). See `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` §4. |
+| DEPLOY-1.7 end-to-end smoke + drill | TBD when planned — clean-VPS → working-pilot smoke + upgrade drill exercising DEPLOY-1.2..1.6. Closes DEPLOY-1. See `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` §4. |
+| DEPLOY-2 managed-cloud reference deployment *(deferred)* | Deferred — managed-cloud peer shape. Resolves A-41. Gets its own roadmap doc when pulled. |

@@ -406,6 +406,19 @@ The user can export their raw `SourceMessage` data on demand in JSON (stable fie
 
 Per-host delivery channels (Telegram file reply, HTTP download endpoint, host-app screen) and the request shape are bracketed as A-39. The implementation lands in its own packet.
 
+## Self-hosted VPS reference shape (DEPLOY-1 / D-060)
+D-060 (DEPLOY-1.1) establishes the self-hosted VPS + Telegram contour as the first implemented reference deployment shape, for a single-community pilot. Implementation lands in the DEPLOY-1.x follow-up packets; this section names the **invariants** an operator can rely on for the DEPLOY-1 shape regardless of which DEPLOY-1.x packet ultimately wires it.
+
+- **OS family:** Debian / Ubuntu LTS.
+- **Tenancy:** single-community / single-tenant default for the first pilot.
+- **Reachability:** public DNS + HTTPS required (not optional). Plain-HTTP pilots are not a DEPLOY-1 shape.
+- **Raw-data durability:** off-box backup destination required (S3-compatible or equivalent). A local-only backup is not a sufficient DEPLOY-1 contour — the off-box sink wires the OP-4 WAL + base-backup primitives ("Raw-data durability and recovery" above) to off-box storage.
+- **Operator model:** an operator-facing, idempotent install/upgrade script is the canonical bootstrap path. It brings a clean VPS from zero to a working deployment and upgrades it later with a clear status outcome.
+
+Tool-level details (which reverse proxy / TLS terminator, which backup tool, installer language and UX) are **current defaults** revisable in DEPLOY-1.x and not yet pinned. Operator-facing commands and the install script land alongside DEPLOY-1.4 / DEPLOY-1.5 / DEPLOY-1.6.
+
+See `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` for the invariants (mirrored), current defaults, and the DEPLOY-1.x packet sequence; the managed-cloud reference deployment (DEPLOY-2) is deferred there and reopens A-41 when pulled.
+
 ## Useful reads when stuck
 - Workflow & recovery: this file.
 - Architecture, adapter axes, deployment shapes: `docs/ARCHITECTURE.md`.
