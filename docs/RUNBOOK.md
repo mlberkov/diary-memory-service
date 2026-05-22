@@ -882,6 +882,56 @@ docker compose config --services | sort
 - `docker compose --profile backup up -d` starts both `pg_backup` and `pg_offbox_uploader`; after the next nightly cycle (or a manual `make backup-run`), `docker compose logs pg_offbox_uploader` shows the `pg_backup.offbox.begin → pg_backup.offbox.ok` sequence; the remote bucket contains `<prefix>/base/base-<ts>/...` and `<prefix>/wal/...`; `/archive/last_offbox.json` records `status=ok` with the same `timestamp` and `base_backup` as `/archive/last_success.json`.
 - Sink-failure additivity smoke: stopping the S3 endpoint mid-upload (or rotating in a bogus credential) yields `pg_backup.offbox.error stage=<base|wal> reason=<class> rc=<n>`; `/archive/last_success.json` is unchanged; `pg_backup.cycle.ok` is still the most recent cycle outcome in `docker compose logs pg_backup`; `/archive/last_offbox.json` records `status=error` with a categorized reason — no credential text appears in the log.
 
+### Local-only upgrade-drill preflight (DEPLOY-1.7-preflight / D-066)
+
+DEPLOY-1.7-preflight adds a local-only upgrade-drill harness at `scripts/installer/drill_upgrade_local.sh` that exercises the D-063 configuration-versioning seam (`INSTALLER_CONFIG_VERSION` + the `migrate_v<old>_to_v<new>` chain) against **real prior packet commits** via a sandboxed git worktree under `mktemp -d`. The harness de-risks the seam locally — it does **not** close DEPLOY-1.7 and DEPLOY-1 remains open. The decisive clean-VPS → working-pilot smoke + the real off-box-backup verification + the real Telegram webhook round-trip + the real public-DNS / ACME-issued cert path all stay DEPLOY-1.7's responsibility.
+
+**Operator pre-conditions:**
+
+- Dev host with Docker + Compose v2 + `git` + `mktemp` + `python3` on `PATH`.
+- The main repo is a working git checkout (the harness uses `git worktree add` against the main repo's `.git` directory).
+- The three prior packet commits are reachable in the local repo (`7cb96fa` — DEPLOY-1.4; `e435e1a` — DEPLOY-1.5; `0aef179` — DEPLOY-1.6). On a freshly-cloned shallow clone, `git fetch --unshallow` once.
+- **No** clean-working-tree requirement: the harness operates entirely inside its throwaway worktree and never modifies the main repo working tree.
+
+**How to run:**
+
+```sh
+./scripts/installer/drill_upgrade_local.sh
+```
+
+Single command, no flags. The harness:
+
+1. Resolves the main repo root via the same `Dockerfile + docker-compose.yml + pyproject.toml` co-located predicate that `scripts/installer/deploy.sh` uses (line 93 of deploy.sh).
+2. Creates a throwaway worktree at `$(mktemp -d -t deploy1-preflight-drill-XXXXXX)/repo` via `git worktree add --detach <path> HEAD` and prints its absolute path on stdout.
+3. Exports `COMPOSE_PROJECT_NAME=deploy1-preflight-drill` so named volumes survive across legs (the v1 → v2 → v3 chain advances against persisted Postgres + archive state) and the drill's Docker objects stay isolated from any operator compose project running against the main repo with the default project name.
+4. Runs three legs in order: leg 1 = `7cb96fa` (DEPLOY-1.4, `INSTALLER_CONFIG_VERSION=1`); leg 2 = `e435e1a` (DEPLOY-1.5, `INSTALLER_CONFIG_VERSION=2`); leg 3 = `0aef179` (DEPLOY-1.6, `INSTALLER_CONFIG_VERSION=3`). For each leg the harness `git checkout`s the commit inside the worktree, regenerates `.env` with benign values (non-resolvable `PUBLIC_HOSTNAME=deploy1-preflight.invalid`, placeholder Telegram credentials, unset `BACKUP_S3_*`), invokes the worktree-local `./scripts/installer/deploy.sh`, snapshots `.installer-state.json` + `.installer-state.last_failure.json` verbatim, captures the final `deploy.install.ok ...` line, and records the elapsed wall-clock.
+5. Skips `docker compose down` between legs — leaving services running mimics the real "upgrade an already-running install" operator path and lets the next leg's `docker compose --profile vps up -d --build` rebuild the changed image layers while reusing healthy volumes.
+6. After leg 3, `docker compose --profile vps down` (no `-v` — volumes survive for operator post-mortem).
+7. Assembles the evidence artifact at `docs/deploy1-drill/deploy1-upgrade-drill-<YYYYMMDD>-evidence.json` (UTC date) from the per-leg captures inside the worktree, via an embedded `python3` step.
+8. On success, the EXIT trap removes the worktree + tempdir. On failure / interrupt, it leaves both in place and prints the absolute path so the operator can inspect, then run `git -C <main-repo> worktree remove --force <path>` manually.
+
+**What the harness confirms locally:**
+
+- `installer_config_version` chain advance: `0 → 1 → 2 → 3` across the three legs, on real prior-version installer + runtime state (not hand-edited state files — per `[[feedback_real_prior_version_evidence]]`).
+- State-file shape transitions per leg (observed verbatim in the captured `state_file_after` snapshots in the evidence artifact): the v1 state file does not carry `webhook_registration` or `offbox_backup_probe`; the v2 state file carries `webhook_registration` but not `offbox_backup_probe`; the v3 state file carries both `offbox_backup_probe` and the `selected_defaults.backup_tool="rclone"` flip from `null`.
+- Migration helper ordering (`migrate_to_v1` → `migrate_v1_to_v2` → `migrate_v2_to_v3` fired in expected sequence) — inferred from the chain advance.
+
+**What the harness does NOT confirm (DEPLOY-1.7's responsibility):**
+
+- Real public DNS for `PUBLIC_HOSTNAME` + ACME-issued cert.
+- Real Telegram `setWebhook` → FastAPI receiver round-trip.
+- Real S3-compatible bucket reachability + `rclone sync` of `/archive/base` + `/archive/wal` artifacts.
+
+The probe verdicts the installer emits in this environment (`public_tls_probe`, `webhook_registration`, `offbox_backup_probe`) are captured **verbatim** under `observed_probes` per leg in the evidence artifact, and classified as `operator_dependent`. They are recorded as observations — the harness does not pre-assert their exact strings.
+
+**Caddy noise advisory.** The non-resolvable `*.invalid` `PUBLIC_HOSTNAME` deliberately fails the ACME-HTTP-01 challenge; Caddy retries indefinitely and emits errors to its log. This is the mechanism by which `probe_public_tls` returns a non-`ok` outcome and is one of the `operator_dependent` conditions the drill records, not a failure of the harness.
+
+**Where evidence lives.** The committed artifact is `docs/deploy1-drill/deploy1-upgrade-drill-<YYYYMMDD>-evidence.json` (UTC-dated; parallel to `docs/op4-drill/op4.3-<YYYYMMDD>-evidence.json`). Per-leg leg logs and verbatim state-file snapshots live inside the worktree at `<worktree>/.preflight-drill-logs/` and `<worktree>/.preflight-drill-evidence/` during the run; on success, they are removed with the worktree.
+
+**Cleanup model.** Docker volumes (under `COMPOSE_PROJECT_NAME=deploy1-preflight-drill`) are not removed automatically — the operator can run `docker compose --project-name deploy1-preflight-drill --profile vps down -v` to clean them, scoped to the drill's project name so any other compose project's state is untouched.
+
+**This harness de-risks the configuration-versioning seam locally — DEPLOY-1.7 remains the closure packet for DEPLOY-1.**
+
 ## Useful reads when stuck
 - Workflow & recovery: this file.
 - Architecture, adapter axes, deployment shapes: `docs/ARCHITECTURE.md`.
