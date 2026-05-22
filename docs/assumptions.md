@@ -60,7 +60,7 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 
 ## DEPLOY-1 self-hosted reference shape (opened by D-060)
 - **A-42. DEPLOY-1 invariants**: closed by D-060 — the DEPLOY-1 self-hosted VPS reference shape pins five invariants (OS family Debian / Ubuntu LTS; single-community / single-tenant default for the first pilot; public DNS + HTTPS required; off-box backup destination required, S3-compatible or equivalent — local-only does not qualify; operator-facing idempotent install/upgrade script). See `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` §2 for the mirrored invariant list and `docs/decision-log.md` D-060 for the authoritative statement.
-- **A-43. Observability scope for the first VPS contour**: open. D-060 names a logs-first observability scope with a forward seam to remote sinks for the first DEPLOY-1 contour, but the specific surface and tooling are not pinned. Required before / pinned by the DEPLOY-1.x packet that ships observability (see `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` §4).
+- **A-43. Observability scope for the first VPS contour**: open. D-060 names a logs-first observability scope with a forward seam to remote sinks for the first DEPLOY-1 contour, but the specific surface and tooling are not pinned. **DEPLOY-1.6 / D-065 did not fold it in** — the off-box backup sink reused the existing `pg_backup.*` log-prefix family already in `scripts/pg_backup/scheduler.sh` and `scripts/installer/deploy.sh`, so no new logging contract was forced. Required before / pinned by a later DEPLOY-1.x packet (not DEPLOY-1.6); see `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` §4.
 
 ---
 

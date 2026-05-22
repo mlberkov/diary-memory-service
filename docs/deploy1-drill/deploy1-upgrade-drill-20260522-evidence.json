@@ -1,0 +1,194 @@
+{
+  "drill": "DEPLOY-1.7-preflight \u2014 local-only upgrade-drill harness across real prior commits (D-066)",
+  "metadata": {
+    "drill_run_date": "20260522",
+    "environment": "local docker-compose dev host (git worktree under mktemp -d)",
+    "worktree_path": "/tmp/deploy1-preflight-drill-rUFWrz/repo",
+    "compose_project_name": "deploy1-preflight-drill",
+    "notes": "Local preflight evidence \u2014 DEPLOY-1.7 closure remains blocked on real-VPS / public-DNS / Telegram / real-S3 operator infrastructure. Procedure follows feedback_real_prior_version_evidence: real prior-version installs via git checkout, not hand-edited state files. The harness is inspection, not a closure gate (feedback_harness_is_inspection_not_gate). Probe verdicts are captured verbatim in observed_probes and classified as operator_dependent; the only asserted properties are per-leg exit_code == 0 and state_file_after.installer_config_version matching the expected integer."
+  },
+  "legs": [
+    {
+      "leg_number": 1,
+      "commit_sha": "7cb96fa",
+      "packet_label": "DEPLOY-1.4",
+      "expected_installer_config_version": 1,
+      "exit_code": 0,
+      "elapsed_seconds": 144,
+      "deploy_install_ok_line": "deploy.install.ok upgraded v0->v1 loopback_health=ok public_tls_probe=\"skipped (hostname did not resolve)\"",
+      "state_file_after": {
+        "installer_config_version": 1,
+        "selected_defaults": {
+          "reverse_proxy": "caddy",
+          "installer_impl": "bash",
+          "backup_tool": null
+        },
+        "last_install_timestamp": "2026-05-22T15:40:53Z",
+        "last_outcome": "success",
+        "loopback_health": "ok",
+        "public_tls_probe": "skipped (hostname did not resolve)"
+      },
+      "last_failure_after": null,
+      "observed_probes": {
+        "public_tls_probe": "skipped (hostname did not resolve)",
+        "webhook_registration": null,
+        "offbox_backup_probe": null,
+        "selected_defaults.backup_tool": null
+      }
+    },
+    {
+      "leg_number": 2,
+      "commit_sha": "e435e1a",
+      "packet_label": "DEPLOY-1.5",
+      "expected_installer_config_version": 2,
+      "exit_code": 0,
+      "elapsed_seconds": 51,
+      "deploy_install_ok_line": "deploy.install.ok upgraded v1->v2 loopback_health=ok public_tls_probe=\"skipped (hostname did not resolve)\" webhook_registration=\"skipped (public_tls_probe=skipped (hostname did not resolve))\"",
+      "state_file_after": {
+        "installer_config_version": 2,
+        "selected_defaults": {
+          "reverse_proxy": "caddy",
+          "installer_impl": "bash",
+          "backup_tool": null
+        },
+        "last_install_timestamp": "2026-05-22T15:41:44Z",
+        "last_outcome": "success",
+        "loopback_health": "ok",
+        "public_tls_probe": "skipped (hostname did not resolve)",
+        "webhook_registration": {
+          "status": "skipped (public_tls_probe=skipped (hostname did not resolve))",
+          "url": null,
+          "attempted_at": "2026-05-22T15:41:44Z"
+        }
+      },
+      "last_failure_after": null,
+      "observed_probes": {
+        "public_tls_probe": "skipped (hostname did not resolve)",
+        "webhook_registration": {
+          "status": "skipped (public_tls_probe=skipped (hostname did not resolve))",
+          "url": null,
+          "attempted_at": "2026-05-22T15:41:44Z"
+        },
+        "offbox_backup_probe": null,
+        "selected_defaults.backup_tool": null
+      }
+    },
+    {
+      "leg_number": 3,
+      "commit_sha": "0aef179",
+      "packet_label": "DEPLOY-1.6",
+      "expected_installer_config_version": 3,
+      "exit_code": 0,
+      "elapsed_seconds": 49,
+      "deploy_install_ok_line": "deploy.install.ok upgraded v2->v3 loopback_health=ok public_tls_probe=\"skipped (hostname did not resolve)\" webhook_registration=\"skipped (public_tls_probe=skipped (hostname did not resolve))\" offbox_backup_probe=\"skipped (BACKUP_S3_BUCKET unset)\"",
+      "state_file_after": {
+        "installer_config_version": 3,
+        "selected_defaults": {
+          "reverse_proxy": "caddy",
+          "installer_impl": "bash",
+          "backup_tool": "rclone"
+        },
+        "last_install_timestamp": "2026-05-22T15:42:33Z",
+        "last_outcome": "success",
+        "loopback_health": "ok",
+        "public_tls_probe": "skipped (hostname did not resolve)",
+        "offbox_backup_probe": "skipped (BACKUP_S3_BUCKET unset)",
+        "webhook_registration": {
+          "status": "skipped (public_tls_probe=skipped (hostname did not resolve))",
+          "url": null,
+          "attempted_at": "2026-05-22T15:42:33Z"
+        }
+      },
+      "last_failure_after": null,
+      "observed_probes": {
+        "public_tls_probe": "skipped (hostname did not resolve)",
+        "webhook_registration": {
+          "status": "skipped (public_tls_probe=skipped (hostname did not resolve))",
+          "url": null,
+          "attempted_at": "2026-05-22T15:42:33Z"
+        },
+        "offbox_backup_probe": "skipped (BACKUP_S3_BUCKET unset)",
+        "selected_defaults.backup_tool": "rclone"
+      }
+    }
+  ],
+  "locally_confirmed_signals": {
+    "installer_config_version_chain_advanced": true,
+    "state_file_shape_transitions": "Per-leg state_file_after snapshots are recorded verbatim; observe the appearance of the webhook_registration block at leg 2 and the appearance of the offbox_backup_probe field plus the flip of selected_defaults.backup_tool to \"rclone\" at leg 3 directly in the captured JSON.",
+    "migration_helpers_fired_in_order": true
+  },
+  "locally_skipped_signals": {
+    "public_tls_probe_per_leg": [
+      {
+        "leg": 1,
+        "verbatim": "skipped (hostname did not resolve)",
+        "classification": "operator_dependent"
+      },
+      {
+        "leg": 2,
+        "verbatim": "skipped (hostname did not resolve)",
+        "classification": "operator_dependent"
+      },
+      {
+        "leg": 3,
+        "verbatim": "skipped (hostname did not resolve)",
+        "classification": "operator_dependent"
+      }
+    ],
+    "webhook_registration_per_leg": [
+      {
+        "leg": 1,
+        "verbatim": null,
+        "classification": "operator_dependent"
+      },
+      {
+        "leg": 2,
+        "verbatim": {
+          "status": "skipped (public_tls_probe=skipped (hostname did not resolve))",
+          "url": null,
+          "attempted_at": "2026-05-22T15:41:44Z"
+        },
+        "classification": "operator_dependent"
+      },
+      {
+        "leg": 3,
+        "verbatim": {
+          "status": "skipped (public_tls_probe=skipped (hostname did not resolve))",
+          "url": null,
+          "attempted_at": "2026-05-22T15:42:33Z"
+        },
+        "classification": "operator_dependent"
+      }
+    ],
+    "offbox_backup_probe_per_leg": [
+      {
+        "leg": 1,
+        "verbatim": null,
+        "classification": "operator_dependent"
+      },
+      {
+        "leg": 2,
+        "verbatim": null,
+        "classification": "operator_dependent"
+      },
+      {
+        "leg": 3,
+        "verbatim": "skipped (BACKUP_S3_BUCKET unset)",
+        "classification": "operator_dependent"
+      }
+    ]
+  },
+  "out_of_scope_for_closure": [
+    "Clean-VPS public DNS + ACME-issued cert path (DEPLOY-1.7).",
+    "Real Telegram setWebhook \u2192 FastAPI receiver round-trip (DEPLOY-1.7).",
+    "Real S3-compatible bucket reachability + rclone sync of /archive/base + /archive/wal (DEPLOY-1.7).",
+    "v2 \u2192 v3 cross-version migration end-to-end against a real previously-installed v2 VPS (DEPLOY-1.7, per D-065 \u00a7\"Real-VPS operator smoke\")."
+  ],
+  "summary": {
+    "seam_exercised_locally": true,
+    "closes_deploy_1_7": false,
+    "deploy_1_7_status": "still open",
+    "deploy_1_status": "still open",
+    "verdict": "preflight ok"
+  }
+}

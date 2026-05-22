@@ -76,6 +76,36 @@ services:
       - ./scripts/pg_backup:/opt/pg_backup:ro
     restart: unless-stopped
 
+  # DEPLOY-1.6 / D-065 — opt-in off-box backup uploader. Started only with
+  # `docker compose --profile backup up -d`; a plain `up` leaves it down, and
+  # the `vps` profile (the installer's bring-up) does NOT start it. Polls the
+  # OP-4.2 `pg_backup` durable signal (`/archive/last_success.json`) and
+  # mirrors `/archive/base` + `/archive/wal` to the operator-supplied
+  # S3-compatible target via `rclone sync`. Best-effort and additive:
+  # `pg_backup.cycle.ok` semantics and the OP-4.2 durable signal are never
+  # affected by an uploader failure. The uploader writes only
+  # `/archive/last_offbox.json` under the archive volume — `/archive/base`,
+  # `/archive/wal`, and `/archive/last_success.json` are never written by
+  # this service (see scripts/pg_offbox_uploader/uploader.sh).
+  pg_offbox_uploader:
+    image: rclone/rclone:1.66
+    container_name: memory_rag_pg_offbox_uploader
+    profiles: ["backup"]
+    depends_on:
+      pg_backup:
+        condition: service_started
+    environment:
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_S3_PATH_PREFIX: ${BACKUP_S3_PATH_PREFIX:-archive}
+      BACKUP_S3_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:-}
+      BACKUP_S3_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:-}
+    entrypoint: ["sh", "/opt/pg_offbox_uploader/uploader.sh"]
+    volumes:
+      - memory_rag_pg_archive:/archive
+      - ./scripts/pg_offbox_uploader:/opt/pg_offbox_uploader:ro
+    restart: unless-stopped
+
   # OP-4.3 — opt-in recovered-cluster runner for restore drills and operator
   # restores (D-055). Started only with `docker compose --profile restore up`.
   # It runs the cluster that `scripts/pg_restore/restore.sh` prepared on the

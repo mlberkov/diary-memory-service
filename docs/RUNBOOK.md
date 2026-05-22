@@ -590,8 +590,8 @@ bash -n scripts/installer/deploy.sh
 #   expected: exit 0, no output.
 
 # 2. Subcommand smoke (no state writes).
-./scripts/installer/deploy.sh --version    # expected: "1"
-./scripts/installer/deploy.sh --help       # expected: usage block
+./scripts/installer/deploy.sh --version    # expected: "2" (was "1" pre-DEPLOY-1.5 / D-064)
+./scripts/installer/deploy.sh --help       # expected: usage block (includes --unregister-webhook)
 ./scripts/installer/deploy.sh --status     # expected: "not installed (...)" on first run
 
 # 3. Preflight error path — missing .env. Writes neither state file.
@@ -605,16 +605,18 @@ cp .env.example .env
 ./scripts/installer/deploy.sh --check
 #   expected (exit 1):
 #   deploy.preflight.error .env is missing or empty for required keys:
-#     PUBLIC_HOSTNAME ACME_EMAIL — fill them ...
+#     PUBLIC_HOSTNAME ACME_EMAIL TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET — fill them ...
 
-# 5. Preflight ok path — three required keys filled. Writes nothing.
+# 5. Preflight ok path — all five required keys filled. Writes nothing.
 sed -i 's/^PUBLIC_HOSTNAME=$/PUBLIC_HOSTNAME=example.com/; \
-        s/^ACME_EMAIL=$/ACME_EMAIL=ops@example.com/' .env
+        s/^ACME_EMAIL=$/ACME_EMAIL=ops@example.com/; \
+        s/^TELEGRAM_BOT_TOKEN=$/TELEGRAM_BOT_TOKEN=placeholder-bot-token/; \
+        s/^TELEGRAM_WEBHOOK_SECRET=$/TELEGRAM_WEBHOOK_SECRET=placeholder-secret/' .env
 ./scripts/installer/deploy.sh --check
 #   expected (exit 0):
-#   deploy.preflight.ok installer_config_version=1 repo_root=<repo>
+#   deploy.preflight.ok installer_config_version=2 repo_root=<repo>
 
-# 6. Bare-up byte-equivalence — DEPLOY-1.4 does not regress DEPLOY-1.2 / 1.3.
+# 6. Bare-up byte-equivalence — DEPLOY-1.4 / 1.5 do not regress DEPLOY-1.2 / 1.3.
 docker compose config --services | sort
 #   expected: pg_archive_init, postgres
 docker compose --profile vps config --services | sort
@@ -626,12 +628,13 @@ cat > .installer-state.json <<'JSON'
   "selected_defaults": { "reverse_proxy": "caddy", "installer_impl": "bash", "backup_tool": null },
   "last_install_timestamp": "2099-01-01T00:00:00Z",
   "last_outcome": "success",
-  "loopback_health": "ok", "public_tls_probe": "ok" }
+  "loopback_health": "ok", "public_tls_probe": "ok",
+  "webhook_registration": { "status": "registered (https://example.com/telegram/webhook)", "url": "https://example.com/telegram/webhook", "attempted_at": "2099-01-01T00:00:00Z" } }
 JSON
 ./scripts/installer/deploy.sh
 #   expected (exit 1):
 #   deploy.upgrade.error deployed config v99 is newer than this installer
-#     v1; upgrade the installer before re-running
+#     v2; upgrade the installer before re-running
 #   .installer-state.last_failure.json is written; .installer-state.json is
 #   left byte-equivalent to the hand-edited input.
 rm -f .installer-state.json .installer-state.last_failure.json
@@ -639,23 +642,295 @@ rm -f .installer-state.json .installer-state.last_failure.json
 
 **Real-VPS operator smoke (the decisive public-contour evidence; NOT a packet-closing gate — clean-VPS pilot smoke + the upgrade drill is DEPLOY-1.7's responsibility):**
 
-Run from the VPS itself, after the operator pre-conditions are satisfied:
+Run from the VPS itself, after the operator pre-conditions are satisfied (now also including the two Telegram credential keys per DEPLOY-1.5 / D-064):
 
 ```bash
 ./scripts/installer/deploy.sh
 #   expected (exit 0):
-#   deploy.install.ok upgraded v0->v1 loopback_health=ok public_tls_probe="ok"
-#   (or "already_at_v1 re-applied ..." on a second invocation)
+#   deploy.install.ok upgraded v0->v2 loopback_health=ok public_tls_probe="ok"
+#     webhook_registration="registered (https://<host>/telegram/webhook)"
+#   (or "already_at_v2 re-applied ..." on a second invocation)
 
 ./scripts/installer/deploy.sh --status
 #   expected: .installer-state.json contents with
-#   "installer_config_version": 1, "last_outcome": "success",
-#   "loopback_health": "ok", "public_tls_probe": "ok".
+#   "installer_config_version": 2, "last_outcome": "success",
+#   "loopback_health": "ok", "public_tls_probe": "ok",
+#   "webhook_registration": { "status": "registered (...)", "url": "...", "attempted_at": "..." }.
 ```
 
 The decisive public-contour evidence (HTTPS `/health` probe + HTTP → HTTPS redirect) remains as documented in the DEPLOY-1.3 subsection above — the installer wraps the bring-up; it does not redefine that closure evidence.
 
 **Teardown** is unchanged from DEPLOY-1.3: `docker compose --profile vps down` (without `-v`). `.installer-state.json` survives a teardown, so the next `./scripts/installer/deploy.sh` is an idempotent re-run, not a fresh install. To force a true fresh install, also remove `.installer-state.json` (this does not delete data — the Postgres / archive / Caddy named volumes still survive).
+
+### Telegram webhook registration (DEPLOY-1.5 / D-064)
+
+DEPLOY-1.5 folds Telegram webhook registration into the canonical install flow and adds an `--unregister-webhook` teardown subcommand. The webhook is registered against the DEPLOY-1.3 public-TLS contour (`https://$PUBLIC_HOSTNAME/telegram/webhook`) using the operator-filled `TELEGRAM_WEBHOOK_SECRET`; the result is recorded honestly in `.installer-state.json` under a new `webhook_registration` block. `INSTALLER_CONFIG_VERSION` bumps `1 → 2`; existing v1 deployments advance via the no-op `migrate_v1_to_v2` stamp on the next install run.
+
+**Operator pre-conditions (extend DEPLOY-1.4's set):**
+
+- `.env` has non-empty values for `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` — both are now part of `REQUIRED_ENV_KEYS` and empty values fail preflight (same error shape as the existing three keys).
+- The operator generates `TELEGRAM_WEBHOOK_SECRET` out of band (e.g. `openssl rand -hex 32`) and writes it into `.env`. The installer reads `.env` and does not write it (D-063-confirmed UX).
+- The DEPLOY-1.3 public-TLS contour is reachable (`https://$PUBLIC_HOSTNAME/health` returns 200) — webhook registration depends on it.
+
+**Lifecycle (initial / rotation / teardown):**
+
+- **Initial registration.** `./scripts/installer/deploy.sh` runs `setWebhook` against `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook` with `url=https://${PUBLIC_HOSTNAME}/telegram/webhook` and `secret_token=${TELEGRAM_WEBHOOK_SECRET}` after the loopback + public-TLS probes succeed. Bounded retry: 3 attempts × 2 s = up to 6 s. The `webhook_registration` block in `.installer-state.json` records one of:
+  - `"registered (https://<host>/telegram/webhook)"` — Telegram returned `"ok":true`.
+  - `"skipped (public_tls_probe=<value>)"` — the upstream public-TLS probe was not `ok`, so webhook registration was not attempted.
+  - `"failed (<short reason ≤200 chars>)"` — Telegram returned a non-ok response or the 6 s budget expired. The reason field is the first 200 characters of the response body (or a synthetic timeout message).
+- **Rotation.** Re-run `./scripts/installer/deploy.sh`. Telegram's `setWebhook` is idempotent — a repeated call overwrites the prior URL and secret. To rotate the webhook secret: edit `TELEGRAM_WEBHOOK_SECRET` in `.env`, then re-run the installer; `docker compose --profile vps up -d --build` recreates the `app` container so the new secret takes effect on the receiving side at the same time.
+- **Teardown.** `./scripts/installer/deploy.sh --unregister-webhook` calls `deleteWebhook` against the bot token in `.env`. On `"ok":true` it clears the `webhook_registration` block in `.installer-state.json` (setting `status="unregistered"`, `url=null`, fresh `attempted_at`) and exits 0 with `deploy.webhook.unregistered ok`. On a Telegram non-ok response or filesystem error it exits non-zero and leaves the state file untouched. The clearing step is skipped when `.installer-state.json` is absent (the API call still runs).
+
+**Honest registration outcome.** Webhook registration is **best-effort** — a failure does not fail the install run on its own; `last_outcome="success"` still requires only the mandatory loopback `/health` to be `"ok"`. This mirrors the DEPLOY-1.4 honest-distinction contract for `public_tls_probe`. The three honest verdicts are surfaced separately in the state file and in the `deploy.install.ok ...` log line.
+
+**Packet-closing local inspection (does not require a real VPS, real DNS, or a real Telegram bot):**
+
+```bash
+# 1. Syntactic validity.
+bash -n scripts/installer/deploy.sh
+#   expected: exit 0, no output.
+
+# 2. Version + help reflect the bump.
+./scripts/installer/deploy.sh --version    # expected: "2"
+./scripts/installer/deploy.sh --help       # expected: usage block lists --unregister-webhook
+
+# 3. Preflight surfaces the two new keys.
+rm -f .env .installer-state.json .installer-state.last_failure.json
+cp .env.example .env
+./scripts/installer/deploy.sh --check
+#   expected (exit 1):
+#   deploy.preflight.error .env is missing or empty for required keys:
+#     POSTGRES_PASSWORD PUBLIC_HOSTNAME ACME_EMAIL TELEGRAM_BOT_TOKEN
+#     TELEGRAM_WEBHOOK_SECRET — fill them ...
+#   (POSTGRES_PASSWORD only appears here if .env.example's "postgres" default
+#   was overwritten with an empty value; the unmodified .env.example carries
+#   POSTGRES_PASSWORD=postgres, which passes preflight non-empty.)
+
+# 4. Preflight passes once all five keys are filled.
+sed -i 's/^POSTGRES_PASSWORD=postgres$/POSTGRES_PASSWORD=postgres-secret/; \
+        s/^PUBLIC_HOSTNAME=$/PUBLIC_HOSTNAME=example.com/; \
+        s/^ACME_EMAIL=$/ACME_EMAIL=ops@example.com/; \
+        s/^TELEGRAM_BOT_TOKEN=$/TELEGRAM_BOT_TOKEN=placeholder-bot-token/; \
+        s/^TELEGRAM_WEBHOOK_SECRET=$/TELEGRAM_WEBHOOK_SECRET=placeholder-secret/' .env
+./scripts/installer/deploy.sh --check
+#   expected (exit 0):
+#   deploy.preflight.ok installer_config_version=2 repo_root=<repo>
+
+# 5. --unregister-webhook refuses cleanly when credentials are absent.
+rm -f .env
+./scripts/installer/deploy.sh --unregister-webhook
+#   expected (exit 1):
+#   deploy.webhook.error missing .env at <repo>/.env — fill TELEGRAM_BOT_TOKEN before unregistering
+
+cp .env.example .env   # TELEGRAM_BOT_TOKEN is still empty in .env.example
+./scripts/installer/deploy.sh --unregister-webhook
+#   expected (exit 1):
+#   deploy.webhook.error TELEGRAM_BOT_TOKEN unset in .env — cannot call deleteWebhook
+
+rm -f .env
+
+# 6. Forward-version refusal at the v2 installer.
+cat > .installer-state.json <<'JSON'
+{ "installer_config_version": 99,
+  "selected_defaults": { "reverse_proxy": "caddy", "installer_impl": "bash", "backup_tool": null },
+  "last_install_timestamp": "2099-01-01T00:00:00Z",
+  "last_outcome": "success",
+  "loopback_health": "ok", "public_tls_probe": "ok",
+  "webhook_registration": { "status": "registered (https://example.com/telegram/webhook)", "url": "https://example.com/telegram/webhook", "attempted_at": "2099-01-01T00:00:00Z" } }
+JSON
+./scripts/installer/deploy.sh
+#   expected (exit 1):
+#   deploy.upgrade.error deployed config v99 is newer than this installer
+#     v2; upgrade the installer before re-running
+rm -f .installer-state.json .installer-state.last_failure.json
+
+# 7. Bare-up byte-equivalence preserved at the v2 installer.
+docker compose config --services | sort
+#   expected: pg_archive_init, postgres
+docker compose --profile vps config --services | sort
+#   expected: app, app_init, caddy, pg_archive_init, postgres
+```
+
+**Real-VPS operator smoke (NOT a packet-closing gate — clean-VPS pilot smoke + the upgrade drill is DEPLOY-1.7's responsibility):**
+
+Run from the VPS itself, after all five required keys are filled (with a real bot token + secret):
+
+```bash
+./scripts/installer/deploy.sh
+#   expected (exit 0):
+#   deploy.install.ok upgraded v0->v2 loopback_health=ok public_tls_probe="ok"
+#     webhook_registration="registered (https://<host>/telegram/webhook)"
+
+./scripts/installer/deploy.sh --status
+#   expected: .installer-state.json with
+#   "installer_config_version": 2, "last_outcome": "success",
+#   "loopback_health": "ok", "public_tls_probe": "ok",
+#   "webhook_registration": {
+#     "status": "registered (https://<host>/telegram/webhook)",
+#     "url": "https://<host>/telegram/webhook",
+#     "attempted_at": "<ISO>"
+#   }.
+
+./scripts/installer/deploy.sh --unregister-webhook
+#   expected (exit 0):
+#   deploy.webhook.unregistered ok
+#   (.installer-state.json now records webhook_registration.status="unregistered",
+#   url=null, attempted_at=<now>; Telegram getWebhookInfo returns an empty URL.)
+```
+
+A real Telegram update sent to `https://<host>/telegram/webhook` after the canonical install is then handled by the FastAPI receiver per D-019 / A-26 (the existing webhook secret comparison is fail-closed). The end-to-end round-trip is exercised by DEPLOY-1.7.
+
+### Off-box backup sink (DEPLOY-1.6 / D-065)
+
+DEPLOY-1.6 wires the existing OP-4.2 `/archive/base` + `/archive/wal` artifacts to an operator-supplied S3-compatible destination via a new `pg_offbox_uploader` sidecar service running `rclone sync`. The DEPLOY-1 §2 invariant ("off-box backup destination required") is the closure signal for DEPLOY-1.7's clean-VPS pilot smoke; DEPLOY-1.6 wires the seam and surfaces honest probe / upload outcomes.
+
+**Operator pre-conditions (additive to the DEPLOY-1.4 / 1.5 pre-conditions):**
+
+- An S3-compatible bucket exists (AWS S3, Cloudflare R2, Backblaze B2, Wasabi, MinIO, …) and the operator has access-key credentials with object read / write on it.
+- `.env` carries the off-box knobs in the new "Off-box backup sink (DEPLOY-1.6 / D-065)" section (see `.env.example`):
+  - `BACKUP_S3_BUCKET` — target bucket name (required to enable off-box).
+  - `BACKUP_S3_ENDPOINT` — S3-compatible endpoint URL; leave blank for AWS S3 itself; set for R2 / B2 / Wasabi / MinIO.
+  - `BACKUP_S3_PATH_PREFIX` — object prefix; defaults to `archive` (artifacts land at `<prefix>/base/...` and `<prefix>/wal/...`).
+  - `BACKUP_S3_ACCESS_KEY_ID` / `BACKUP_S3_SECRET_ACCESS_KEY` — credentials.
+  All five knobs are **optional** — none join `REQUIRED_ENV_KEYS`. With them unset, both the installer probe and the uploader log `skipped (...)` outcomes and `pg_backup.cycle.ok` semantics are unaffected.
+
+**Installer probe (`offbox_backup_probe`).** The canonical `./scripts/installer/deploy.sh` (DEPLOY-1.4) runs an active off-box probe after the DEPLOY-1.5 webhook-registration step: a one-shot `timeout 6 docker run --rm -e RCLONE_CONFIG_OFFBOX_* rclone/rclone:1.66 lsd offbox:<bucket>` against the configured remote, preceded by a separate `timeout 60 docker pull -q rclone/rclone:1.66` step that runs only when `docker image inspect` reports the image absent. The probe is best-effort — a non-`ok` outcome never fails the install; `last_outcome="success"` still requires only the mandatory loopback `/health` to be `"ok"` (mirrors `public_tls_probe` / `webhook_registration` semantics). The outcome is recorded in `.installer-state.json` under `offbox_backup_probe` as one of:
+
+```
+"ok"                                          # bucket reachable, credentials accepted
+"skipped (BACKUP_S3_BUCKET unset)"            # operator opted out
+"skipped (BACKUP_S3_ACCESS_KEY_ID unset)"     # bucket set, credentials missing
+"skipped (BACKUP_S3_SECRET_ACCESS_KEY unset)" # bucket set, credentials missing
+"failed (<short reason ≤200 chars>)"          # rclone lsd did not return 0
+```
+
+…and surfaced in the final `deploy.install.ok ... offbox_backup_probe="..."` log line alongside `public_tls_probe` and `webhook_registration`. The first invocation pays up to the 60 s pull budget for the rclone image; subsequent invocations reuse the cached image and only spend the 6 s probe budget.
+
+**Off-box uploader lifecycle.** The `pg_offbox_uploader` service (image `rclone/rclone:1.66`, gated by `profiles: ["backup"]`) starts alongside the existing `pg_backup` sidecar when the operator runs:
+
+```sh
+docker compose --profile backup up -d
+#   memory_rag_pg_backup           (OP-4.2 nightly base-backup runner)
+#   memory_rag_pg_offbox_uploader  (DEPLOY-1.6 / D-065 off-box uploader)
+```
+
+The uploader is a long-running poll loop (polls `/archive/last_success.json` every 600 s). When it observes a previously-unseen cycle timestamp, it runs `rclone sync /archive/base remote:<bucket>/<prefix>/base` then `rclone sync /archive/wal remote:<bucket>/<prefix>/wal` and records the outcome in `/archive/last_offbox.json`. `rclone sync` is idempotent — already-present files at the remote are skipped, so a cold-start re-upload only transfers what has changed. The uploader **never writes** to `/archive/base`, `/archive/wal`, or `/archive/last_success.json` — only `/archive/last_offbox.json`. A sink failure does NOT degrade `pg_backup.cycle.ok` or the OP-4.2 durable signal at `/archive/last_success.json`.
+
+**Inspect what the uploader is doing.**
+
+```sh
+docker compose logs pg_offbox_uploader
+#   healthy cycle:
+#     pg_backup.offbox.start bucket=<…> endpoint=<…> prefix=archive poll_seconds=600
+#     pg_backup.offbox.begin base=base-2026-05-21T03:00:00Z ts=<…>
+#     pg_backup.offbox.ok base=base-2026-05-21T03:00:00Z
+#   missing credentials (logged once per state change, not once per poll):
+#     pg_backup.offbox.skipped reason=BACKUP_S3_BUCKET unset
+#     pg_backup.offbox.skipped reason=BACKUP_S3_ACCESS_KEY_ID unset
+#     pg_backup.offbox.skipped reason=BACKUP_S3_SECRET_ACCESS_KEY unset
+#   sink failure (categorized — never echoes credentials):
+#     pg_backup.offbox.error stage=<base|wal> reason=<auth_failed|network|remote_error|temporary|fatal> rc=<n>
+
+docker compose exec pg_backup cat /archive/last_offbox.json
+#   {
+#     "timestamp": "<UTC ISO matching last_success.json>",
+#     "base_backup": "base-2026-05-21T03:00:00Z",
+#     "status": "ok",
+#     "error": null
+#   }
+```
+
+**What to do when the sink probe says `failed (...)`.**
+
+1. Re-read the reason text on the `deploy.install.ok ... offbox_backup_probe="failed (...)"` log line — it is the first 200 characters of rclone's stderr. Common causes: bucket does not exist; credentials denied; endpoint URL typo; bucket region mismatch.
+2. Confirm the five `BACKUP_S3_*` knobs are filled correctly in `.env` — secrets are never auto-rotated by the installer (the installer reads `.env` and does not write it, per D-063).
+3. Re-run `./scripts/installer/deploy.sh` after the fix — the probe re-runs and the state file is rewritten with the new verdict.
+4. If the canonical install reported `offbox_backup_probe="ok"` but the uploader subsequently logs `pg_backup.offbox.error`, the most common cause is a credential rotation between the install and the next cycle. Update `.env`, then `docker compose --profile backup restart pg_offbox_uploader` to pick up the new values.
+
+**Packet-closing local inspection (no real S3 endpoint required).** Mirrors the DEPLOY-1.4 / 1.5 packet-closing blocks above; included here so an operator can verify the DEPLOY-1.6 seam shape on a dev host before pointing it at a real bucket.
+
+```sh
+./scripts/installer/deploy.sh --version
+#   expected (exit 0):
+#   3
+
+# Profile parity — pg_offbox_uploader must NOT appear under --profile vps
+# (the installer's bring-up) and must appear under --profile backup.
+docker compose --profile vps config --services | sort
+#   expected (exit 0):
+#   app app_init caddy pg_archive_init postgres
+docker compose --profile backup config --services | sort
+#   expected (exit 0):
+#   pg_archive_init pg_backup pg_offbox_uploader postgres
+
+# Bare-up byte-equivalence preserved.
+docker compose config --services | sort
+#   expected (exit 0):
+#   pg_archive_init postgres
+
+# Future-version refusal still works at v3.
+# 1) hand-edit .installer-state.json:installer_config_version to 99
+# 2) ./scripts/installer/deploy.sh
+#   expected (exit 1):
+#   deploy.upgrade.error deployed config v99 is newer than this installer v3 ...
+#   (.installer-state.last_failure.json written; .installer-state.json byte-equivalent to input)
+```
+
+**Real-VPS operator smoke (NOT a packet-closing gate; clean-VPS pilot smoke + the off-box-backup §2-invariant verification is DEPLOY-1.7's responsibility):**
+
+- From a clean Debian / Ubuntu LTS VPS with the DEPLOY-1.5 pre-conditions plus the five `BACKUP_S3_*` knobs filled against a reachable S3-compatible bucket: `./scripts/installer/deploy.sh` exits 0 with `deploy.install.ok ... offbox_backup_probe="ok"`; `--status` shows the v3 state file with `"selected_defaults.backup_tool": "rclone"` and `"offbox_backup_probe": "ok"`.
+- `docker compose --profile backup up -d` starts both `pg_backup` and `pg_offbox_uploader`; after the next nightly cycle (or a manual `make backup-run`), `docker compose logs pg_offbox_uploader` shows the `pg_backup.offbox.begin → pg_backup.offbox.ok` sequence; the remote bucket contains `<prefix>/base/base-<ts>/...` and `<prefix>/wal/...`; `/archive/last_offbox.json` records `status=ok` with the same `timestamp` and `base_backup` as `/archive/last_success.json`.
+- Sink-failure additivity smoke: stopping the S3 endpoint mid-upload (or rotating in a bogus credential) yields `pg_backup.offbox.error stage=<base|wal> reason=<class> rc=<n>`; `/archive/last_success.json` is unchanged; `pg_backup.cycle.ok` is still the most recent cycle outcome in `docker compose logs pg_backup`; `/archive/last_offbox.json` records `status=error` with a categorized reason — no credential text appears in the log.
+
+### Local-only upgrade-drill preflight (DEPLOY-1.7-preflight / D-066)
+
+DEPLOY-1.7-preflight adds a local-only upgrade-drill harness at `scripts/installer/drill_upgrade_local.sh` that exercises the D-063 configuration-versioning seam (`INSTALLER_CONFIG_VERSION` + the `migrate_v<old>_to_v<new>` chain) against **real prior packet commits** via a sandboxed git worktree under `mktemp -d`. The harness de-risks the seam locally — it does **not** close DEPLOY-1.7 and DEPLOY-1 remains open. The decisive clean-VPS → working-pilot smoke + the real off-box-backup verification + the real Telegram webhook round-trip + the real public-DNS / ACME-issued cert path all stay DEPLOY-1.7's responsibility.
+
+**Operator pre-conditions:**
+
+- Dev host with Docker + Compose v2 + `git` + `mktemp` + `python3` on `PATH`.
+- The main repo is a working git checkout (the harness uses `git worktree add` against the main repo's `.git` directory).
+- The three prior packet commits are reachable in the local repo (`7cb96fa` — DEPLOY-1.4; `e435e1a` — DEPLOY-1.5; `0aef179` — DEPLOY-1.6). On a freshly-cloned shallow clone, `git fetch --unshallow` once.
+- **No** clean-working-tree requirement: the harness operates entirely inside its throwaway worktree and never modifies the main repo working tree.
+
+**How to run:**
+
+```sh
+./scripts/installer/drill_upgrade_local.sh
+```
+
+Single command, no flags. The harness:
+
+1. Resolves the main repo root via the same `Dockerfile + docker-compose.yml + pyproject.toml` co-located predicate that `scripts/installer/deploy.sh` uses (line 93 of deploy.sh).
+2. Creates a throwaway worktree at `$(mktemp -d -t deploy1-preflight-drill-XXXXXX)/repo` via `git worktree add --detach <path> HEAD` and prints its absolute path on stdout.
+3. Exports `COMPOSE_PROJECT_NAME=deploy1-preflight-drill` so named volumes survive across legs (the v1 → v2 → v3 chain advances against persisted Postgres + archive state) and the drill's Docker objects stay isolated from any operator compose project running against the main repo with the default project name.
+4. Runs three legs in order: leg 1 = `7cb96fa` (DEPLOY-1.4, `INSTALLER_CONFIG_VERSION=1`); leg 2 = `e435e1a` (DEPLOY-1.5, `INSTALLER_CONFIG_VERSION=2`); leg 3 = `0aef179` (DEPLOY-1.6, `INSTALLER_CONFIG_VERSION=3`). For each leg the harness `git checkout`s the commit inside the worktree, regenerates `.env` with benign values (non-resolvable `PUBLIC_HOSTNAME=deploy1-preflight.invalid`, placeholder Telegram credentials, unset `BACKUP_S3_*`), invokes the worktree-local `./scripts/installer/deploy.sh`, snapshots `.installer-state.json` + `.installer-state.last_failure.json` verbatim, captures the final `deploy.install.ok ...` line, and records the elapsed wall-clock.
+5. Skips `docker compose down` between legs — leaving services running mimics the real "upgrade an already-running install" operator path and lets the next leg's `docker compose --profile vps up -d --build` rebuild the changed image layers while reusing healthy volumes.
+6. After leg 3, `docker compose --profile vps down` (no `-v` — volumes survive for operator post-mortem).
+7. Assembles the evidence artifact at `docs/deploy1-drill/deploy1-upgrade-drill-<YYYYMMDD>-evidence.json` (UTC date) from the per-leg captures inside the worktree, via an embedded `python3` step.
+8. On success, the EXIT trap removes the worktree + tempdir. On failure / interrupt, it leaves both in place and prints the absolute path so the operator can inspect, then run `git -C <main-repo> worktree remove --force <path>` manually.
+
+**What the harness confirms locally:**
+
+- `installer_config_version` chain advance: `0 → 1 → 2 → 3` across the three legs, on real prior-version installer + runtime state (not hand-edited state files — per `[[feedback_real_prior_version_evidence]]`).
+- State-file shape transitions per leg (observed verbatim in the captured `state_file_after` snapshots in the evidence artifact): the v1 state file does not carry `webhook_registration` or `offbox_backup_probe`; the v2 state file carries `webhook_registration` but not `offbox_backup_probe`; the v3 state file carries both `offbox_backup_probe` and the `selected_defaults.backup_tool="rclone"` flip from `null`.
+- Migration helper ordering (`migrate_to_v1` → `migrate_v1_to_v2` → `migrate_v2_to_v3` fired in expected sequence) — inferred from the chain advance.
+
+**What the harness does NOT confirm (DEPLOY-1.7's responsibility):**
+
+- Real public DNS for `PUBLIC_HOSTNAME` + ACME-issued cert.
+- Real Telegram `setWebhook` → FastAPI receiver round-trip.
+- Real S3-compatible bucket reachability + `rclone sync` of `/archive/base` + `/archive/wal` artifacts.
+
+The probe verdicts the installer emits in this environment (`public_tls_probe`, `webhook_registration`, `offbox_backup_probe`) are captured **verbatim** under `observed_probes` per leg in the evidence artifact, and classified as `operator_dependent`. They are recorded as observations — the harness does not pre-assert their exact strings.
+
+**Caddy noise advisory.** The non-resolvable `*.invalid` `PUBLIC_HOSTNAME` deliberately fails the ACME-HTTP-01 challenge; Caddy retries indefinitely and emits errors to its log. This is the mechanism by which `probe_public_tls` returns a non-`ok` outcome and is one of the `operator_dependent` conditions the drill records, not a failure of the harness.
+
+**Where evidence lives.** The committed artifact is `docs/deploy1-drill/deploy1-upgrade-drill-<YYYYMMDD>-evidence.json` (UTC-dated; parallel to `docs/op4-drill/op4.3-<YYYYMMDD>-evidence.json`). Per-leg leg logs and verbatim state-file snapshots live inside the worktree at `<worktree>/.preflight-drill-logs/` and `<worktree>/.preflight-drill-evidence/` during the run; on success, they are removed with the worktree.
+
+**Cleanup model.** Docker volumes (under `COMPOSE_PROJECT_NAME=deploy1-preflight-drill`) are not removed automatically — the operator can run `docker compose --project-name deploy1-preflight-drill --profile vps down -v` to clean them, scoped to the drill's project name so any other compose project's state is untouched.
+
+**This harness de-risks the configuration-versioning seam locally — DEPLOY-1.7 remains the closure packet for DEPLOY-1.**
 
 ## Useful reads when stuck
 - Workflow & recovery: this file.
