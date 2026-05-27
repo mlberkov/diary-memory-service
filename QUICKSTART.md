@@ -110,7 +110,7 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
   -d '{"update_id":4,"message":{"message_id":4,"date":1715300300,"chat":{"id":42},"from":{"id":7},"text":"/note not-a-date\nfoo"}}'
-# → text: "Mock /note needs an ISO date (YYYY-MM-DD) on the first line. Got: 'not-a-date'."
+# → text: "First line must be a date like 2026-05-09. Got: 'not-a-date'."
 ```
 
 #### Heuristic plain-text routing (`/note` / `/ask` optional)

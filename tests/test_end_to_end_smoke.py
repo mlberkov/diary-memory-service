@@ -150,10 +150,78 @@ def test_note_with_invalid_first_line_returns_invalid_input_and_persists_source(
     resp = _post(client, _update("/note not-a-date\nfoo", update_id=1))
 
     assert resp.status_code == 200
-    assert resp.json()["text"] == (
-        "Mock /note needs an ISO date (YYYY-MM-DD) on the first line. Got: 'not-a-date'."
-    )
+    text = resp.json()["text"]
+    assert text == "First line must be a date like 2026-05-09. Got: 'not-a-date'."
+    # D-070: the dev-leaking "Mock" label is no longer in the user-facing reply.
+    assert "Mock" not in text
     assert store.len_sources() == 1
+    assert store.len_notes() == 0
+    assert store.len_chunks() == 0
+
+
+def test_explicit_note_with_slash_separated_yyyy_first_is_normalized_and_saved() -> None:
+    # D-070: explicit /note path normalizes a six-form near-ISO whitelist
+    # to canonical YYYY-MM-DD before the strict parser runs.
+    client, store = _client_with_fresh_store()
+
+    resp = _post(client, _update("/note 2026/05/09\nfoo", update_id=1))
+
+    assert resp.status_code == 200
+    assert resp.json()["text"] == "Saved 1 event for 2026-05-09."
+    assert store.len_chunks() == 1
+
+
+def test_explicit_note_with_dd_first_uses_dd_mm_yyyy_convention_pin() -> None:
+    # D-070 convention pin: DD-first inputs are always interpreted as
+    # DD/MM/YYYY by intentional product convention. 05/09/2026 must
+    # therefore be saved as 2026-09-05 (5 September 2026), never as
+    # 2026-05-09 (9 May 2026). A future "let's allow MM/DD/YYYY too"
+    # change cannot land without flipping this red.
+    client, store = _client_with_fresh_store()
+
+    resp = _post(client, _update("/note 05/09/2026\nfoo", update_id=1))
+
+    assert resp.status_code == 200
+    assert resp.json()["text"] == "Saved 1 event for 2026-09-05."
+    assert store.len_chunks() == 1
+
+
+def test_explicit_note_with_dot_separated_date_is_normalized_and_saved() -> None:
+    client, store = _client_with_fresh_store()
+
+    resp = _post(client, _update("/note 09.05.2026\nfoo", update_id=1))
+
+    assert resp.status_code == 200
+    assert resp.json()["text"] == "Saved 1 event for 2026-05-09."
+    assert store.len_chunks() == 1
+
+
+def test_explicit_note_with_unpadded_date_is_rejected() -> None:
+    # D-070 whitelist is exact — unpadded forms (2026-5-9) remain rejected.
+    client, store = _client_with_fresh_store()
+
+    resp = _post(client, _update("/note 2026-5-9\nfoo", update_id=1))
+
+    assert resp.status_code == 200
+    assert resp.json()["text"] == "First line must be a date like 2026-05-09. Got: '2026-5-9'."
+    assert store.len_notes() == 0
+    assert store.len_chunks() == 0
+
+
+def test_heuristic_classifier_not_broadened_by_packet_2() -> None:
+    # Regression guardrail (NOT a contract assertion about the desired
+    # long-term shape of the heuristic): the legacy plain-text NOTE
+    # auto-route was not coupled to the D-070 whitelist. Plain text
+    # starting with 2026/05/09 still does not auto-promote to NOTE.
+    # The legacy heuristic itself is slated for separate cleanup; this
+    # test only proves Packet 2 did not enlarge its surface.
+    client, store = _client_with_fresh_store()
+
+    resp = _post(client, _update("2026/05/09\nfoo", update_id=1))
+
+    assert resp.status_code == 200
+    text = resp.json()["text"]
+    assert text.startswith("Stored as draft")
     assert store.len_notes() == 0
     assert store.len_chunks() == 0
 

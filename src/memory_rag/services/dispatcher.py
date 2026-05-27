@@ -31,9 +31,12 @@ rather than a 500.
 
 from __future__ import annotations
 
+import dataclasses
+
 from memory_rag.config import Settings
 from memory_rag.core.domain import AnswerResult, FallbackMode, IngestResult
 from memory_rag.core.domain.models import EventChunk
+from memory_rag.core.domain.parser import normalize_iso_date_token
 from memory_rag.core.export import ExportFormat
 from memory_rag.core.routing import DispatchResult, InboundMessage, RouteKind
 from memory_rag.logging import get_logger
@@ -45,8 +48,10 @@ log = get_logger(__name__)
 
 _REPLY_START = (
     "Welcome — diary mode. Use /note to record, /ask to query, /sources to see the chunks "
-    "behind your last answer, or /drafts to recall recent drafts. Plain text without a "
-    "command is stored as a draft so nothing is lost."
+    "behind your last answer, or /drafts to recall recent drafts. For /note, put a date on "
+    "the first line — 2026-05-09 is the recommended form; 2026/05/09, 2026.05.09, "
+    "09-05-2026, 09/05/2026, and 09.05.2026 also work (DD-first is read as DD/MM/YYYY). "
+    "Plain text without a command is stored as a draft so nothing is lost."
 )
 _REPLY_HELP = (
     "Commands: /start, /help, /note, /ask, /sources, /drafts, /export. Plain text "
@@ -74,12 +79,37 @@ _DRAFT_REPLY_HINT = (
 def _format_ingest_reply(result: IngestResult) -> str:
     if result.fallback is FallbackMode.INVALID_INPUT:
         got = result.invalid_first_line or ""
-        return f"Mock /note needs an ISO date (YYYY-MM-DD) on the first line. Got: '{got}'."
+        return f"First line must be a date like 2026-05-09. Got: '{got}'."
     assert result.note_date is not None
     if result.events_count == 0:
         return f"Saved {result.note_date.isoformat()} with no event lines."
     plural = "event" if result.events_count == 1 else "events"
     return f"Saved {result.events_count} {plural} for {result.note_date.isoformat()}."
+
+
+def _normalize_note_first_line(message: InboundMessage) -> InboundMessage:
+    """Rewrite the first non-empty line of an explicit ``/note`` payload to canonical ISO.
+
+    Used only on the explicit ``/note`` dispatch path (``is_heuristic=False``).
+    The non-empty-line rule must match :func:`parse_note`'s behavior so the
+    surface the user sees matches what the parser will then read.
+    """
+    payload = message.payload
+    if not payload:
+        return message
+    lines = payload.splitlines(keepends=True)
+    for idx, raw in enumerate(lines):
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        canonical = normalize_iso_date_token(stripped)
+        if canonical is None or canonical == stripped:
+            return message
+        leading_len = len(raw) - len(raw.lstrip())
+        trailing = raw[leading_len + len(stripped) :]
+        lines[idx] = raw[:leading_len] + canonical + trailing
+        return dataclasses.replace(message, payload="".join(lines))
+    return message
 
 
 def _format_draft_reply(result: IngestResult) -> str:
@@ -218,6 +248,8 @@ class Dispatcher:
         if route is RouteKind.HELP:
             return DispatchResult(reply_text=_REPLY_HELP, route=route)
         if route is RouteKind.NOTE:
+            if not is_heuristic:
+                message = _normalize_note_first_line(message)
             ingest = self._domain.ingest(message)
             reply = _format_ingest_reply(ingest)
             if is_heuristic:

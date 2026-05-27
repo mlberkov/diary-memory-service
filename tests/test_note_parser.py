@@ -7,6 +7,7 @@ from datetime import date
 import pytest
 
 from memory_rag.core.domain import parse_note
+from memory_rag.core.domain.parser import normalize_iso_date_token
 
 
 def test_parses_iso_date_and_event_lines() -> None:
@@ -47,3 +48,73 @@ def test_date_only_returns_no_events() -> None:
     assert parsed is not None
     assert parsed.note_date == date(2026, 5, 9)
     assert parsed.events == []
+
+
+# ---------------------------------------------------------------------------
+# normalize_iso_date_token — six-form near-ISO whitelist used by the explicit
+# /note dispatcher path. parse_note itself remains strict; these tests cover
+# only the additive helper.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "token",
+    ["2026-05-09", "2026/05/09", "2026.05.09", "09-05-2026", "09/05/2026", "09.05.2026"],
+)
+def test_normalize_accepts_six_whitelisted_forms(token: str) -> None:
+    assert normalize_iso_date_token(token) == "2026-05-09"
+
+
+@pytest.mark.parametrize("token", ["05-09-2026", "05/09/2026", "05.09.2026"])
+def test_normalize_dd_first_is_always_dd_mm_yyyy_by_product_convention(token: str) -> None:
+    # Convention pin: DD-first inputs are interpreted as DD/MM/YYYY regardless
+    # of whether the first two numeric groups are <= 12. 05/09/2026 always
+    # becomes 2026-09-05 (5 September 2026), never 2026-05-09 (9 May 2026).
+    assert normalize_iso_date_token(token) == "2026-09-05"
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "2026-5-9",
+        "2026/5/9",
+        "2026.5.9",
+        "9-5-2026",
+        "9/5/2026",
+        "9.5.2026",
+        "2026-05-9",
+        "9-05-2026",
+    ],
+)
+def test_normalize_rejects_unpadded_forms(token: str) -> None:
+    assert normalize_iso_date_token(token) is None
+
+
+@pytest.mark.parametrize("token", ["2026-05/09", "2026/05.09", "09.05-2026", "09-05/2026"])
+def test_normalize_rejects_mixed_separators(token: str) -> None:
+    assert normalize_iso_date_token(token) is None
+
+
+@pytest.mark.parametrize("token", ["May 9 2026", "9 May 2026", "today", "yesterday", "now"])
+def test_normalize_rejects_natural_language(token: str) -> None:
+    assert normalize_iso_date_token(token) is None
+
+
+@pytest.mark.parametrize("token", ["", "   ", "\n", "not-a-date"])
+def test_normalize_rejects_empty_or_junk(token: str) -> None:
+    assert normalize_iso_date_token(token) is None
+
+
+@pytest.mark.parametrize("token", ["2026-02-30", "30-02-2026", "2026-13-01", "32-01-2026"])
+def test_normalize_rejects_impossible_calendar_dates(token: str) -> None:
+    assert normalize_iso_date_token(token) is None
+
+
+def test_normalize_returns_none_for_non_string_input() -> None:
+    assert normalize_iso_date_token(None) is None
+    assert normalize_iso_date_token(20260509) is None
+
+
+def test_normalize_strips_surrounding_whitespace_before_matching() -> None:
+    assert normalize_iso_date_token("  2026-05-09  ") == "2026-05-09"
+    assert normalize_iso_date_token("\t09/05/2026\n") == "2026-05-09"
