@@ -130,7 +130,10 @@ def test_ask_with_no_match_returns_no_evidence_fallback() -> None:
     resp = _post(client, _update("/ask snowstorm", update_id=2, message_id=2))
 
     assert resp.status_code == 200
-    assert resp.json()["text"] == "No memories matched 'snowstorm'."
+    assert resp.json()["text"] == (
+        "Nothing in your saved notes matched 'snowstorm'. "
+        "Try rephrasing the question, or use words that appear in your notes."
+    )
     # Slice 3.5: NO_EVIDENCE still persists one Query row with zero hits.
     assert store.len_queries() == 1
     assert store.len_retrieval_hits() == 0
@@ -232,7 +235,10 @@ def test_ask_before_any_note_returns_no_evidence() -> None:
     resp = _post(client, _update("/ask anything", update_id=1))
 
     assert resp.status_code == 200
-    assert resp.json()["text"] == "No memories matched 'anything'."
+    assert resp.json()["text"] == (
+        "Nothing in your saved notes matched 'anything'. "
+        "Try rephrasing the question, or use words that appear in your notes."
+    )
 
 
 def test_dated_plain_text_is_ingested_as_note_via_heuristic() -> None:

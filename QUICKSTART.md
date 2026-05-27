@@ -103,7 +103,7 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
   -d '{"update_id":3,"message":{"message_id":3,"date":1715300200,"chat":{"id":42},"from":{"id":7},"text":"/ask snowstorm"}}'
-# → text: "No memories matched 'snowstorm'."
+# → text: "Nothing in your saved notes matched 'snowstorm'. Try rephrasing the question, or use words that appear in your notes."
 
 # 4. Non-ISO first line → INVALID_INPUT reply; raw SourceMessage is still recorded
 curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
@@ -238,7 +238,7 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
   -d '{"update_id":2,"message":{"message_id":2,"date":1715300100,"chat":{"id":42},"from":{"id":7},"text":"/ask book"}}'
-# → text: "No memories matched 'book'."
+# → text: "Nothing in your saved notes matched 'book'. Try rephrasing the question, or use words that appear in your notes."
 # (server log includes "retrieval.unavailable reason=... community_id=...")
 
 # Cleanup

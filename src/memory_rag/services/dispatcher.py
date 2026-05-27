@@ -123,6 +123,10 @@ _REPLY_PROVIDER_UNAVAILABLE = (
     "Couldn't generate an answer — chat provider is unavailable. Try again later."
 )
 _REPLY_PARSE_FAILURE = "Couldn't generate an answer — provider response was unparseable. Try again."
+_REPLY_NO_MATCHES_TEMPLATE = (
+    "Nothing in your saved notes matched '{query}'. "
+    "Try rephrasing the question, or use words that appear in your notes."
+)
 _REPLY_SOURCES_NONE = "No selected chunks available — ask a question with /ask first."
 
 
@@ -149,9 +153,11 @@ def _format_answer_reply(result: AnswerResult) -> str:
     explanatory trailer. The cited chunks are not in the default reply —
     ``/sources`` exposes them on demand.
 
-    ``NO_EVIDENCE`` has two distinct effective paths — empty retrieval
+    ``NO_EVIDENCE`` has two distinct effective paths — empty-evidence
     and LLM-marker — that must produce different surface text per R-6.
     The Dispatcher disambiguates on ``bool(result.evidence)``. The
+    empty-evidence reply names the empty-match outcome and offers two
+    short question-side nudges, staying neutral about cause. The
     LLM-marker reply deliberately does not surface the LLM's prose:
     "no_evidence" means there is no answer to render.
     """
@@ -182,7 +188,7 @@ def _format_answer_reply(result: AnswerResult) -> str:
                 f"Found possible matches but couldn't ground an answer for "
                 f"'{result.query_text}'. Try refining the question."
             )
-        return f"No memories matched '{result.query_text}'."
+        return _REPLY_NO_MATCHES_TEMPLATE.format(query=result.query_text)
 
     return _REPLY_UNKNOWN
 
