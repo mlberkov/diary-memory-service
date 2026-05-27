@@ -1,0 +1,103 @@
+{
+  "_template": true,
+  "drill": "DEPLOY-1.7b — v2 → v3 cross-version upgrade drill on a real previously-installed v2 VPS (D-068)",
+  "metadata": {
+    "capture_date": "<TO_FILL_BY_OPERATOR YYYYMMDD>",
+    "environment": "real previously-installed v2 VPS — Debian/Ubuntu LTS, installer originally run from commit e435e1a (DEPLOY-1.5, INSTALLER_CONFIG_VERSION=2); current branch is the live DEPLOY-1.6+ tip (INSTALLER_CONFIG_VERSION=3)",
+    "host_redacted": true,
+    "notes": "Live operator drill evidence for the v2 → v3 cross-version migration on a real previously-installed v2 VPS. Per the DEPLOY-1.7b redaction rule (RUNBOOK §\"v2 → v3 cross-version upgrade drill (DEPLOY-1.7b / D-068)\"), credential-bearing values (PUBLIC_HOSTNAME, BACKUP_S3_BUCKET, BACKUP_S3_ENDPOINT, BACKUP_S3_PATH_PREFIX, BACKUP_S3_ACCESS_KEY_ID, BACKUP_S3_SECRET_ACCESS_KEY, webhook URL token) are replaced by <REDACTED> placeholders or a _redacted: true flag; structural outcomes (status strings, log-line shapes, status transitions) are preserved verbatim. Operator action required before commit: (1) copy this file to docs/deploy1-drill/deploy1-cross-version-drill-<YYYYMMDD>-evidence.json (UTC-dated), (2) drop the top-level \"_template\": true flag, (3) replace every <TO_FILL_BY_OPERATOR> placeholder with the verbatim captured observation, (4) run the redaction grep checklist from the RUNBOOK subsection."
+  },
+  "pre_upgrade_state": {
+    "commit_sha_at_install": "e435e1a",
+    "packet_label_at_install": "DEPLOY-1.5",
+    "expected_installer_config_version": 2,
+    "installer_state_snapshot": {
+      "installer_config_version": 2,
+      "selected_defaults": {
+        "reverse_proxy": "caddy",
+        "installer_impl": "bash",
+        "backup_tool": null
+      },
+      "last_install_timestamp": "<TO_FILL_BY_OPERATOR — verbatim UTC ISO from the live v2 .installer-state.json>",
+      "last_outcome": "success",
+      "loopback_health": "<TO_FILL_BY_OPERATOR — verbatim from the live v2 .installer-state.json>",
+      "public_tls_probe": "<TO_FILL_BY_OPERATOR — verbatim from the live v2 .installer-state.json>",
+      "webhook_registration": {
+        "status": "<TO_FILL_BY_OPERATOR — verbatim from the live v2 .installer-state.json; if URL appears, replace with the redacted shape \"registered (https://<REDACTED>/telegram/webhook)\">",
+        "url_redacted": true,
+        "attempted_at": "<TO_FILL_BY_OPERATOR — verbatim UTC ISO from the live v2 .installer-state.json>"
+      }
+    }
+  },
+  "observed_migration": {
+    "branch_checked_out_for_upgrade": "<TO_FILL_BY_OPERATOR — current DEPLOY-1.6+ ref at INSTALLER_CONFIG_VERSION=3>",
+    "deploy_install_ok_line_shape": "deploy.install.ok upgraded v2->v3 loopback_health=<value> public_tls_probe=<value> webhook_registration=<value> offbox_backup_probe=<value>",
+    "deploy_install_ok_line_verbatim": "<TO_FILL_BY_OPERATOR — verbatim line emitted by scripts/installer/deploy.sh on the live VPS during the upgrade leg; redact any URL token>",
+    "migrate_v2_to_v3_fired": true,
+    "exit_code": 0
+  },
+  "post_upgrade_state": {
+    "expected_installer_config_version": 3,
+    "installer_state_snapshot": {
+      "installer_config_version": 3,
+      "selected_defaults": {
+        "reverse_proxy": "caddy",
+        "installer_impl": "bash",
+        "backup_tool": "rclone"
+      },
+      "last_install_timestamp": "<TO_FILL_BY_OPERATOR — verbatim UTC ISO from the post-upgrade .installer-state.json>",
+      "last_outcome": "success",
+      "loopback_health": "<TO_FILL_BY_OPERATOR — verbatim from the post-upgrade .installer-state.json>",
+      "public_tls_probe": "<TO_FILL_BY_OPERATOR — verbatim from the post-upgrade .installer-state.json>",
+      "offbox_backup_probe": "<TO_FILL_BY_OPERATOR — verbatim from the post-upgrade .installer-state.json>",
+      "webhook_registration": {
+        "status": "<TO_FILL_BY_OPERATOR — verbatim from the post-upgrade .installer-state.json; if URL appears, replace with the redacted shape \"registered (https://<REDACTED>/telegram/webhook)\">",
+        "url_redacted": true,
+        "attempted_at": "<TO_FILL_BY_OPERATOR — verbatim UTC ISO from the post-upgrade .installer-state.json>"
+      }
+    },
+    "reprobed_signals": {
+      "loopback_health": {
+        "source": "curl -sS http://127.0.0.1:8000/health (operator-only bypass-the-proxy inspection per RUNBOOK §\"VPS runtime shape (DEPLOY-1.2 / D-061)\")",
+        "observed_body": "<TO_FILL_BY_OPERATOR — verbatim JSON body {status, version, env}>"
+      },
+      "public_tls_probe": {
+        "source": "curl -sS https://<REDACTED PUBLIC_HOSTNAME>/health",
+        "observed_body": "<TO_FILL_BY_OPERATOR — verbatim JSON body {status, version, env}>"
+      },
+      "webhook_registration": {
+        "trigger": "/start sent via Telegram client",
+        "observed_log_line_shape": "telegram.webhook update_id=<id> route=start route_source=command confidence=n/a edit_seq=<int> lifecycle=<lifecycle> effective_path=<path>",
+        "observed_log_line_verbatim": "<TO_FILL_BY_OPERATOR — verbatim app-container log line>",
+        "http_observed": "<TO_FILL_BY_OPERATOR — verbatim access log e.g. POST /telegram/webhook 200>",
+        "observed_latency_seconds": "<TO_FILL_BY_OPERATOR — observed /start round-trip latency, e.g. ≈2–3>"
+      },
+      "offbox_backup_probe": {
+        "source": "one off-box cycle after the upgrade (wait for nightly or run a one-off make backup-run)",
+        "observed_log_lines": [
+          "<TO_FILL_BY_OPERATOR — verbatim pg_backup.offbox.begin base=<base_id> ts=<UTC ISO>>",
+          "<TO_FILL_BY_OPERATOR — verbatim pg_backup.offbox.ok base=<base_id>>"
+        ],
+        "last_offbox_json": {
+          "timestamp": "<TO_FILL_BY_OPERATOR — verbatim UTC ISO matching /archive/last_success.json>",
+          "base_backup": "<TO_FILL_BY_OPERATOR — verbatim base id>",
+          "status": "<TO_FILL_BY_OPERATOR — expected: ok>",
+          "error": null
+        }
+      }
+    }
+  },
+  "out_of_scope_for_this_packet": [
+    "Any src/ / scripts / docker-compose.yml / Caddyfile / schema / migration / tests/ change.",
+    "Three Phase-4 UX polish observations flagged in D-067 (/note first-line ISO-date strictness; /ask user-facing wording leaking chunk UUID + the phrase 'dense+sparse RRF'; no-memories-matched UX) — deferred to a separate post-DEPLOY-1 packet.",
+    "A-43 logs-first observability scope — pinned to a later DEPLOY-1.x packet.",
+    "Any pinning of new defaults or bump of INSTALLER_CONFIG_VERSION beyond 3."
+  ],
+  "summary": {
+    "v2_to_v3_migration_observed": "<TO_FILL_BY_OPERATOR — expected: true if installer_config_version flipped 2 → 3 and the deploy.install.ok upgraded v2->v3 line was emitted>",
+    "closes_deploy_1_7b": "<TO_FILL_BY_OPERATOR>",
+    "closes_deploy_1_7": "<TO_FILL_BY_OPERATOR>",
+    "closes_deploy_1": "<TO_FILL_BY_OPERATOR>",
+    "verdict": "<TO_FILL_BY_OPERATOR>"
+  }
+}

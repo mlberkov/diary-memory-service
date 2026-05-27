@@ -932,6 +932,130 @@ The probe verdicts the installer emits in this environment (`public_tls_probe`, 
 
 **This harness de-risks the configuration-versioning seam locally — DEPLOY-1.7 remains the closure packet for DEPLOY-1.**
 
+### Clean-VPS pilot smoke (DEPLOY-1.7a / D-067)
+
+DEPLOY-1.7a closes the clean-VPS → working-pilot smoke and the off-box backup §2-invariant verification halves of the DEPLOY-1.7 scope split (see D-067 and the `SELF-HOSTED-DEPLOYMENT-ROADMAP.md` §4 row split). Closure is by the committed evidence artifact at `docs/deploy1-drill/deploy1-pilot-smoke-<YYYYMMDD>-evidence.json` (UTC-dated; parallel to `docs/deploy1-drill/deploy1-upgrade-drill-<YYYYMMDD>-evidence.json` from D-066), exercising **real public DNS + ACME-issued cert**, **real Telegram `setWebhook` → FastAPI round-trip**, and a **real S3-compatible bucket** off-box upload + additivity smoke. The v2 → v3 cross-version upgrade drill against a real previously-installed v2 VPS stays out of scope here — see DEPLOY-1.7b for that closure leg.
+
+**Operator pre-conditions:**
+
+- Clean Debian / Ubuntu LTS VPS reachable on its public hostname; DNS A/AAAA records for `$PUBLIC_HOSTNAME` already in place and resolving from the public internet so Caddy's ACME-HTTP-01 challenge can succeed.
+- `.env` populated per the §"Installer / upgrade script (DEPLOY-1.4 / D-063)" + §"Telegram webhook registration (DEPLOY-1.5 / D-064)" + §"Off-box backup sink (DEPLOY-1.6 / D-065)" subsections: `PUBLIC_HOSTNAME`, `ACME_EMAIL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, and **all five `BACKUP_S3_*` knobs** pointing at a reachable S3-compatible bucket the operator owns.
+- A Telegram client (mobile or desktop) signed in as a user able to talk to the bot.
+
+**How to run:**
+
+```sh
+# 1. Install / upgrade on the clean VPS.
+bash scripts/installer/deploy.sh
+
+# 2. Snapshot the installer state file verbatim into the evidence artifact.
+cat .installer-state.json
+
+# 3. Confirm the public health endpoint and capture its body.
+curl -sS https://$PUBLIC_HOSTNAME/health
+
+# 4. Send /start to the bot from a Telegram client. From the app container's
+#    logs, capture the `telegram.webhook ... route=start ...` log line and the
+#    matching access log `POST /telegram/webhook 200`. Note the wall-clock
+#    latency between the client send and the user-visible reply.
+docker compose logs --tail=200 app | grep telegram.webhook
+
+# 5. Note that `getUpdates` against the bot token returns HTTP 409 while the
+#    webhook is active — EXPECTED, not a defect.
+curl -sS https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getUpdates
+
+# 6. Off-box happy path: wait for one full nightly cycle (or run a one-off
+#    `make backup-run` to trigger it), then capture the uploader's begin/ok
+#    log lines + the cursor file + a remote listing summary.
+docker compose logs --tail=50 pg_offbox_uploader | grep pg_backup.offbox
+docker compose exec pg_backup cat /archive/last_offbox.json
+# Use `rclone lsf` or the operator's S3 client to summarize <prefix>/base/...
+# and <prefix>/wal/... presence (object counts, not contents).
+
+# 7. Off-box additivity smoke: force an upload failure (stop endpoint / revoke
+#    credentials / break network), trigger another cycle, capture the cursor
+#    flipping to status=error, confirm last_success.json is unchanged, and
+#    confirm pg_backup.cycle.ok is still emitted.
+docker compose exec pg_backup cat /archive/last_offbox.json
+docker compose exec pg_backup cat /archive/last_success.json
+docker compose logs --tail=50 pg_backup | grep pg_backup.cycle
+```
+
+The result is assembled by hand into the evidence artifact at `docs/deploy1-drill/deploy1-pilot-smoke-<YYYYMMDD>-evidence.json`. See the parallel D-066 artifact `docs/deploy1-drill/deploy1-upgrade-drill-20260522-evidence.json` for the shape precedent; the DEPLOY-1.7a artifact carries two top-level branches — `pilot_smoke` (installer state, `/health` body, Telegram round-trip + observed latency, `getUpdates=409` framing) and `offbox_backup_verification` (happy path + additivity smoke) — plus `out_of_scope_for_this_packet` and a `summary` with `closes_deploy_1_7a: true`, `closes_deploy_1_7: false`, `closes_deploy_1: false`.
+
+**Redaction rule (mandatory).** No credential text, bucket name, endpoint URL, prefix value, public hostname, or Telegram URL token may appear in the captured evidence file. Capture structural outcomes (status strings, log-line shapes, `"ok"` / `"error"` transitions, the boolean additivity assertions) **verbatim**; replace identifying values with `<REDACTED>` or a `_redacted: true` flag. Pre-commit, grep the artifact for the literal `$PUBLIC_HOSTNAME`, `$BACKUP_S3_BUCKET`, `$BACKUP_S3_ENDPOINT`, `$BACKUP_S3_PATH_PREFIX`, `$BACKUP_S3_ACCESS_KEY_ID`, `$BACKUP_S3_SECRET_ACCESS_KEY`, and `$TELEGRAM_BOT_TOKEN` values and confirm none appear literally.
+
+**getUpdates=409 framing.** Telegram documents `setWebhook` and `getUpdates` as mutually exclusive: while a webhook is registered, `getUpdates` returns HTTP 409 (`Conflict: can't use getUpdates method while there is an active webhook`). The smoke captures this verbatim in the evidence artifact as **expected with webhook active**, not as a defect.
+
+**DEPLOY-1.7a closes the pilot-smoke + off-box §2-invariant verification halves of DEPLOY-1.7. DEPLOY-1.7b (v2 → v3 cross-version upgrade drill on a real previously-installed v2 VPS) is the sole canonical remaining packet for DEPLOY-1 closure.**
+
+### v2 → v3 cross-version upgrade drill (DEPLOY-1.7b / D-068)
+
+DEPLOY-1.7b closes the v2 → v3 cross-version upgrade drill against a real previously-installed v2 VPS — the operator-side migration evidence the DEPLOY-1.7-preflight harness (D-066, local) and the DEPLOY-1.7a clean-VPS pilot smoke (D-067, real-VPS but new install) cannot produce. This subsection lands the operator procedure + a committed evidence-file template ahead of the drill itself; the drill is operator-dependent because it requires a real v2-installed VPS that the development environment cannot synthesize. Closure is by the populated evidence artifact at `docs/deploy1-drill/deploy1-cross-version-drill-<YYYYMMDD>-evidence.json` (UTC-dated; populated from the committed template `docs/deploy1-drill/deploy1-cross-version-drill-TEMPLATE.json`), exercising the **real v2 → v3 migration helper** (`migrate_v2_to_v3` at `scripts/installer/deploy.sh`) and the four signals re-probed across the version boundary: `loopback_health`, `public_tls_probe`, `webhook_registration`, and `offbox_backup_probe`.
+
+**Operator pre-conditions:**
+
+- A **real previously-installed v2 VPS** — Debian / Ubuntu LTS host whose installer was originally run from commit `e435e1a` (DEPLOY-1.5, `INSTALLER_CONFIG_VERSION=2`) and whose live `.installer-state.json` reads `installer_config_version: 2` at drill-start. The DEPLOY-1.7-preflight harness's `e435e1a` leg is **not** a substitute — the preflight is a sandboxed worktree without public DNS / Telegram / real S3, and the v2 → v3 migration evidence DEPLOY-1.7b closes is the real-operator one.
+- The current branch (DEPLOY-1.6+ — i.e. a commit at `INSTALLER_CONFIG_VERSION=3`) checked out in the repo working tree on the VPS.
+- `.env` populated with the **same env-key groups** as DEPLOY-1.7a (RUNBOOK §"Clean-VPS pilot smoke (DEPLOY-1.7a / D-067)"): `PUBLIC_HOSTNAME`, `ACME_EMAIL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, and all five `BACKUP_S3_*` knobs pointing at a reachable S3-compatible bucket the operator owns. DNS A/AAAA records for `$PUBLIC_HOSTNAME` already in place and resolving so Caddy's ACME-HTTP-01 challenge continues to succeed across the upgrade.
+- A Telegram client (mobile or desktop) signed in as a user able to talk to the bot, for the `/start` round-trip re-probe.
+
+**How to run:**
+
+```sh
+# 1. On the live v2 VPS, snapshot the installer state file verbatim into the
+#    evidence artifact's pre_upgrade_state.installer_state_snapshot branch.
+#    Expected: installer_config_version: 2, selected_defaults.backup_tool: null,
+#    no offbox_backup_probe field. Redact credential-bearing values before
+#    pasting into the artifact.
+cat .installer-state.json
+
+# 2. Move the working tree to the current DEPLOY-1.6+ ref (INSTALLER_CONFIG_VERSION=3).
+git fetch && git checkout <current DEPLOY-1.6+ ref>
+
+# 3. Run the unchanged installer. Capture the verbatim deploy.install.ok line
+#    for the evidence artifact's observed_migration.deploy_install_ok_line_verbatim;
+#    expected shape:
+#    deploy.install.ok upgraded v2->v3 loopback_health=<value> public_tls_probe=<value> webhook_registration=<value> offbox_backup_probe=<value>
+bash scripts/installer/deploy.sh
+
+# 4. Snapshot the post-upgrade installer state file into the evidence artifact's
+#    post_upgrade_state.installer_state_snapshot branch. Assert: installer_config_version
+#    flipped 2 → 3; selected_defaults.backup_tool: "rclone" (materialized by migrate_v2_to_v3
+#    per the D-063 / D-065 seam); a new offbox_backup_probe field is present.
+cat .installer-state.json
+
+# 5. Re-probe loopback_health — verify the loopback /health body shape.
+curl -sS http://127.0.0.1:8000/health
+
+# 6. Re-probe public_tls_probe — verify the public /health body shape across the upgrade.
+curl -sS https://$PUBLIC_HOSTNAME/health
+
+# 7. Re-probe webhook_registration — send /start from the Telegram client and capture
+#    the canonical telegram.webhook log line + matching POST /telegram/webhook 200
+#    access log + observed /start round-trip latency.
+docker compose logs --tail=200 app | grep telegram.webhook
+
+# 8. Note that getUpdates against the bot token continues to return HTTP 409 while
+#    the webhook is active across the upgrade — EXPECTED, not a defect (same framing
+#    as DEPLOY-1.7a).
+curl -sS https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getUpdates
+
+# 9. Re-probe offbox_backup_probe — wait for one full nightly cycle (or run a
+#    one-off make backup-run) after the upgrade, then capture the uploader's
+#    begin/ok log lines + the /archive/last_offbox.json cursor (status=ok).
+docker compose logs --tail=50 pg_offbox_uploader | grep pg_backup.offbox
+docker compose exec pg_backup cat /archive/last_offbox.json
+```
+
+The result is assembled by hand by copying the committed template `docs/deploy1-drill/deploy1-cross-version-drill-TEMPLATE.json` to a UTC-dated working filename `docs/deploy1-drill/deploy1-cross-version-drill-<YYYYMMDD>-evidence.json`, dropping the top-level `"_template": true` flag, replacing every `<TO_FILL_BY_OPERATOR>` placeholder with the verbatim captured observation, and running the redaction grep checklist below.
+
+The evidence artifact carries **four top-level branches** — `pre_upgrade_state` (the verbatim v2 `.installer-state.json` fields), `observed_migration` (the verbatim `deploy.install.ok upgraded v2->v3 …` line, the `migrate_v2_to_v3` fired flag, the exit code), `post_upgrade_state` (the verbatim v3 `.installer-state.json` fields plus the four re-probed signals), and `summary` (the `closes_deploy_1_7b` / `closes_deploy_1_7` / `closes_deploy_1` booleans + verdict) — plus `metadata` and `out_of_scope_for_this_packet`. Shape parallels `docs/deploy1-drill/deploy1-pilot-smoke-20260527-evidence.json` (D-067) for redaction conventions and `docs/deploy1-drill/deploy1-upgrade-drill-20260522-evidence.json` (D-066) for the "verbatim observed outcomes" framing.
+
+**Redaction rule (mandatory).** No credential text, bucket name, endpoint URL, prefix value, public hostname, or Telegram URL token may appear in the captured evidence file. Capture structural outcomes (status strings, log-line shapes, `"ok"` / `"error"` transitions, the `installer_config_version` 2 → 3 transition) **verbatim**; replace identifying values with `<REDACTED>` or a `_redacted: true` flag. Pre-commit, grep the artifact for the literal `$PUBLIC_HOSTNAME`, `$BACKUP_S3_BUCKET`, `$BACKUP_S3_ENDPOINT`, `$BACKUP_S3_PATH_PREFIX`, `$BACKUP_S3_ACCESS_KEY_ID`, `$BACKUP_S3_SECRET_ACCESS_KEY`, and `$TELEGRAM_BOT_TOKEN` values and confirm none appear literally. Same checklist as the DEPLOY-1.7a / D-067 subsection.
+
+**DEPLOY-1.7b operator-procedure prep (D-068) is the docs landing — the operator drill against a real previously-installed v2 VPS is the sole remaining step to close DEPLOY-1.7b and DEPLOY-1.**
+
 ## Useful reads when stuck
 - Workflow & recovery: this file.
 - Architecture, adapter axes, deployment shapes: `docs/ARCHITECTURE.md`.

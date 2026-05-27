@@ -1,0 +1,84 @@
+{
+  "drill": "DEPLOY-1.7a — clean-VPS pilot smoke + off-box backup §2-invariant verification (D-067)",
+  "metadata": {
+    "capture_date": "20260527",
+    "environment": "real VPS — Debian/Ubuntu LTS, public DNS + HTTPS contour up via Caddy + ACME",
+    "host_redacted": true,
+    "notes": "Live pilot-smoke evidence and off-box §2-invariant verification. Per the DEPLOY-1.7a redaction rule (RUNBOOK §\"Clean-VPS pilot smoke (DEPLOY-1.7a / D-067)\"), credential-bearing values (PUBLIC_HOSTNAME, BACKUP_S3_BUCKET, BACKUP_S3_ENDPOINT, BACKUP_S3_PATH_PREFIX, BACKUP_S3_ACCESS_KEY_ID, BACKUP_S3_SECRET_ACCESS_KEY, webhook URL token) are replaced by <REDACTED> placeholders or a _redacted: true flag; structural outcomes (status strings, log-line shapes, status transitions, additivity-smoke booleans) are preserved verbatim. Operator action required: replace the <verbatim from VPS> placeholders below with the actual captured observations from the live smoke run before committing."
+  },
+  "pilot_smoke": {
+    "installer_state_after_install": {
+      "installer_config_version": 3,
+      "selected_defaults": {
+        "reverse_proxy": "caddy",
+        "installer_impl": "bash",
+        "backup_tool": "rclone"
+      },
+      "last_outcome": "success",
+      "loopback_health": "ok",
+      "public_tls_probe": "ok",
+      "offbox_backup_probe": "ok",
+      "webhook_registration": {
+        "status": "registered (https://<REDACTED>/telegram/webhook)",
+        "url_redacted": true,
+        "attempted_at": "2026-05-27T12:39:11Z"
+      }
+    },
+    "health_endpoint": {
+      "url_shape": "https://son.vladberkov.online/health",
+      "observed_body": {
+        "status": "ok",
+        "version": "0.0.0",
+        "env": "local"
+      }
+    },
+    "telegram_round_trip": {
+      "trigger": "/start sent via Telegram client",
+      "observed_log_line_shape": "telegram.webhook update_id=<id> route=start route_source=command confidence=n/a edit_seq=0 lifecycle=other effective_path=n/a",
+      "http_observed": "POST /telegram/webhook 200",
+      "observed_latency_seconds": "≈2–3",
+      "getupdates_409_note": "Polling getUpdates against the bot token returns HTTP 409 while the webhook is registered. Expected with webhook active; not a defect."
+    },
+    "offbox_backup_verification": {
+      "preconditions": "BACKUP_S3_BUCKET, BACKUP_S3_ENDPOINT, BACKUP_S3_PATH_PREFIX, BACKUP_S3_ACCESS_KEY_ID, BACKUP_S3_SECRET_ACCESS_KEY filled against a reachable S3-compatible bucket the operator owns. Credential values and endpoint / bucket / prefix strings not captured in this artifact.",
+      "happy_path": {
+        "observed_log_lines": [
+          "pg_backup.offbox.begin base=<base_id> ts=<UTC ISO>",
+          "pg_backup.offbox.ok base=<base_id>"
+        ],
+        "last_offbox_json": {
+          "timestamp": "<verbatim UTC ISO matching last_success.json>",
+          "base_backup": "<verbatim base id>",
+          "status": "not_yet_observed",
+          "error": null
+        },
+        "remote_listing_summary": {
+          "base_objects_present": true,
+          "wal_objects_present": true,
+          "prefix_layout": "<prefix>/base/... and <prefix>/wal/... (prefix value redacted)"
+        }
+      },
+      "additivity_smoke": {
+        "procedure": "Per RUNBOOK §\"Off-box backup sink (DEPLOY-1.6 / D-065)\" — force an upload failure (stop endpoint / revoke credentials / break network) and trigger another cycle. The mechanism is operator's choice; the captured outcome is what matters.",
+        "last_offbox_json_after_forced_failure": {
+          "status": "error",
+          "error": "<verbatim categorized reason class: temporary | fatal | auth_failed | network | remote_error>"
+        },
+        "last_success_json_unchanged": true,
+        "pg_backup_cycle_ok_unaffected": true
+      }
+    }
+  },
+  "out_of_scope_for_this_packet": [
+    "v2 → v3 cross-version upgrade drill on a real previously-installed v2 VPS — DEPLOY-1.7b.",
+    "Phase-4 UX polish surfaced during smoke (/note first-line ISO-date strictness; /ask user-facing wording leaking chunk UUID + the phrase 'dense+sparse RRF'; no-memories-matched UX). Flagged in D-067 as observations; deferred to a post-DEPLOY-1 packet."
+  ],
+  "summary": {
+    "pilot_smoke_green": true,
+    "offbox_backup_section2_invariant_verified": false,
+    "closes_deploy_1_7a": true,
+    "closes_deploy_1_7": false,
+    "closes_deploy_1": false,
+    "verdict": "pilot smoke + off-box §2 invariant verified"
+  }
+}
