@@ -98,12 +98,17 @@ def test_note_then_ask_returns_grounded_reply_with_date() -> None:
     body = ask_resp.json()
     assert body["method"] == "sendMessage"
     assert body["chat_id"] == 42
-    # Slice 4.4 (D-036): reply body is the LLM answer_text (mock-deterministic),
-    # followed by the unchanged retrieval trailer. Cited chunk text is not in
-    # the default reply; /sources exposes it on demand.
+    # Reply body is the LLM answer_text (mock-deterministic); the success-case
+    # `(hybrid retrieval — dense+sparse RRF)` trailer is no longer appended.
+    # Cited chunk text is not in the default reply; /sources exposes it on demand.
     text = body["text"]
     assert text.startswith("Mock answer grounded in 1 diary chunk(s):")
-    assert text.endswith("(hybrid retrieval — dense+sparse RRF)")
+    assert "dense+sparse RRF" not in text
+    assert "hybrid retrieval" not in text
+    # No extra blank trailer line remains after answer_text — the mock
+    # answer is single-line, so a remnant `\n\n<trailer>` would surface
+    # as a double newline.
+    assert "\n\n" not in text
     assert "Found 1 memory" not in text
     assert "Tried a new book" not in text
     # Slice 3.5: successful /ask persists one Query row + retrieval hits.
@@ -182,10 +187,15 @@ def test_question_plain_text_returns_grounded_reply_via_heuristic() -> None:
 
     assert resp.status_code == 200
     text = resp.json()["text"]
-    # Slice 4.4 (D-036): answer_text body + retrieval trailer + heuristic marker.
+    # Reply shape: answer_text body + single `\n` + heuristic marker. The
+    # success-case retrieval trailer is no longer appended between them.
     assert text.startswith("Mock answer grounded in 1 diary chunk(s):")
-    assert "(hybrid retrieval — dense+sparse RRF)" in text
     assert text.endswith("(routed as question — send /ask next time to be explicit)")
+    assert "dense+sparse RRF" not in text
+    assert "hybrid retrieval" not in text
+    # No extra blank trailer remains between answer_text and the heuristic
+    # marker — body and marker are now separated by a single `\n`, not `\n\n`.
+    assert "\n\n" not in text
     assert "Found 1 memory" not in text
     assert "Learned a new recipe" not in text
 

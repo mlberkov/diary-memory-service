@@ -87,7 +87,6 @@ def _format_draft_reply(result: IngestResult) -> str:
     return f"{_DRAFT_REPLY_PREFIX}{suffix}. {_DRAFT_REPLY_HINT}"
 
 
-_RETRIEVAL_TRAILER = "(hybrid retrieval — dense+sparse RRF)"
 _TRAILER_WEAK_EVIDENCE = "(weak evidence — model expressed uncertainty)"
 _TRAILER_AMBIGUOUS = "(ambiguous question — refine and ask again)"
 _REPLY_PROVIDER_UNAVAILABLE = (
@@ -97,24 +96,28 @@ _REPLY_PARSE_FAILURE = "Couldn't generate an answer — provider response was un
 _REPLY_SOURCES_NONE = "No selected chunks available — ask a question with /ask first."
 
 
-def _render_source_block(chunk: EventChunk) -> str:
+def _render_source_block(chunk: EventChunk, *, index: int, total: int) -> str:
     """Render one selected chunk for ``/sources`` (D-036).
 
     "Selected" = post-RRF top-k chunk fed into the prompt. Rendered
-    "as-is": full ``chunk_text`` with the note date and chunk id as a
-    header. Not a citation, not fine-grained attribution.
+    "as-is": full ``chunk_text`` with the note date and a 1-based
+    ``(i/N)`` index as a header. The index is ephemeral — it numbers
+    the chunks within the current ``/ask``'s cached list only, in
+    post-RRF order, and is not a stable cross-``/ask`` identifier.
+    Not a citation, not fine-grained attribution. The underlying
+    ``chunk_id`` is not surfaced to the user; ``AnswerTrace.context_chunk_ids``
+    keeps it for operator forensics via SQL.
     """
-    return f"[{chunk.note_date.isoformat()}] {chunk.chunk_id}\n\n{chunk.chunk_text}"
+    return f"[{chunk.note_date.isoformat()}] ({index}/{total})\n\n{chunk.chunk_text}"
 
 
 def _format_answer_reply(result: AnswerResult) -> str:
     """Render the answer reply per :class:`FallbackMode` (D-035, D-036).
 
-    Slice 4.4 (D-036): the body for the three contours that surface an
-    LLM-produced answer (``NONE``, ``WEAK_EVIDENCE``, ``AMBIGUOUS``) is
-    ``result.answer_text`` followed by the contour-specific trailer.
-    The cited chunks are not in the default reply — ``/sources`` exposes
-    them on demand.
+    Slice 4.4 (D-036): the body for ``NONE`` is ``result.answer_text``
+    alone. ``WEAK_EVIDENCE`` and ``AMBIGUOUS`` append their plain-English
+    explanatory trailer. The cited chunks are not in the default reply —
+    ``/sources`` exposes them on demand.
 
     ``NO_EVIDENCE`` has two distinct effective paths — empty retrieval
     and LLM-marker — that must produce different surface text per R-6.
@@ -125,8 +128,7 @@ def _format_answer_reply(result: AnswerResult) -> str:
     fallback = result.fallback
 
     if fallback is FallbackMode.NONE:
-        body = result.answer_text or ""
-        return f"{body}\n\n{_RETRIEVAL_TRAILER}"
+        return result.answer_text or ""
 
     if fallback is FallbackMode.WEAK_EVIDENCE:
         body = result.answer_text or ""
@@ -430,7 +432,10 @@ class Dispatcher:
                 },
             )
         header = f"Selected chunks for your last /ask ({len(chunks)} chunk(s)):"
-        source_blocks = [_render_source_block(c) for c in chunks]
+        total = len(chunks)
+        source_blocks = [
+            _render_source_block(c, index=i + 1, total=total) for i, c in enumerate(chunks)
+        ]
         return DispatchResult(
             reply_text=header,
             route=RouteKind.SOURCES,
