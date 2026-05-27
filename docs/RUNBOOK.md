@@ -932,6 +932,63 @@ The probe verdicts the installer emits in this environment (`public_tls_probe`, 
 
 **This harness de-risks the configuration-versioning seam locally — DEPLOY-1.7 remains the closure packet for DEPLOY-1.**
 
+### Clean-VPS pilot smoke (DEPLOY-1.7a / D-067)
+
+DEPLOY-1.7a closes the clean-VPS → working-pilot smoke and the off-box backup §2-invariant verification halves of the DEPLOY-1.7 scope split (see D-067 and the `SELF-HOSTED-DEPLOYMENT-ROADMAP.md` §4 row split). Closure is by the committed evidence artifact at `docs/deploy1-drill/deploy1-pilot-smoke-<YYYYMMDD>-evidence.json` (UTC-dated; parallel to `docs/deploy1-drill/deploy1-upgrade-drill-<YYYYMMDD>-evidence.json` from D-066), exercising **real public DNS + ACME-issued cert**, **real Telegram `setWebhook` → FastAPI round-trip**, and a **real S3-compatible bucket** off-box upload + additivity smoke. The v2 → v3 cross-version upgrade drill against a real previously-installed v2 VPS stays out of scope here — see DEPLOY-1.7b for that closure leg.
+
+**Operator pre-conditions:**
+
+- Clean Debian / Ubuntu LTS VPS reachable on its public hostname; DNS A/AAAA records for `$PUBLIC_HOSTNAME` already in place and resolving from the public internet so Caddy's ACME-HTTP-01 challenge can succeed.
+- `.env` populated per the §"Installer / upgrade script (DEPLOY-1.4 / D-063)" + §"Telegram webhook registration (DEPLOY-1.5 / D-064)" + §"Off-box backup sink (DEPLOY-1.6 / D-065)" subsections: `PUBLIC_HOSTNAME`, `ACME_EMAIL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, and **all five `BACKUP_S3_*` knobs** pointing at a reachable S3-compatible bucket the operator owns.
+- A Telegram client (mobile or desktop) signed in as a user able to talk to the bot.
+
+**How to run:**
+
+```sh
+# 1. Install / upgrade on the clean VPS.
+bash scripts/installer/deploy.sh
+
+# 2. Snapshot the installer state file verbatim into the evidence artifact.
+cat .installer-state.json
+
+# 3. Confirm the public health endpoint and capture its body.
+curl -sS https://$PUBLIC_HOSTNAME/health
+
+# 4. Send /start to the bot from a Telegram client. From the app container's
+#    logs, capture the `telegram.webhook ... route=start ...` log line and the
+#    matching access log `POST /telegram/webhook 200`. Note the wall-clock
+#    latency between the client send and the user-visible reply.
+docker compose logs --tail=200 app | grep telegram.webhook
+
+# 5. Note that `getUpdates` against the bot token returns HTTP 409 while the
+#    webhook is active — EXPECTED, not a defect.
+curl -sS https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getUpdates
+
+# 6. Off-box happy path: wait for one full nightly cycle (or run a one-off
+#    `make backup-run` to trigger it), then capture the uploader's begin/ok
+#    log lines + the cursor file + a remote listing summary.
+docker compose logs --tail=50 pg_offbox_uploader | grep pg_backup.offbox
+docker compose exec pg_backup cat /archive/last_offbox.json
+# Use `rclone lsf` or the operator's S3 client to summarize <prefix>/base/...
+# and <prefix>/wal/... presence (object counts, not contents).
+
+# 7. Off-box additivity smoke: force an upload failure (stop endpoint / revoke
+#    credentials / break network), trigger another cycle, capture the cursor
+#    flipping to status=error, confirm last_success.json is unchanged, and
+#    confirm pg_backup.cycle.ok is still emitted.
+docker compose exec pg_backup cat /archive/last_offbox.json
+docker compose exec pg_backup cat /archive/last_success.json
+docker compose logs --tail=50 pg_backup | grep pg_backup.cycle
+```
+
+The result is assembled by hand into the evidence artifact at `docs/deploy1-drill/deploy1-pilot-smoke-<YYYYMMDD>-evidence.json`. See the parallel D-066 artifact `docs/deploy1-drill/deploy1-upgrade-drill-20260522-evidence.json` for the shape precedent; the DEPLOY-1.7a artifact carries two top-level branches — `pilot_smoke` (installer state, `/health` body, Telegram round-trip + observed latency, `getUpdates=409` framing) and `offbox_backup_verification` (happy path + additivity smoke) — plus `out_of_scope_for_this_packet` and a `summary` with `closes_deploy_1_7a: true`, `closes_deploy_1_7: false`, `closes_deploy_1: false`.
+
+**Redaction rule (mandatory).** No credential text, bucket name, endpoint URL, prefix value, public hostname, or Telegram URL token may appear in the captured evidence file. Capture structural outcomes (status strings, log-line shapes, `"ok"` / `"error"` transitions, the boolean additivity assertions) **verbatim**; replace identifying values with `<REDACTED>` or a `_redacted: true` flag. Pre-commit, grep the artifact for the literal `$PUBLIC_HOSTNAME`, `$BACKUP_S3_BUCKET`, `$BACKUP_S3_ENDPOINT`, `$BACKUP_S3_PATH_PREFIX`, `$BACKUP_S3_ACCESS_KEY_ID`, `$BACKUP_S3_SECRET_ACCESS_KEY`, and `$TELEGRAM_BOT_TOKEN` values and confirm none appear literally.
+
+**getUpdates=409 framing.** Telegram documents `setWebhook` and `getUpdates` as mutually exclusive: while a webhook is registered, `getUpdates` returns HTTP 409 (`Conflict: can't use getUpdates method while there is an active webhook`). The smoke captures this verbatim in the evidence artifact as **expected with webhook active**, not as a defect.
+
+**DEPLOY-1.7a closes the pilot-smoke + off-box §2-invariant verification halves of DEPLOY-1.7. DEPLOY-1.7b (v2 → v3 cross-version upgrade drill on a real previously-installed v2 VPS) is the sole canonical remaining packet for DEPLOY-1 closure.**
+
 ## Useful reads when stuck
 - Workflow & recovery: this file.
 - Architecture, adapter axes, deployment shapes: `docs/ARCHITECTURE.md`.
