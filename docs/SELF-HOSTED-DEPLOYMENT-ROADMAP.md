@@ -40,7 +40,17 @@ verification against a real S3-compatible target via a new
 DEPLOY-1.7 was split: 1.7a closes the pilot-smoke + off-box halves
 now; DEPLOY-1.7b (v2 → v3 cross-version upgrade drill on a real
 previously-installed v2 VPS) is the sole canonical remaining closure
-packet for DEPLOY-1. DEPLOY-1 remains open.**
+packet for DEPLOY-1. DEPLOY-1.7b operator-procedure prep landed
+(D-068) — a new "v2 → v3 cross-version upgrade drill (DEPLOY-1.7b /
+D-068)" subsection in `docs/RUNBOOK.md` (operator pre-conditions, run
+procedure, evidence-file shape, redaction rule) and a committed
+evidence-file template at
+`docs/deploy1-drill/deploy1-cross-version-drill-TEMPLATE.json` with
+`"_template": true` and `<TO_FILL_BY_OPERATOR>` / `<REDACTED>`
+placeholders. DEPLOY-1.7b closure (and therefore DEPLOY-1 closure)
+still depends on the operator drill against a real previously-installed
+v2 VPS, which produces the populated dated evidence artifact. DEPLOY-1
+remains open.**
 
 This mirrors the D-042 / `docs/RENAMING-ROADMAP.md` and D-044 /
 `docs/OPERATIONALIZATION-ROADMAP.md` precedent: the decision entry (D-060)
@@ -142,7 +152,7 @@ DEPLOY-1 invariants — A-22 updated by D-060".
 | **DEPLOY-1.6 — off-box backup sink wiring** | A new `pg_offbox_uploader` sidecar service in `docker-compose.yml` (image `rclone/rclone:1.66`, gated by `profiles: ["backup"]`) running `scripts/pg_offbox_uploader/uploader.sh` — a long-running poller that mirrors `/archive/base` + `/archive/wal` to the operator-supplied S3-compatible target via `rclone sync` whenever a new OP-4.2 cycle has succeeded. New best-effort `probe_offbox_backup` helper in `scripts/installer/deploy.sh` (active probe via `docker run rclone/rclone:1.66 lsd`), `offbox_backup_probe` field in `.installer-state.json`, `INSTALLER_CONFIG_VERSION` bumped `2 → 3` with `migrate_v2_to_v3` (second non-trivial use of the D-063 seam), `selected_defaults.backup_tool` flipped from `null` to `"rclone"`, and five optional `BACKUP_S3_*` knobs in `.env.example`. Pins **rclone** as the §3 backup-tool default. A-43 logs-first observability scope deferred to a later DEPLOY-1.x packet (the off-box sink reuses the existing `pg_backup.*` log-prefix family — no new logging contract is forced). New "Off-box backup sink (DEPLOY-1.6 / D-065)" subsection in `docs/RUNBOOK.md`. No `src/` / schema / migration / `tests/` change; no change to `pg_backup` or `scheduler.sh`. | **Landed (D-065).** |
 | **DEPLOY-1.7-preflight — local-only upgrade-drill harness** | `scripts/installer/drill_upgrade_local.sh` (new) + `docs/deploy1-drill/deploy1-upgrade-drill-<YYYYMMDD>-evidence.json` (new) + new "Local-only upgrade-drill preflight (DEPLOY-1.7-preflight / D-066)" subsection in `docs/RUNBOOK.md` + this roadmap update + new `docs/execution-map.md` row + new `docs/todo.md` entry. Sandboxed git worktree under `mktemp -d`; pins `COMPOSE_PROJECT_NAME=deploy1-preflight-drill`; runs the unchanged `./scripts/installer/deploy.sh` across commits `7cb96fa` / `e435e1a` / `0aef179`. Probe verdicts (`public_tls_probe` / `webhook_registration` / `offbox_backup_probe`) are captured **verbatim** under `observed_probes` and classified as `operator_dependent`; only `exit_code == 0` and `installer_config_version` matching the expected integer per leg are asserted. De-risks the configuration-versioning seam locally; does **NOT** close DEPLOY-1.7. No `scripts/installer/deploy.sh` / `docker-compose.yml` / `pg_offbox_uploader` / `pg_backup` / `pg_restore` change; no `src/` / schema / migration / `tests/` change. | **Landed (D-066).** |
 | **DEPLOY-1.7a — clean-VPS pilot smoke + off-box backup §2-invariant verification** | Committed pilot-smoke evidence artifact at `docs/deploy1-drill/deploy1-pilot-smoke-<YYYYMMDD>-evidence.json` capturing verbatim: installer `.installer-state.json` fields (`installer_config_version`, `last_outcome`, `loopback_health`, `public_tls_probe`, `offbox_backup_probe`, `webhook_registration`); the observed `https://$PUBLIC_HOSTNAME/health` body; the `https://$PUBLIC_HOSTNAME/telegram/webhook` round-trip with the canonical `telegram.webhook update_id=<id> route=start ...` log line + matching `POST /telegram/webhook 200` access log + observed `/start` latency (~2–3 s); an explicit `getUpdates=409` note framed as expected-with-webhook-active (not a defect). Real off-box leg with `BACKUP_S3_*` filled against a reachable bucket: `pg_backup.offbox.begin → pg_backup.offbox.ok`, `/archive/last_offbox.json` `status=ok`, `<prefix>/base/...` + `<prefix>/wal/...` listing summary, and an additivity smoke (force upload failure → `status=error`, `/archive/last_success.json` unchanged, `pg_backup.cycle.ok` unaffected). Credential text redacted. New "Clean-VPS pilot smoke (DEPLOY-1.7a / D-067)" subsection in `docs/RUNBOOK.md`. No `src/` / scripts / `docker-compose.yml` / `Caddyfile` / schema / migration / `tests/` change. | **Landed (D-067).** |
-| **DEPLOY-1.7b — v2 → v3 cross-version upgrade drill on a real previously-installed v2 VPS** | The v2 → v3 cross-version migration smoke against a real previously-installed v2 VPS — the cross-version migration evidence the DEPLOY-1.7-preflight harness (D-066) cannot produce. Closes DEPLOY-1. | **Sole canonical next for closure.** Depends on a separate v2-installed VPS that does not yet exist; the local-only configuration-versioning seam is de-risked by DEPLOY-1.7-preflight (D-066); the pilot smoke + off-box §2 verification halves are closed by DEPLOY-1.7a (D-067). |
+| **DEPLOY-1.7b — v2 → v3 cross-version upgrade drill on a real previously-installed v2 VPS** | The v2 → v3 cross-version migration smoke against a real previously-installed v2 VPS — the cross-version migration evidence the DEPLOY-1.7-preflight harness (D-066) cannot produce. Operator-procedure prep landed (D-068) — a new "v2 → v3 cross-version upgrade drill (DEPLOY-1.7b / D-068)" subsection in `docs/RUNBOOK.md` (operator pre-conditions, run procedure, evidence-file shape, redaction rule) + a committed evidence-file template `docs/deploy1-drill/deploy1-cross-version-drill-TEMPLATE.json` with `"_template": true`. Closure remains by a populated dated evidence artifact `docs/deploy1-drill/deploy1-cross-version-drill-<YYYYMMDD>-evidence.json` produced by the operator drill. Closes DEPLOY-1. | **Prep landed (D-068).** Operator drill outstanding; depends on a separate v2-installed VPS that does not yet exist. The local-only configuration-versioning seam is de-risked by DEPLOY-1.7-preflight (D-066); the pilot smoke + off-box §2 verification halves are closed by DEPLOY-1.7a (D-067). |
 | **DEPLOY-2 — managed-cloud reference deployment** *(deferred)* | The managed-cloud peer shape. Resolves A-41. Has its own roadmap doc when it is pulled. | **Deferred** — no near-term operator. |
 
 ---
@@ -160,7 +170,12 @@ above but is not on the critical path. DEPLOY-1.7a (D-067) closes the pilot smok
 off-box §2-invariant verification halves of the original DEPLOY-1.7 scope. DEPLOY-1.7b
 closes the v2 → v3 cross-version upgrade drill against a real previously-installed
 v2 VPS — the operator-side evidence the preflight harness cannot produce — and is
-the sole canonical remaining packet for DEPLOY-1 closure.
+the sole canonical remaining packet for DEPLOY-1 closure. DEPLOY-1.7b's
+operator procedure (the new "v2 → v3 cross-version upgrade drill (DEPLOY-1.7b / D-068)"
+subsection in `docs/RUNBOOK.md`) and committed evidence-file template
+(`docs/deploy1-drill/deploy1-cross-version-drill-TEMPLATE.json`) are pre-staged via
+D-068; the only remaining work is operator execution against a real v2 VPS and
+committing the populated dated evidence artifact.
 
 - **DEPLOY-1.2 first** — the proxy / installer / webhook / backup-sink packets
   all need a runnable VPS runtime to terminate against.
