@@ -219,7 +219,7 @@ SELECT q.created_at, q.query_text, a.fallback_mode, a.model_name,
 A-34 destructive-upgrade discipline applies: existing local Postgres volumes that pre-date the Slice 4.3b CHECK widening on `queries.fallback` and `answer_traces.fallback_mode` must be reset via `docker compose down -v` before the bootstrap DDL applies cleanly. Real provider adapters remain deferred to Phase 6.
 
 ### Selected-chunks recall (`/sources`, D-036)
-`/sources` exposes the **selected chunks as-is** for the chat's most recent `/ask` turn: the post-RRF top-k chunks `services/context_assembler.assemble_answer_context` produced and `build_answer_prompt` fed to the LLM — i.e. the same `chunk_id` list `AnswerTrace.context_chunk_ids` records, rendered with `note_date`, `chunk_id`, and the full `chunk_text` verbatim. It is not citations, not fine-grained attribution, and not the full pre-RRF candidate pool. Outbound delivery is one Telegram message by default and splits across multiple messages only when the 4096-char cap forces it (whole-block boundaries; `(part k/N)` footers on an oversized single chunk; identical packing semantics to `/drafts`).
+`/sources` exposes the **selected chunks as-is** for the chat's most recent `/ask` turn: the post-RRF top-k chunks `services/context_assembler.assemble_answer_context` produced and `build_answer_prompt` fed to the LLM — i.e. the same `chunk_id` list `AnswerTrace.context_chunk_ids` records, rendered with `note_date`, a 1-based `(i/N)` index, and the full `chunk_text` verbatim. The raw `chunk_id` is **not** surfaced to the user (D-069); operator forensics still join through `AnswerTrace.context_chunk_ids` via the SQL recipe in "Inspecting recent `/ask` retrieval traces (D-032)" above. The `(i/N)` marker is **per-last-`/ask` ephemeral ordering, not a stable cross-`/ask` identifier** — the index numbers the chunks within the current cached list in post-RRF order, and the cache is overwritten by the next `/ask`. It is not citations, not fine-grained attribution, and not the full pre-RRF candidate pool. Outbound delivery is one Telegram message by default and splits across multiple messages only when the 4096-char cap forces it (whole-block boundaries; `(part k/N)` footers on an oversized single chunk; identical packing semantics to `/drafts`). The `(i/N)` block header and the outbound `(part k/N)` packing footer live at distinct positions in the rendered message and do not collide.
 
 The state behind `/sources` is a process-local `Dispatcher._latest_sources: dict[str, tuple[EventChunk, ...]]` keyed by `community_id`. The current FastAPI wiring at `adapters/telegram/webhook.py` makes `Dispatcher` a module-level singleton via `get_dispatcher()`, so `/ask` and a follow-up `/sources` are served by the same instance within one process. **Every `/ask` dispatch updates the cache**: non-empty `answer.context.ordered_chunks` overwrites; empty (empty-query, empty-retrieval `NO_EVIDENCE`, retrieval-unavailable on SQLite) clears. Non-`/ask` routes never touch the cache. `/sources` itself is read-only.
 
@@ -343,7 +343,7 @@ OPENAI_API_KEY=... uv run python -m memory_rag.eval.retrieval.regenerate_embeddi
 Mock-mode shape coverage in `tests/test_retrieval_harness_shape.py` is parametrized over **both** pairs under `make check`.
 
 ### Hybrid retrieval (D-025)
-`/ask` runs the baseline hybrid path: a single query-embedding call followed by dense + sparse legs against `SearchRepository`, fused with service-layer RRF. Every retrieval call logs `retrieval.hybrid community_id=… model=… dense_n=… sparse_n=… merged_n=…` so an operator can confirm both legs ran. The dispatcher reply trailer for a successful answer is `(hybrid retrieval — dense+sparse RRF)`; an empty merged set returns `FallbackMode.NO_EVIDENCE` with the plain "No memories matched 'X'." reply.
+`/ask` runs the baseline hybrid path: a single query-embedding call followed by dense + sparse legs against `SearchRepository`, fused with service-layer RRF. Every retrieval call logs `retrieval.hybrid community_id=… model=… dense_n=… sparse_n=… merged_n=…` so an operator can confirm both legs ran. A successful answer reply is `result.answer_text` alone — no trailer line (D-069 dropped the prior `(hybrid retrieval — dense+sparse RRF)` trailer as user-facing ranking-method jargon; the equivalent operator signal stays in the `retrieval.hybrid` log line). `WEAK_EVIDENCE` and `AMBIGUOUS` still append their plain-English explanatory trailers (`(weak evidence — model expressed uncertainty)` / `(ambiguous question — refine and ask again)`). The dispatcher's empty-evidence `FallbackMode.NO_EVIDENCE` surface returns `"Nothing in your saved notes matched 'X'. Try rephrasing the question, or use words that appear in your notes."` — neutral about cause, with two short question-side nudges.
 
 Postgres is the only canonical retrieval backend. When `STORAGE_BACKEND=sqlite`, `SqliteDomainStore.dense_candidates` / `sparse_candidates` raise `NotImplementedError`; the dispatcher catches that, logs `retrieval.unavailable reason=… community_id=…`, and returns `NO_EVIDENCE`. Operators running SQLite see ingest work and `/ask` always fall back — that is the canonical contour, not a bug.
 
@@ -356,6 +356,26 @@ Webhook only (D-019). Expose the local process via a tunnel (e.g. `ngrok`, `clou
 The Telegram code path exposes `/note`, `/ask`, `/sources`, `/drafts`, and `/export`, with absence of an explicit command defaulting to **draft** (D-028). The explicit `/draft` command was removed in D-030 — drafts are created only by the no-command default and recalled via `/drafts`. `/sources` (D-036) returns the chunks retrieval selected for the chat's most recent `/ask`.
 
 Operationally: the draft floor (R-13) means no inbound message is silently discarded, even when routing confidence is low. The webhook log line records `lifecycle=draft|note|query|other` so an operator can see which lifecycle state each delivery resolved to. `DomainService` emits `draft.persisted source_message_id=… community_id=… effective_path=fresh|replay` when the draft path commits. CLARIFY (D-020) remains a valid reply shape for the rare case where a heuristic would actively conflict with intent, but the classifier no longer emits CLARIFY for plain text; raw persistence is unconditional.
+
+#### `/note` first-line date format (D-070)
+The explicit `/note` dispatcher path normalizes a small whitelist of near-ISO first-line tokens to canonical `YYYY-MM-DD` before the strict parser runs. Accepted forms (zero-padded only):
+
+- `YYYY-MM-DD` (recommended canonical form, e.g. `2026-05-09`)
+- `YYYY/MM/DD`, `YYYY.MM.DD`
+- `DD-MM-YYYY`, `DD/MM/YYYY`, `DD.MM.YYYY`
+
+**DD-first inputs are always interpreted as DD/MM/YYYY by intentional product convention** — there is no fallback heuristic and no per-input ambiguity branch. Concrete pin: `05/09/2026` → `2026-09-05` (5 September 2026, never 9 May 2026). The same convention applies to the other DD-first separators.
+
+Rejected categories (fall through to the user-facing error below):
+
+- Unpadded month or day: `2026-5-9`, `9/5/2026`, etc.
+- Mixed separators: `2026-05/09`, `09.05-2026`.
+- Natural-language or relative dates: `May 9 2026`, `today`, `yesterday`.
+- Impossible calendar dates: `2026-02-30`, `30-02-2026`.
+
+User-facing failure UX: when the first line does not match the whitelist, the reply is exactly `"First line must be a date like 2026-05-09. Got: '<first-line>'."`. The raw `SourceMessage` is still recorded (I-15); no `Note` or `EventChunk` is created. Operator script for the parent: "Send `/note 2026-05-09` on the first line, then one event per line." If the parent prefers DD-first, remind them DD/MM/YYYY is the convention so May/September do not get swapped.
+
+Scope note: this normalization is applied only on the explicit `/note` dispatch path. The legacy plain-text NOTE auto-route in `core/routing/classifier.py` is not coupled to this whitelist and continues to fire only for the strict canonical `YYYY-MM-DD` form — that heuristic is misaligned with the drafts-vs-notes product contract and is slated for separate cleanup in a future milestone (not closed by D-070).
 
 Schema upgrade note: the `source_messages.detected_route` CHECK constraint extended from `{start, help, note, ask, clarify, unknown}` to `{start, help, note, ask, draft, clarify, unknown}` (D-028). Per A-34, existing local Postgres volumes must be reset with `docker compose down -v` before the new CHECK applies; SQLite has no enum constraint on the column. Until the reset is performed, inserts with `detected_route='draft'` raise a CHECK violation against the live Postgres backend.
 

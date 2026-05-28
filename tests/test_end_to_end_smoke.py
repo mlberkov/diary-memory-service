@@ -98,12 +98,17 @@ def test_note_then_ask_returns_grounded_reply_with_date() -> None:
     body = ask_resp.json()
     assert body["method"] == "sendMessage"
     assert body["chat_id"] == 42
-    # Slice 4.4 (D-036): reply body is the LLM answer_text (mock-deterministic),
-    # followed by the unchanged retrieval trailer. Cited chunk text is not in
-    # the default reply; /sources exposes it on demand.
+    # Reply body is the LLM answer_text (mock-deterministic); the success-case
+    # `(hybrid retrieval — dense+sparse RRF)` trailer is no longer appended.
+    # Cited chunk text is not in the default reply; /sources exposes it on demand.
     text = body["text"]
     assert text.startswith("Mock answer grounded in 1 diary chunk(s):")
-    assert text.endswith("(hybrid retrieval — dense+sparse RRF)")
+    assert "dense+sparse RRF" not in text
+    assert "hybrid retrieval" not in text
+    # No extra blank trailer line remains after answer_text — the mock
+    # answer is single-line, so a remnant `\n\n<trailer>` would surface
+    # as a double newline.
+    assert "\n\n" not in text
     assert "Found 1 memory" not in text
     assert "Tried a new book" not in text
     # Slice 3.5: successful /ask persists one Query row + retrieval hits.
@@ -125,7 +130,10 @@ def test_ask_with_no_match_returns_no_evidence_fallback() -> None:
     resp = _post(client, _update("/ask snowstorm", update_id=2, message_id=2))
 
     assert resp.status_code == 200
-    assert resp.json()["text"] == "No memories matched 'snowstorm'."
+    assert resp.json()["text"] == (
+        "Nothing in your saved notes matched 'snowstorm'. "
+        "Try rephrasing the question, or use words that appear in your notes."
+    )
     # Slice 3.5: NO_EVIDENCE still persists one Query row with zero hits.
     assert store.len_queries() == 1
     assert store.len_retrieval_hits() == 0
@@ -145,10 +153,78 @@ def test_note_with_invalid_first_line_returns_invalid_input_and_persists_source(
     resp = _post(client, _update("/note not-a-date\nfoo", update_id=1))
 
     assert resp.status_code == 200
-    assert resp.json()["text"] == (
-        "Mock /note needs an ISO date (YYYY-MM-DD) on the first line. Got: 'not-a-date'."
-    )
+    text = resp.json()["text"]
+    assert text == "First line must be a date like 2026-05-09. Got: 'not-a-date'."
+    # D-070: the dev-leaking "Mock" label is no longer in the user-facing reply.
+    assert "Mock" not in text
     assert store.len_sources() == 1
+    assert store.len_notes() == 0
+    assert store.len_chunks() == 0
+
+
+def test_explicit_note_with_slash_separated_yyyy_first_is_normalized_and_saved() -> None:
+    # D-070: explicit /note path normalizes a six-form near-ISO whitelist
+    # to canonical YYYY-MM-DD before the strict parser runs.
+    client, store = _client_with_fresh_store()
+
+    resp = _post(client, _update("/note 2026/05/09\nfoo", update_id=1))
+
+    assert resp.status_code == 200
+    assert resp.json()["text"] == "Saved 1 event for 2026-05-09."
+    assert store.len_chunks() == 1
+
+
+def test_explicit_note_with_dd_first_uses_dd_mm_yyyy_convention_pin() -> None:
+    # D-070 convention pin: DD-first inputs are always interpreted as
+    # DD/MM/YYYY by intentional product convention. 05/09/2026 must
+    # therefore be saved as 2026-09-05 (5 September 2026), never as
+    # 2026-05-09 (9 May 2026). A future "let's allow MM/DD/YYYY too"
+    # change cannot land without flipping this red.
+    client, store = _client_with_fresh_store()
+
+    resp = _post(client, _update("/note 05/09/2026\nfoo", update_id=1))
+
+    assert resp.status_code == 200
+    assert resp.json()["text"] == "Saved 1 event for 2026-09-05."
+    assert store.len_chunks() == 1
+
+
+def test_explicit_note_with_dot_separated_date_is_normalized_and_saved() -> None:
+    client, store = _client_with_fresh_store()
+
+    resp = _post(client, _update("/note 09.05.2026\nfoo", update_id=1))
+
+    assert resp.status_code == 200
+    assert resp.json()["text"] == "Saved 1 event for 2026-05-09."
+    assert store.len_chunks() == 1
+
+
+def test_explicit_note_with_unpadded_date_is_rejected() -> None:
+    # D-070 whitelist is exact — unpadded forms (2026-5-9) remain rejected.
+    client, store = _client_with_fresh_store()
+
+    resp = _post(client, _update("/note 2026-5-9\nfoo", update_id=1))
+
+    assert resp.status_code == 200
+    assert resp.json()["text"] == "First line must be a date like 2026-05-09. Got: '2026-5-9'."
+    assert store.len_notes() == 0
+    assert store.len_chunks() == 0
+
+
+def test_heuristic_classifier_not_broadened_by_packet_2() -> None:
+    # Regression guardrail (NOT a contract assertion about the desired
+    # long-term shape of the heuristic): the legacy plain-text NOTE
+    # auto-route was not coupled to the D-070 whitelist. Plain text
+    # starting with 2026/05/09 still does not auto-promote to NOTE.
+    # The legacy heuristic itself is slated for separate cleanup; this
+    # test only proves Packet 2 did not enlarge its surface.
+    client, store = _client_with_fresh_store()
+
+    resp = _post(client, _update("2026/05/09\nfoo", update_id=1))
+
+    assert resp.status_code == 200
+    text = resp.json()["text"]
+    assert text.startswith("Stored as draft")
     assert store.len_notes() == 0
     assert store.len_chunks() == 0
 
@@ -159,7 +235,10 @@ def test_ask_before_any_note_returns_no_evidence() -> None:
     resp = _post(client, _update("/ask anything", update_id=1))
 
     assert resp.status_code == 200
-    assert resp.json()["text"] == "No memories matched 'anything'."
+    assert resp.json()["text"] == (
+        "Nothing in your saved notes matched 'anything'. "
+        "Try rephrasing the question, or use words that appear in your notes."
+    )
 
 
 def test_dated_plain_text_is_ingested_as_note_via_heuristic() -> None:
@@ -182,10 +261,15 @@ def test_question_plain_text_returns_grounded_reply_via_heuristic() -> None:
 
     assert resp.status_code == 200
     text = resp.json()["text"]
-    # Slice 4.4 (D-036): answer_text body + retrieval trailer + heuristic marker.
+    # Reply shape: answer_text body + single `\n` + heuristic marker. The
+    # success-case retrieval trailer is no longer appended between them.
     assert text.startswith("Mock answer grounded in 1 diary chunk(s):")
-    assert "(hybrid retrieval — dense+sparse RRF)" in text
     assert text.endswith("(routed as question — send /ask next time to be explicit)")
+    assert "dense+sparse RRF" not in text
+    assert "hybrid retrieval" not in text
+    # No extra blank trailer remains between answer_text and the heuristic
+    # marker — body and marker are now separated by a single `\n`, not `\n\n`.
+    assert "\n\n" not in text
     assert "Found 1 memory" not in text
     assert "Learned a new recipe" not in text
 

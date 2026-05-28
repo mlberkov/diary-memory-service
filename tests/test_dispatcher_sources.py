@@ -177,8 +177,8 @@ def test_ask_success_then_sources_returns_selected_chunks() -> None:
     assert sources_result.reply_text == "Selected chunks for your last /ask (2 chunk(s)):"
     assert sources_result.source_blocks is not None
     assert sources_result.source_blocks == [
-        "[2026-05-09] c-1\n\nTried a new book",
-        "[2026-05-09] c-2\n\nHad a calm morning",
+        "[2026-05-09] (1/2)\n\nTried a new book",
+        "[2026-05-09] (2/2)\n\nHad a calm morning",
     ]
     assert sources_result.metadata["returned"] == "2"
 
@@ -200,7 +200,7 @@ def test_two_successful_asks_sources_returns_only_latest() -> None:
     dispatcher.dispatch(_ask("dog"))
     sources_result = dispatcher.dispatch(_sources())
 
-    assert sources_result.source_blocks == ["[2026-05-09] c-2\n\nWalked the dog"]
+    assert sources_result.source_blocks == ["[2026-05-09] (1/1)\n\nWalked the dog"]
     assert sources_result.metadata["returned"] == "1"
 
 
@@ -268,7 +268,7 @@ def test_provider_unavailable_ask_overwrites_cache_with_retrieved_chunks() -> No
 
     # PROVIDER_UNAVAILABLE retrieval still surfaced chunks, so /sources
     # returns the second turn's chunks (cache lifecycle: update on every /ask).
-    assert sources_result.source_blocks == ["[2026-05-09] c-2\n\nWalked the dog"]
+    assert sources_result.source_blocks == ["[2026-05-09] (1/1)\n\nWalked the dog"]
 
 
 def test_parse_failure_ask_overwrites_cache_with_retrieved_chunks() -> None:
@@ -289,7 +289,7 @@ def test_parse_failure_ask_overwrites_cache_with_retrieved_chunks() -> None:
     dispatcher.dispatch(_ask("dog"))
     sources_result = dispatcher.dispatch(_sources())
 
-    assert sources_result.source_blocks == ["[2026-05-09] c-2\n\nWalked the dog"]
+    assert sources_result.source_blocks == ["[2026-05-09] (1/1)\n\nWalked the dog"]
 
 
 # ---- two-family isolation ---------------------------------------------------
@@ -311,8 +311,8 @@ def test_two_family_caches_are_independent() -> None:
     a_sources = dispatcher.dispatch(_sources(chat_id="fam-A"))
     b_sources = dispatcher.dispatch(_sources(chat_id="fam-B"))
 
-    assert a_sources.source_blocks == ["[2026-05-09] a-1\n\nFamily A note"]
-    assert b_sources.source_blocks == ["[2026-05-09] b-1\n\nFamily B note"]
+    assert a_sources.source_blocks == ["[2026-05-09] (1/1)\n\nFamily A note"]
+    assert b_sources.source_blocks == ["[2026-05-09] (1/1)\n\nFamily B note"]
 
 
 # ---- /sources is read-only --------------------------------------------------
@@ -327,4 +327,4 @@ def test_repeated_sources_does_not_clear_cache() -> None:
     second = dispatcher.dispatch(_sources())
 
     assert first.source_blocks == second.source_blocks
-    assert second.source_blocks == ["[2026-05-09] c-1\n\nTried a new book"]
+    assert second.source_blocks == ["[2026-05-09] (1/1)\n\nTried a new book"]

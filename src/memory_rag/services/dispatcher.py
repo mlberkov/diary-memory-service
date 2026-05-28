@@ -31,9 +31,12 @@ rather than a 500.
 
 from __future__ import annotations
 
+import dataclasses
+
 from memory_rag.config import Settings
 from memory_rag.core.domain import AnswerResult, FallbackMode, IngestResult
 from memory_rag.core.domain.models import EventChunk
+from memory_rag.core.domain.parser import normalize_iso_date_token
 from memory_rag.core.export import ExportFormat
 from memory_rag.core.routing import DispatchResult, InboundMessage, RouteKind
 from memory_rag.logging import get_logger
@@ -45,8 +48,10 @@ log = get_logger(__name__)
 
 _REPLY_START = (
     "Welcome — diary mode. Use /note to record, /ask to query, /sources to see the chunks "
-    "behind your last answer, or /drafts to recall recent drafts. Plain text without a "
-    "command is stored as a draft so nothing is lost."
+    "behind your last answer, or /drafts to recall recent drafts. For /note, put a date on "
+    "the first line — 2026-05-09 is the recommended form; 2026/05/09, 2026.05.09, "
+    "09-05-2026, 09/05/2026, and 09.05.2026 also work (DD-first is read as DD/MM/YYYY). "
+    "Plain text without a command is stored as a draft so nothing is lost."
 )
 _REPLY_HELP = (
     "Commands: /start, /help, /note, /ask, /sources, /drafts, /export. Plain text "
@@ -74,7 +79,7 @@ _DRAFT_REPLY_HINT = (
 def _format_ingest_reply(result: IngestResult) -> str:
     if result.fallback is FallbackMode.INVALID_INPUT:
         got = result.invalid_first_line or ""
-        return f"Mock /note needs an ISO date (YYYY-MM-DD) on the first line. Got: '{got}'."
+        return f"First line must be a date like 2026-05-09. Got: '{got}'."
     assert result.note_date is not None
     if result.events_count == 0:
         return f"Saved {result.note_date.isoformat()} with no event lines."
@@ -82,51 +87,84 @@ def _format_ingest_reply(result: IngestResult) -> str:
     return f"Saved {result.events_count} {plural} for {result.note_date.isoformat()}."
 
 
+def _normalize_note_first_line(message: InboundMessage) -> InboundMessage:
+    """Rewrite the first non-empty line of an explicit ``/note`` payload to canonical ISO.
+
+    Used only on the explicit ``/note`` dispatch path (``is_heuristic=False``).
+    The non-empty-line rule must match :func:`parse_note`'s behavior so the
+    surface the user sees matches what the parser will then read.
+    """
+    payload = message.payload
+    if not payload:
+        return message
+    lines = payload.splitlines(keepends=True)
+    for idx, raw in enumerate(lines):
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        canonical = normalize_iso_date_token(stripped)
+        if canonical is None or canonical == stripped:
+            return message
+        leading_len = len(raw) - len(raw.lstrip())
+        trailing = raw[leading_len + len(stripped) :]
+        lines[idx] = raw[:leading_len] + canonical + trailing
+        return dataclasses.replace(message, payload="".join(lines))
+    return message
+
+
 def _format_draft_reply(result: IngestResult) -> str:
     suffix = " (replay)" if result.replayed else ""
     return f"{_DRAFT_REPLY_PREFIX}{suffix}. {_DRAFT_REPLY_HINT}"
 
 
-_RETRIEVAL_TRAILER = "(hybrid retrieval — dense+sparse RRF)"
 _TRAILER_WEAK_EVIDENCE = "(weak evidence — model expressed uncertainty)"
 _TRAILER_AMBIGUOUS = "(ambiguous question — refine and ask again)"
 _REPLY_PROVIDER_UNAVAILABLE = (
     "Couldn't generate an answer — chat provider is unavailable. Try again later."
 )
 _REPLY_PARSE_FAILURE = "Couldn't generate an answer — provider response was unparseable. Try again."
+_REPLY_NO_MATCHES_TEMPLATE = (
+    "Nothing in your saved notes matched '{query}'. "
+    "Try rephrasing the question, or use words that appear in your notes."
+)
 _REPLY_SOURCES_NONE = "No selected chunks available — ask a question with /ask first."
 
 
-def _render_source_block(chunk: EventChunk) -> str:
+def _render_source_block(chunk: EventChunk, *, index: int, total: int) -> str:
     """Render one selected chunk for ``/sources`` (D-036).
 
     "Selected" = post-RRF top-k chunk fed into the prompt. Rendered
-    "as-is": full ``chunk_text`` with the note date and chunk id as a
-    header. Not a citation, not fine-grained attribution.
+    "as-is": full ``chunk_text`` with the note date and a 1-based
+    ``(i/N)`` index as a header. The index is ephemeral — it numbers
+    the chunks within the current ``/ask``'s cached list only, in
+    post-RRF order, and is not a stable cross-``/ask`` identifier.
+    Not a citation, not fine-grained attribution. The underlying
+    ``chunk_id`` is not surfaced to the user; ``AnswerTrace.context_chunk_ids``
+    keeps it for operator forensics via SQL.
     """
-    return f"[{chunk.note_date.isoformat()}] {chunk.chunk_id}\n\n{chunk.chunk_text}"
+    return f"[{chunk.note_date.isoformat()}] ({index}/{total})\n\n{chunk.chunk_text}"
 
 
 def _format_answer_reply(result: AnswerResult) -> str:
     """Render the answer reply per :class:`FallbackMode` (D-035, D-036).
 
-    Slice 4.4 (D-036): the body for the three contours that surface an
-    LLM-produced answer (``NONE``, ``WEAK_EVIDENCE``, ``AMBIGUOUS``) is
-    ``result.answer_text`` followed by the contour-specific trailer.
-    The cited chunks are not in the default reply — ``/sources`` exposes
-    them on demand.
+    Slice 4.4 (D-036): the body for ``NONE`` is ``result.answer_text``
+    alone. ``WEAK_EVIDENCE`` and ``AMBIGUOUS`` append their plain-English
+    explanatory trailer. The cited chunks are not in the default reply —
+    ``/sources`` exposes them on demand.
 
-    ``NO_EVIDENCE`` has two distinct effective paths — empty retrieval
+    ``NO_EVIDENCE`` has two distinct effective paths — empty-evidence
     and LLM-marker — that must produce different surface text per R-6.
     The Dispatcher disambiguates on ``bool(result.evidence)``. The
+    empty-evidence reply names the empty-match outcome and offers two
+    short question-side nudges, staying neutral about cause. The
     LLM-marker reply deliberately does not surface the LLM's prose:
     "no_evidence" means there is no answer to render.
     """
     fallback = result.fallback
 
     if fallback is FallbackMode.NONE:
-        body = result.answer_text or ""
-        return f"{body}\n\n{_RETRIEVAL_TRAILER}"
+        return result.answer_text or ""
 
     if fallback is FallbackMode.WEAK_EVIDENCE:
         body = result.answer_text or ""
@@ -150,7 +188,7 @@ def _format_answer_reply(result: AnswerResult) -> str:
                 f"Found possible matches but couldn't ground an answer for "
                 f"'{result.query_text}'. Try refining the question."
             )
-        return f"No memories matched '{result.query_text}'."
+        return _REPLY_NO_MATCHES_TEMPLATE.format(query=result.query_text)
 
     return _REPLY_UNKNOWN
 
@@ -216,6 +254,8 @@ class Dispatcher:
         if route is RouteKind.HELP:
             return DispatchResult(reply_text=_REPLY_HELP, route=route)
         if route is RouteKind.NOTE:
+            if not is_heuristic:
+                message = _normalize_note_first_line(message)
             ingest = self._domain.ingest(message)
             reply = _format_ingest_reply(ingest)
             if is_heuristic:
@@ -430,7 +470,10 @@ class Dispatcher:
                 },
             )
         header = f"Selected chunks for your last /ask ({len(chunks)} chunk(s)):"
-        source_blocks = [_render_source_block(c) for c in chunks]
+        total = len(chunks)
+        source_blocks = [
+            _render_source_block(c, index=i + 1, total=total) for i, c in enumerate(chunks)
+        ]
         return DispatchResult(
             reply_text=header,
             route=RouteKind.SOURCES,

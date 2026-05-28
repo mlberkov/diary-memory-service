@@ -97,7 +97,10 @@ def test_not_implemented_error_translates_to_no_evidence(
         result = dispatcher.dispatch(_ask("book"))
 
     assert result.route is RouteKind.ASK
-    assert result.reply_text == "No memories matched 'book'."
+    assert result.reply_text == (
+        "Nothing in your saved notes matched 'book'. "
+        "Try rephrasing the question, or use words that appear in your notes."
+    )
     assert result.metadata["fallback"] == FallbackMode.NO_EVIDENCE.value
     assert any("retrieval.unavailable" in line for line in caplog.text.splitlines())
 
@@ -159,7 +162,10 @@ def test_llm_marker_no_evidence_distinct_from_empty_retrieval() -> None:
     empty = empty_dispatcher.dispatch(_ask("book"))
     llm = llm_dispatcher.dispatch(_ask("book"))
 
-    assert empty.reply_text == "No memories matched 'book'."
+    assert empty.reply_text == (
+        "Nothing in your saved notes matched 'book'. "
+        "Try rephrasing the question, or use words that appear in your notes."
+    )
     assert llm.reply_text == (
         "Found possible matches but couldn't ground an answer for 'book'. "
         "Try refining the question."
@@ -218,3 +224,36 @@ def test_weak_evidence_heuristic_still_appends_route_marker() -> None:
 
     assert "(weak evidence — model expressed uncertainty)" in result.reply_text
     assert "(routed as question — send /ask next time to be explicit)" in result.reply_text
+
+
+def test_sibling_fallback_wording_unchanged() -> None:
+    """Anti-bleed guard: empty-evidence wording packet must not touch sibling fallback replies.
+
+    Asserts byte-equality of ``PROVIDER_UNAVAILABLE`` and ``PARSE_FAILURE``
+    reply literals so any accidental cross-contour wording change is caught
+    in this packet's own test diff, not only by the per-mode tests above.
+    """
+    provider_dispatcher = _build_dispatcher(
+        AnswerResult(
+            fallback=FallbackMode.PROVIDER_UNAVAILABLE,
+            query_text="book",
+            evidence=_evidence(),
+        )
+    )
+    parse_dispatcher = _build_dispatcher(
+        AnswerResult(
+            fallback=FallbackMode.PARSE_FAILURE,
+            query_text="book",
+            evidence=_evidence(),
+        )
+    )
+
+    provider = provider_dispatcher.dispatch(_ask("book"))
+    parse = parse_dispatcher.dispatch(_ask("book"))
+
+    assert provider.reply_text == (
+        "Couldn't generate an answer — chat provider is unavailable. Try again later."
+    )
+    assert parse.reply_text == (
+        "Couldn't generate an answer — provider response was unparseable. Try again."
+    )

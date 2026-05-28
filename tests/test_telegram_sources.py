@@ -144,8 +144,8 @@ def test_sources_after_ask_delivers_one_combined_outbound_message() -> None:
     assert len(tg.message_calls) == 1
     body = tg.message_calls[0]["text"]
     assert body.startswith("Selected chunks for your last /ask (2 chunk(s)):")
-    assert "[2026-05-09] c-1\n\nTried a new book" in body
-    assert "[2026-05-09] c-2\n\nHad a calm morning" in body
+    assert "[2026-05-09] (1/2)\n\nTried a new book" in body
+    assert "[2026-05-09] (2/2)\n\nHad a calm morning" in body
     # As-is rendering: chunk text appears verbatim (no excerpt, no truncation).
     assert body.index("Tried a new book") < body.index("Had a calm morning")
 
