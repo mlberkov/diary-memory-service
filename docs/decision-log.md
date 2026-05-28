@@ -2135,3 +2135,40 @@ The evidence is intentionally one-shot and operator-deliberate. It does not turn
 - Any harness extension, quality aggregate, threshold, or CI gate.
 - Any schema, migration, retrieval, answer-path, or provider-adapter change.
 - DEPLOY-1.7b, D-038, Slice 3.4, Slice 3.7, D-026 rename work, and any multi-run statistical capture.
+
+---
+
+## D-075 — REAL-1 tracking-doc hygiene: collapse duplicate REAL-1 entries left behind after D-074
+
+### Context
+
+D-074 closed REAL-1 by landing the populated dated evidence artifact `docs/real-answer-drill/real-answer-smoke-20260528-evidence.json` and adding closed-state milestone copies in `docs/todo.md` and `docs/execution-map.md`. The pre-existing open-state copies of the same milestone were not removed at the time, so the branch carried two contradictory REAL-1 milestone blocks in `docs/todo.md` (one tagged `— in progress` with REAL-1.1 marked `outstanding`, one tagged `— complete` with REAL-1.1 marked `done (D-074)`) and two REAL-1.1 rows in the `Real-answer e2e proof rollout` table in `docs/execution-map.md` (one row carrying the pre-closure `Operator-dependent. Requires …` description, one row carrying the `**Done (D-074).**` closure description). The REAL-1 milestone is therefore not reviewable as a coherent unit while the tracking docs simultaneously carry both states.
+
+### Decision
+
+Collapse the duplicates by deleting the stale open-state copies and keeping the closed-state entries intact:
+
+- In `docs/todo.md`, delete the `## Real-answer end-to-end value-loop proof (REAL-1) — in progress` block (the heading and its three bullets covering milestone scope, REAL-1.0 prep, and the pre-closure REAL-1.1 outstanding description) together with the trailing blank-line separator. Keep the `## Real-answer end-to-end value-loop proof (REAL-1) — complete` block (heading + milestone scope bullet + REAL-1.0 done (D-073) bullet + REAL-1.1 done (D-074) bullet) byte-for-byte intact at its existing position.
+- In `docs/execution-map.md`, delete the stale REAL-1.1 row whose right-hand column begins `Operator-dependent. Requires real \`OPENAI_API_KEY\` …` from the `Real-answer e2e proof rollout` table. Keep the REAL-1.0 (D-073) row and the REAL-1.1 `**Done (D-074).**` row byte-for-byte intact, along with the table header and the section intro.
+
+No other doc, source file, schema, migration, test, script, or build artifact is touched. The REAL-1 evidence artifact `docs/real-answer-drill/real-answer-smoke-20260528-evidence.json` and the REAL-1.0 template `docs/real-answer-drill/real-answer-smoke-TEMPLATE.json` are not edited. The D-073 and D-074 decision-log entries are not edited. `docs/RUNBOOK.md` is not edited. The kept closed-state REAL-1 entries are not reworded.
+
+### Why
+
+The contradiction in the tracking docs is purely an artifact of how D-074 layered its closure copies on top of the pre-existing in-progress copies without removing them. Collapsing the duplicates is the minimum docs-only follow-up needed to leave the milestone documentation self-consistent so the branch becomes reviewable as a coherent unit, without rewording the surviving closed-state entries and without widening into REAL-2, quality expansion, deployment follow-up, or any new live-run work.
+
+### Consequence
+
+- **Changed:** `docs/todo.md` — stale open-state REAL-1 milestone block removed; closed-state block preserved at its existing position.
+- **Changed:** `docs/execution-map.md` — stale REAL-1.1 row removed from the `Real-answer e2e proof rollout` table; REAL-1.0 (D-073) and REAL-1.1 (Done, D-074) rows preserved.
+- **Changed:** `docs/decision-log.md` — this D-075 entry.
+- REAL-1 closure flags from D-074 (`summary.note_round_trip_green`, `summary.ask_round_trip_green`, `summary.answer_grounded`, `summary.closes_real_1`) remain green on the unchanged evidence artifact `docs/real-answer-drill/real-answer-smoke-20260528-evidence.json`.
+- No `src/`, schema, migration, script, test, `docker-compose.yml`, `Dockerfile`, `.env.example`, `Makefile`, `pyproject.toml`, or `uv.lock` change is part of this cleanup.
+
+### Out of scope
+
+- Any `src/`, schema, migration, test, script, `docker-compose.yml`, `Dockerfile`, `Makefile`, `pyproject.toml`, `uv.lock`, `QUICKSTART.md`, `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/RUNBOOK.md`, `docs/INVARIANTS.md`, `docs/RUNTIME-INVARIANTS.md`, `docs/assumptions.md`, `docs/assumption-audit.md`, `docs/ARCHITECTURE.md`, `docs/product/*`, `docs/GLOSSARY.md`, `docs/OPERATIONALIZATION-ROADMAP.md`, `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md`, or `docs/RENAMING-ROADMAP.md` change.
+- Any edit to `docs/real-answer-drill/real-answer-smoke-20260528-evidence.json` or `docs/real-answer-drill/real-answer-smoke-TEMPLATE.json`.
+- Any rewording of the kept closed-state REAL-1 entries in `docs/todo.md` or `docs/execution-map.md` beyond the minimum needed to remove duplication.
+- Any widening into REAL-2, quality expansion, deployment follow-up, DEPLOY-1.7b operator drill, D-072 routing-contract rescue, D-038 baseline measurement, Slice 3.4 / 3.7 work, D-026 rename work, or new live-run work.
+- Any live OpenAI call, `make check` dependency, or new gated test.
