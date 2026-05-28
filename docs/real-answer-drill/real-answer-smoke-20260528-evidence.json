@@ -1,0 +1,226 @@
+{
+  "drill": "REAL-1.1 — real-answer end-to-end value-loop proof: /note → retrieval → grounded-answer round-trip with real OpenAI embeddings (D-024) + real OpenAI chat (D-037) (D-073 prep / REAL-1.1 capture)",
+  "metadata": {
+    "capture_date": "20260528",
+    "environment": "real backend — STORAGE_BACKEND=postgres, EMBEDDING_BACKEND=openai, EMBEDDING_MODEL=text-embedding-3-large, EMBEDDING_DIMENSION=3072, CHAT_BACKEND=openai, CHAT_MODEL=gpt-4.1; OP-1 migrations applied; OP-2 bounded retry/backoff active at defaults; webhook secret set",
+    "host_redacted": true,
+    "notes": "Live operator evidence for the real-answer end-to-end value-loop proof. Credential-bearing values are replaced by <REDACTED>; structural outcomes are preserved verbatim. A prior mock-backend preflight attempt was rejected and excluded from closure evidence; this artifact records the isolated real-backend run on community_id 5252525201."
+  },
+  "preflight_state": {
+    "env_knobs": {
+      "STORAGE_BACKEND": "postgres",
+      "EMBEDDING_BACKEND": "openai",
+      "EMBEDDING_MODEL": "text-embedding-3-large",
+      "EMBEDDING_DIMENSION": 3072,
+      "CHAT_BACKEND": "openai",
+      "CHAT_MODEL": "gpt-4.1",
+      "OPENAI_API_KEY": "<REDACTED>",
+      "TELEGRAM_WEBHOOK_SECRET": "<REDACTED>",
+      "TELEGRAM_BOT_TOKEN": "<REDACTED>",
+      "PROVIDER_TIMEOUT_SECONDS": "30.0",
+      "PROVIDER_MAX_ATTEMPTS": "3"
+    },
+    "boot_log_line_shape": "app.created env=<env> version=<version> embedding_backend=openai embedding_dim=3072 chat_backend=openai chat_model=gpt-4.1",
+    "boot_log_line_verbatim": "memory_rag_app  | 2026-05-28 17:34:26,093 INFO memory_rag.app :: app.created env=local version=0.0.0 embedding_backend=openai embedding_dim=3072 chat_backend=openai chat_model=gpt-4.1",
+    "boot_gate_outcome": "ok",
+    "boot_gate_notes": "_verify_embedding_contour and _verify_chat_contour in src/memory_rag/app.py abort start on any canonical-knob mismatch (R-10); a successful app.created line implies both gates passed."
+  },
+  "note_round_trip": {
+    "request": {
+      "method": "POST",
+      "url_shape": "http://127.0.0.1:8000/telegram/webhook",
+      "url_redacted": false,
+      "headers": {
+        "Content-Type": "application/json",
+        "X-Telegram-Bot-Api-Secret-Token": "<REDACTED>"
+      },
+      "body_shape": {
+        "update_id": 900000301,
+        "message": {
+          "message_id": 900000301,
+          "date": 1780000401,
+          "chat": {
+            "id": 5252525201
+          },
+          "from": {
+            "id": 8888888801
+          },
+          "text": "/note 2026-05-09\nNora built a violet kite puzzle before breakfast.\nNora watered the basil plant with a blue cup after lunch.\nNora practiced three quiet piano songs before bedtime."
+        }
+      }
+    },
+    "response": {
+      "http_status": 200,
+      "body_shape": {
+        "method": "sendMessage",
+        "chat_id": 5252525201,
+        "text": "Saved 3 events for 2026-05-09."
+      },
+      "body_text_verbatim": "Saved 3 events for 2026-05-09."
+    },
+    "post_ingest_row_counts": {
+      "source_messages_delta": 1,
+      "notes_delta": 1,
+      "event_chunks_delta": 3
+    },
+    "source_message_row": {
+      "source_message_id": "ecf912f4-8cad-43a9-8917-750c316d1e08",
+      "community_id": "5252525201",
+      "author_user_id": "8888888801",
+      "external_chat_id": "5252525201",
+      "external_user_id": "8888888801",
+      "external_message_id": "900000301",
+      "detected_route": "note",
+      "created_at": "2026-05-28 17:42:22.349745+00"
+    },
+    "embedding_records_sample_row": {
+      "model_name": "text-embedding-3-large",
+      "embedding_dim_observed": 3072,
+      "vector_dims_observed": 3072,
+      "rows_inserted": 3
+    },
+    "event_chunks_status_transition": {
+      "before": "pending",
+      "after_observed": "ready for every chunk in this /note"
+    },
+    "event_chunks": [
+      {
+        "chunk_id": "5256c14a-3d22-4f3c-9cee-eb6432705ace",
+        "event_index": 0,
+        "chunk_text": "Nora built a violet kite puzzle before breakfast.",
+        "embedding_status": "ready",
+        "embedding_model_name": "text-embedding-3-large",
+        "embedding_dimension": 3072
+      },
+      {
+        "chunk_id": "c529c297-2121-4ae0-8daa-1316488d83b7",
+        "event_index": 1,
+        "chunk_text": "Nora watered the basil plant with a blue cup after lunch.",
+        "embedding_status": "ready",
+        "embedding_model_name": "text-embedding-3-large",
+        "embedding_dimension": 3072
+      },
+      {
+        "chunk_id": "a82226bb-8c06-45ba-9d55-5a82d648fe48",
+        "event_index": 2,
+        "chunk_text": "Nora practiced three quiet piano songs before bedtime.",
+        "embedding_status": "ready",
+        "embedding_model_name": "text-embedding-3-large",
+        "embedding_dimension": 3072
+      }
+    ],
+    "provider_attempt_log_line_shape": "provider.attempt label=openai.embeddings attempt=<n>/<N> outcome=<class> latency_ms=<int>",
+    "provider_attempt_log_line_verbatim": "memory_rag_app  | 2026-05-28 17:42:22,546 INFO memory_rag.adapters.embeddings.openai_client :: provider.attempt label=openai.embeddings attempt=1/3 outcome=success latency_ms=190"
+  },
+  "ask_round_trip": {
+    "request": {
+      "method": "POST",
+      "url_shape": "http://127.0.0.1:8000/telegram/webhook",
+      "url_redacted": false,
+      "headers": {
+        "Content-Type": "application/json",
+        "X-Telegram-Bot-Api-Secret-Token": "<REDACTED>"
+      },
+      "body_shape": {
+        "update_id": 900000302,
+        "message": {
+          "message_id": 900000302,
+          "date": 1780000402,
+          "chat": {
+            "id": 5252525201
+          },
+          "from": {
+            "id": 8888888801
+          },
+          "text": "/ask violet kite puzzle breakfast"
+        }
+      }
+    },
+    "response": {
+      "http_status": 200,
+      "body_shape": {
+        "method": "sendMessage",
+        "chat_id": 5252525201,
+        "text": "Nora built a violet kite puzzle before breakfast."
+      },
+      "user_facing_reply_verbatim": "Nora built a violet kite puzzle before breakfast."
+    },
+    "queries_row": {
+      "query_id": "09d7a3d5-224e-40ce-880e-702633f4397b",
+      "fallback": "none",
+      "community_id_redacted": true,
+      "query_text_verbatim": "violet kite puzzle breakfast",
+      "model_name": "text-embedding-3-large",
+      "created_at": "2026-05-28 17:42:41.487312+00"
+    },
+    "retrieval_hits_row_counts_by_leg": {
+      "dense": 3,
+      "sparse": 1,
+      "merged": 3
+    },
+    "retrieval_hit_rows": [
+      {
+        "leg": "dense",
+        "rank": 1,
+        "chunk_id": "5256c14a-3d22-4f3c-9cee-eb6432705ace",
+        "model_name": "text-embedding-3-large",
+        "chunk_text": "Nora built a violet kite puzzle before breakfast."
+      },
+      {
+        "leg": "sparse",
+        "rank": 1,
+        "chunk_id": "5256c14a-3d22-4f3c-9cee-eb6432705ace",
+        "model_name": "simple",
+        "chunk_text": "Nora built a violet kite puzzle before breakfast."
+      },
+      {
+        "leg": "merged",
+        "rank": 1,
+        "chunk_id": "5256c14a-3d22-4f3c-9cee-eb6432705ace",
+        "model_name": "text-embedding-3-large",
+        "chunk_text": "Nora built a violet kite puzzle before breakfast."
+      }
+    ],
+    "answer_traces_row": {
+      "answer_trace_id": "796d7c8c-f044-4d73-bea2-684df7aacf9b",
+      "fallback_mode": "none",
+      "model_name": "gpt-4.1",
+      "prompt_version": "v1",
+      "context_chunk_ids_non_empty": true,
+      "context_chunk_ids": [
+        "5256c14a-3d22-4f3c-9cee-eb6432705ace",
+        "c529c297-2121-4ae0-8daa-1316488d83b7",
+        "a82226bb-8c06-45ba-9d55-5a82d648fe48"
+      ],
+      "latency_ms": 2132,
+      "token_counts": {
+        "prompt": 279,
+        "completion": 59
+      },
+      "answer_text_verbatim": "Nora built a violet kite puzzle before breakfast.",
+      "created_at": "2026-05-28 17:42:43.835492+00"
+    },
+    "provider_attempt_log_line_shape": "provider.attempt label=openai.chat attempt=<n>/<N> outcome=<class> latency_ms=<int>",
+    "provider_attempt_log_line_verbatim": "memory_rag_app  | 2026-05-28 17:42:43,830 INFO memory_rag.adapters.answers.openai_client :: provider.attempt label=openai.chat attempt=1/3 outcome=success latency_ms=2131"
+  },
+  "out_of_scope_for_this_packet": [
+    "Any src/ / scripts / docker-compose.yml / schema / migration / tests/ change.",
+    "Any live OpenAI call inside make check or any new gated test.",
+    "Any harness extension, new aggregate, or retrieval/answer-path behavior change.",
+    "Resilience-knob tuning beyond D-047 / D-049 defaults.",
+    "RouteKind.ENTRY → NOTE / Note / D-026 rename work.",
+    "DEPLOY-1.7b cross-version upgrade drill work.",
+    "Slice 3.4 metadata-filter dimensions (child_id, visibility_scope).",
+    "Slice 3.7 dual-config tsvector and the unresolved D-038 Postgres baseline capture.",
+    "Multi-run / multi-query / multi-language statistical capture — the milestone is a one-shot value-loop proof."
+  ],
+  "summary": {
+    "note_round_trip_green": true,
+    "ask_round_trip_green": true,
+    "answer_grounded": true,
+    "closes_real_1_0": false,
+    "closes_real_1_1": true,
+    "closes_real_1": true,
+    "verdict": "REAL-1.1 green — wired OpenAI paths produced a grounded /note → /ask round-trip end-to-end; REAL-1 closed."
+  }
+}

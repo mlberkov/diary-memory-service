@@ -2043,3 +2043,132 @@ The vocabulary migration to "notes" aligns the user-facing reply with the canoni
 - Sibling-subject / "did you mean another subject" hints (D-040-adjacent); these are explicitly out of scope today.
 - DEPLOY-1.7b — v2 → v3 cross-version upgrade drill against a real previously-installed v2 VPS (sole canonical remaining DEPLOY-1 closure packet per D-067 / D-068).
 - A-43 logs-first observability scope work.
+
+---
+
+## D-073 — Real-answer end-to-end value-loop proof (REAL-1) prep: operator procedure + evidence-file template for one recorded /note → retrieval → grounded-answer round-trip against real OpenAI
+
+### Decision
+Open the **Real-answer end-to-end value-loop proof (REAL-1)** milestone and land its **docs-first operator-procedure preparation** (REAL-1.0) — the RUNBOOK procedure, the committed evidence-file template, and the cross-doc registration — ahead of the operator execution itself (REAL-1.1). REAL-1.1 remains the sole closure step for REAL-1. The next free decision number on this branch is D-073: D-072 is parked on the sibling `rescue/d072-doc-closure-and-routing-contract` branch (the checkpoint commit message reads *"preserve D-072 routing/doc work before baseline reprioritization"*) and is deliberately not reused here, so the rescue work can land later at its original number without renumbering.
+
+D-073 mirrors the D-068 (DEPLOY-1.7b prep) precedent shape: a narrowly-scoped prep packet that pins the artifact shape + procedure + cross-doc registration now, isolating the operator-dependent live-run capture into a single subsequent action. The motivation is the same — the live run cannot be authored autonomously without operator credentials (real `OPENAI_API_KEY`, real Telegram webhook secret, real Postgres), but the artifact *shape*, the *procedure*, and the *milestone registration* can — and pinning those first is the smallest autonomous step that materially advances the milestone without widening scope.
+
+D-073 lands via:
+
+- The new `docs/RUNBOOK.md` "Real-answer end-to-end smoke (REAL-1 / D-073)" subsection at `###` level, placed inside the existing top-level "Operations" group immediately after the "Answer traces (D-034, D-035)" subsection and before the "Selected-chunks recall (`/sources`, D-036)" subsection so it sits adjacent to the inspection surfaces it depends on. Names operator pre-conditions (the canonical env knobs — `STORAGE_BACKEND=postgres`, `EMBEDDING_BACKEND=openai`, `EMBEDDING_MODEL=text-embedding-3-large`, `EMBEDDING_DIMENSION=3072`, `CHAT_BACKEND=openai`, `CHAT_MODEL=gpt-4.1`, `TELEGRAM_WEBHOOK_SECRET` set — and the boot-gate enforcement in `src/memory_rag/app.py`'s `_verify_embedding_contour` / `_verify_chat_contour`); the numbered run procedure (export env → `docker compose --profile vps up -d --build` → confirm verbatim `app.created` line → POST `/note` reusing the QUICKSTART.md:87-92 curl shape with the real webhook secret → confirm `embedding_status='ready'` via SQL → POST `/ask` reusing the QUICKSTART.md:95-99 curl shape → capture the verbatim `answer_traces` row via the existing one-liner from §"Answer traces (D-034, D-035)" with `LIMIT 1` → capture the two `provider.attempt` log lines (embedding + chat) → hand-assemble the dated artifact by copying the template + dropping the `"_template": true` flag + replacing every `<TO_FILL_BY_OPERATOR>` placeholder → run the redaction grep checklist); the evidence-file shape (five top-level branches `metadata`, `preflight_state`, `note_round_trip`, `ask_round_trip`, `summary`, plus the verbatim `out_of_scope_for_this_packet` block); the mandatory redaction rule with a pre-commit grep checklist (`$OPENAI_API_KEY`, `$TELEGRAM_BOT_TOKEN`, `$TELEGRAM_WEBHOOK_SECRET`, `$PUBLIC_HOSTNAME`); the closure signal (a populated dated `docs/real-answer-drill/real-answer-smoke-<YYYYMMDD>-evidence.json` with all three summary booleans `true` and `closes_real_1: true`); and an explicit `make check` non-impact note (no live OpenAI in CI; no new gated test).
+- The new committed evidence-file template at `docs/real-answer-drill/real-answer-smoke-TEMPLATE.json` carrying a top-level `"_template": true` flag so it cannot be misread as real evidence, the five top-level branches above, and the dual placeholder convention — `<REDACTED>` for credential-bearing values and `<TO_FILL_BY_OPERATOR>` for outcomes the operator captures from the real run. Stable values are pre-filled (`preflight_state.env_knobs.STORAGE_BACKEND="postgres"`, `EMBEDDING_BACKEND="openai"`, `EMBEDDING_MODEL="text-embedding-3-large"`, `EMBEDDING_DIMENSION=3072`, `CHAT_BACKEND="openai"`, `CHAT_MODEL="gpt-4.1"`; the structural `app.created … embedding_backend=openai embedding_dim=3072 chat_backend=openai chat_model=gpt-4.1` log-line shape; the `provider.attempt label=openai_embedding …` and `provider.attempt label=openai_chat …` shapes; the expected `answer_traces` row contract `fallback_mode='none'`, `model_name='gpt-4.1'`, `prompt_version='v1'`, non-empty `context_chunk_ids`, non-zero `latency_ms`, non-empty `token_counts`).
+
+The closure of REAL-1.1 and therefore REAL-1 remains a future, operator-dependent step. The committed template plus the RUNBOOK subsection mean that when the operator has credentials in hand, the only remaining work is to execute the documented procedure and commit the populated dated evidence artifact.
+
+### Why
+The product baseline is incomplete under the binding owner rule until at least one real-backend `/note` → retrieval → grounded-answer round-trip has been recorded as a committed evidence artifact. The OpenAI-side adapters (D-024 embeddings; D-037 chat client + boot gate), the OP-2 bounded-retry / backoff (D-047 / D-049), the OP-4 backup automation (D-054 / D-055), and the OP-5 inspection harness (D-056 / D-057 / D-058 / D-059) contours are all already wired and validated in mock — what is missing is the captured live run.
+
+A single-packet "land the live run + populated dated artifact" approach would be the DEPLOY-1.7a precedent (D-067), but the live run cannot be authored autonomously without operator credentials. The D-068 / DEPLOY-1.7b precedent already shows the canonical split for this constraint: prep packet first (procedure + committed template + cross-doc registration), live-run packet second. REAL-1.0 takes that shape.
+
+Committing the evidence-file template explicitly (with `"_template": true`, `<TO_FILL_BY_OPERATOR>` placeholders, and the operator-copy instruction in `metadata.notes`) — rather than leaving it implicit in the RUNBOOK subsection — eliminates the risk of REAL-1.1 landing an artifact whose shape drifts from the documented contract. The future dated artifact is mechanically derived by copying + filling the committed template.
+
+The five-branch artifact shape (`metadata`, `preflight_state`, `note_round_trip`, `ask_round_trip`, `summary`) is the minimum that proves the value loop end-to-end: `preflight_state` records the boot-gate green signal (the canonical env-knob set actually reached `app.created`); `note_round_trip` records that the embedding path took (`embedding_status='ready'`, real `model_name=text-embedding-3-large` at dim 3072, one `provider.attempt label=openai_embedding`); `ask_round_trip` records that the chat path took (`fallback_mode='none'`, `model_name='gpt-4.1'`, non-empty `context_chunk_ids`, non-zero `latency_ms`, non-empty `token_counts`, one `provider.attempt label=openai_chat`, the verbatim user-facing reply that references the saved note content); `summary` records the three closure booleans. No additional branches are needed because OP-2 / OP-4 / OP-5 already supply the inspection surfaces the procedure leans on — `provider.attempt` for resilience, `answer_traces` for the answer-side trace, the existing operator SQL for retrieval-side inspection. **Reuse-only**: REAL-1.0 introduces no new resilience knob, no new aggregate, no new harness code, no extension of `_TRUNCATE_TABLES`, and no behavioral change.
+
+### Consequence
+- **New:** `docs/real-answer-drill/real-answer-smoke-TEMPLATE.json` — committed evidence-file template carrying `"_template": true`, five top-level branches (`metadata`, `preflight_state`, `note_round_trip`, `ask_round_trip`, `summary`) plus `out_of_scope_for_this_packet`, the dual placeholder convention (`<REDACTED>` for credential-bearing values; `<TO_FILL_BY_OPERATOR>` for outcomes the operator captures), and stable pre-filled values (`preflight_state.env_knobs.STORAGE_BACKEND="postgres"`, the openai backends + canonical models + 3072 dim, structural log-line shapes, the expected `answer_traces` row contract). The dated working artifact (`docs/real-answer-drill/real-answer-smoke-<YYYYMMDD>-evidence.json`) is REAL-1.1's output, not D-073's.
+- **Changed:** `docs/RUNBOOK.md` — new "Real-answer end-to-end smoke (REAL-1 / D-073)" subsection at `###` level placed between "Answer traces (D-034, D-035)" and "Selected-chunks recall (`/sources`, D-036)". Names operator pre-conditions, the numbered run procedure, the evidence-file shape, the explicit redaction rule (with the credential grep checklist), the closure signal, and the `make check` non-impact note.
+- **Changed:** `docs/todo.md` — new "Real-answer end-to-end value-loop proof (REAL-1) — in progress" milestone block placed after the closed "Post-DEPLOY-1 Phase-4 UX polish" block and before the OP-1 section. Two bullets: REAL-1.0 prep done (D-073); REAL-1.1 live run outstanding.
+- **Changed:** `docs/execution-map.md` — new "Real-answer e2e proof rollout *(sequenced separately from the Phase/Stage axis)*" section placed after the closed "Post-DEPLOY-1 Phase-4 UX polish" section. Two rows: REAL-1.0 operator-procedure prep (done, → D-073); REAL-1.1 operator live run + populated dated evidence (outstanding).
+- **No `src/` change**, no schema change, no migration change, no `tests/` change, no `pyproject.toml` / `uv.lock` change, no `Makefile` change, no `Dockerfile` / `.dockerignore` change, no `docker-compose.yml` change, no `.env.example` change, no `.gitignore` change, no `configs/caddy/Caddyfile` change, no change to any `scripts/` path.
+- `docs/INVARIANTS.md` / `docs/RUNTIME-INVARIANTS.md` deliberately **not** touched — D-073 lands operator-procedure prep; it neither adds nor verifies a runtime invariant. R-6 / R-9 / R-10 / I-3 / I-9 are unaffected (REAL-1.1 will exercise the same invariants the mock harness already validates under `make check`).
+- `docs/assumptions.md` / `docs/assumption-audit.md` deliberately **not** touched — no new assumption is opened; no existing assumption is closed.
+- `docs/ARCHITECTURE.md`, `docs/product/{PRD,BuildPlan,TechSpec}.md`, `docs/GLOSSARY.md`, `docs/OPERATIONALIZATION-ROADMAP.md`, `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md`, `docs/RENAMING-ROADMAP.md`, `AGENTS.md`, `CLAUDE.md`, `README.md`, `QUICKSTART.md` — also not touched.
+- **REAL-1.0 prep is complete; REAL-1.1 operator execution against real OpenAI stays the sole closure step; REAL-1 stays open.**
+
+### Out of scope (per packet boundaries)
+- The live run itself, the populated dated evidence artifact, and milestone closure — that is REAL-1.1.
+- Any `src/`, schema, migration, `docker-compose.yml`, `Dockerfile`, installer, `.env.example`, `Makefile`, `pyproject.toml`, or `uv.lock` change.
+- Any live OpenAI call inside `make check` or any new gated test (the existing `tests/test_chat_client_openai.py` and `tests/test_embedding_client_openai.py` are not touched).
+- Any harness extension, new `scripts/` path, new aggregate, or retrieval / answer-path / grading behavior change.
+- Any resilience-knob tuning beyond D-047 / D-049 defaults.
+- The `RouteKind.ENTRY → NOTE` / `Note` / `community_id` / `DomainRepository` / `memory_rag` renames closed under D-026 / D-042 are not reopened.
+- DEPLOY-1.7b — v2 → v3 cross-version upgrade drill against a real previously-installed v2 VPS (sole canonical remaining DEPLOY-1 closure packet per D-067 / D-068).
+- Slice 3.4 metadata-filter dimensions (`child_id`, `visibility_scope`).
+- Slice 3.7 dual-config tsvector and the unresolved D-038 Postgres baseline capture.
+- The previously-checkpointed routing/doc work on `rescue/d072-doc-closure-and-routing-contract` is deferred — D-072 stays parked at its original number on that branch; D-073 does not displace it.
+- Multi-run / multi-query / multi-language statistical capture — the milestone is a one-shot value-loop proof, by design.
+- Any `make real-*` convenience target (per the DEPLOY-1.2..1.7 precedent of deferring convenience targets).
+- A-43 logs-first observability scope work.
+- Any edit to `docs/INVARIANTS.md`, `docs/RUNTIME-INVARIANTS.md`, `docs/assumptions.md`, `docs/assumption-audit.md`, `docs/ARCHITECTURE.md`, `docs/product/{PRD,BuildPlan,TechSpec}.md`, `docs/GLOSSARY.md`, `docs/OPERATIONALIZATION-ROADMAP.md`, `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md`, `docs/RENAMING-ROADMAP.md`, `AGENTS.md`, `CLAUDE.md`, `README.md`, `QUICKSTART.md`.
+
+---
+
+## D-074 — Real-answer end-to-end value-loop proof (REAL-1) closure
+
+### Context
+
+REAL-1.0 (D-073) landed the operator procedure and evidence-file template for the real-answer smoke, but did not close REAL-1. The product-baseline gap remained open until one real-backend `/note` → retrieval → grounded-answer round-trip was captured as a populated dated evidence artifact using real Postgres, real OpenAI embeddings, real OpenAI chat, and the Telegram webhook secret contour.
+
+### Decision
+
+Close REAL-1.1 and therefore REAL-1 by recording the populated dated evidence artifact at `docs/real-answer-drill/real-answer-smoke-20260528-evidence.json`.
+
+The run used the canonical real-backend contour: `STORAGE_BACKEND=postgres`, `EMBEDDING_BACKEND=openai`, `EMBEDDING_MODEL=text-embedding-3-large`, `EMBEDDING_DIMENSION=3072`, `CHAT_BACKEND=openai`, `CHAT_MODEL=gpt-4.1`, and a set Telegram webhook secret. The boot gate emitted the expected `app.created ... embedding_backend=openai embedding_dim=3072 chat_backend=openai chat_model=gpt-4.1` line.
+
+The isolated smoke posted one `/note` into a fresh test community, persisted raw source data before enrichment, created one note and three event chunks, wrote three embedding records with `model_name='text-embedding-3-large'` and `dimension=3072`, and observed every chunk at `embedding_status='ready'`. The follow-up `/ask` produced a grounded user-facing answer from the saved note. Retrieval traces recorded dense, sparse, and merged rows; the answer trace recorded `fallback_mode='none'`, `model_name='gpt-4.1'`, `prompt_version='v1'`, non-empty `context_chunk_ids`, positive `latency_ms`, and non-empty token counts.
+
+### Why
+
+REAL-1 exists to prove the already-wired real provider paths produce user-visible value end to end, not only that the offline contracts and mock smokes pass. The populated artifact closes that gap with one bounded, inspectable value-loop run: capture through the Telegram webhook adapter, durable Postgres lineage, OpenAI embedding/indexing, hybrid retrieval, OpenAI grounded answer generation, and persisted traces.
+
+The evidence is intentionally one-shot and operator-deliberate. It does not turn live OpenAI calls into CI, does not add thresholds, and does not broaden the harness. It records the product-baseline proof needed before treating the real-answer path as closed.
+
+### Consequence
+
+- **New:** `docs/real-answer-drill/real-answer-smoke-20260528-evidence.json` — populated REAL-1.1 evidence artifact, derived from the D-073 template with `"_template": true` removed and credential-bearing values redacted.
+- **Changed:** `docs/decision-log.md` — this D-074 closure entry.
+- **Changed:** `docs/todo.md` — REAL-1 milestone marked complete; REAL-1.1 marked done.
+- **Changed:** `docs/execution-map.md` — REAL-1.1 row marked done (D-074) and pointed at the dated evidence artifact.
+- REAL-1 is closed by `summary.note_round_trip_green == true`, `summary.ask_round_trip_green == true`, `summary.answer_grounded == true`, and `summary.closes_real_1 == true`.
+- No `src/`, schema, migration, script, test, `docker-compose.yml`, `Dockerfile`, `.env`, `Makefile`, `pyproject.toml`, or `uv.lock` change is part of this closure.
+
+### Out of scope
+
+- Any runtime behavior change.
+- Any resilience-knob tuning beyond the D-047 / D-049 defaults.
+- Any live OpenAI call inside `make check` or any new gated test.
+- Any harness extension, quality aggregate, threshold, or CI gate.
+- Any schema, migration, retrieval, answer-path, or provider-adapter change.
+- DEPLOY-1.7b, D-038, Slice 3.4, Slice 3.7, D-026 rename work, and any multi-run statistical capture.
+
+---
+
+## D-075 — REAL-1 tracking-doc hygiene: collapse duplicate REAL-1 entries left behind after D-074
+
+### Context
+
+D-074 closed REAL-1 by landing the populated dated evidence artifact `docs/real-answer-drill/real-answer-smoke-20260528-evidence.json` and adding closed-state milestone copies in `docs/todo.md` and `docs/execution-map.md`. The pre-existing open-state copies of the same milestone were not removed at the time, so the branch carried two contradictory REAL-1 milestone blocks in `docs/todo.md` (one tagged `— in progress` with REAL-1.1 marked `outstanding`, one tagged `— complete` with REAL-1.1 marked `done (D-074)`) and two REAL-1.1 rows in the `Real-answer e2e proof rollout` table in `docs/execution-map.md` (one row carrying the pre-closure `Operator-dependent. Requires …` description, one row carrying the `**Done (D-074).**` closure description). The REAL-1 milestone is therefore not reviewable as a coherent unit while the tracking docs simultaneously carry both states.
+
+### Decision
+
+Collapse the duplicates by deleting the stale open-state copies and keeping the closed-state entries intact:
+
+- In `docs/todo.md`, delete the `## Real-answer end-to-end value-loop proof (REAL-1) — in progress` block (the heading and its three bullets covering milestone scope, REAL-1.0 prep, and the pre-closure REAL-1.1 outstanding description) together with the trailing blank-line separator. Keep the `## Real-answer end-to-end value-loop proof (REAL-1) — complete` block (heading + milestone scope bullet + REAL-1.0 done (D-073) bullet + REAL-1.1 done (D-074) bullet) byte-for-byte intact at its existing position.
+- In `docs/execution-map.md`, delete the stale REAL-1.1 row whose right-hand column begins `Operator-dependent. Requires real \`OPENAI_API_KEY\` …` from the `Real-answer e2e proof rollout` table. Keep the REAL-1.0 (D-073) row and the REAL-1.1 `**Done (D-074).**` row byte-for-byte intact, along with the table header and the section intro.
+
+No other doc, source file, schema, migration, test, script, or build artifact is touched. The REAL-1 evidence artifact `docs/real-answer-drill/real-answer-smoke-20260528-evidence.json` and the REAL-1.0 template `docs/real-answer-drill/real-answer-smoke-TEMPLATE.json` are not edited. The D-073 and D-074 decision-log entries are not edited. `docs/RUNBOOK.md` is not edited. The kept closed-state REAL-1 entries are not reworded.
+
+### Why
+
+The contradiction in the tracking docs is purely an artifact of how D-074 layered its closure copies on top of the pre-existing in-progress copies without removing them. Collapsing the duplicates is the minimum docs-only follow-up needed to leave the milestone documentation self-consistent so the branch becomes reviewable as a coherent unit, without rewording the surviving closed-state entries and without widening into REAL-2, quality expansion, deployment follow-up, or any new live-run work.
+
+### Consequence
+
+- **Changed:** `docs/todo.md` — stale open-state REAL-1 milestone block removed; closed-state block preserved at its existing position.
+- **Changed:** `docs/execution-map.md` — stale REAL-1.1 row removed from the `Real-answer e2e proof rollout` table; REAL-1.0 (D-073) and REAL-1.1 (Done, D-074) rows preserved.
+- **Changed:** `docs/decision-log.md` — this D-075 entry.
+- REAL-1 closure flags from D-074 (`summary.note_round_trip_green`, `summary.ask_round_trip_green`, `summary.answer_grounded`, `summary.closes_real_1`) remain green on the unchanged evidence artifact `docs/real-answer-drill/real-answer-smoke-20260528-evidence.json`.
+- No `src/`, schema, migration, script, test, `docker-compose.yml`, `Dockerfile`, `.env.example`, `Makefile`, `pyproject.toml`, or `uv.lock` change is part of this cleanup.
+
+### Out of scope
+
+- Any `src/`, schema, migration, test, script, `docker-compose.yml`, `Dockerfile`, `Makefile`, `pyproject.toml`, `uv.lock`, `QUICKSTART.md`, `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/RUNBOOK.md`, `docs/INVARIANTS.md`, `docs/RUNTIME-INVARIANTS.md`, `docs/assumptions.md`, `docs/assumption-audit.md`, `docs/ARCHITECTURE.md`, `docs/product/*`, `docs/GLOSSARY.md`, `docs/OPERATIONALIZATION-ROADMAP.md`, `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md`, or `docs/RENAMING-ROADMAP.md` change.
+- Any edit to `docs/real-answer-drill/real-answer-smoke-20260528-evidence.json` or `docs/real-answer-drill/real-answer-smoke-TEMPLATE.json`.
+- Any rewording of the kept closed-state REAL-1 entries in `docs/todo.md` or `docs/execution-map.md` beyond the minimum needed to remove duplication.
+- Any widening into REAL-2, quality expansion, deployment follow-up, DEPLOY-1.7b operator drill, D-072 routing-contract rescue, D-038 baseline measurement, Slice 3.4 / 3.7 work, D-026 rename work, or new live-run work.
+- Any live OpenAI call, `make check` dependency, or new gated test.
