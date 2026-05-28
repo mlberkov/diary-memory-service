@@ -1,0 +1,141 @@
+{
+  "_template": true,
+  "drill": "REAL-1.1 — real-answer end-to-end value-loop proof: /note → retrieval → grounded-answer round-trip with real OpenAI embeddings (D-024) + real OpenAI chat (D-037) (D-073 prep / REAL-1.1 capture)",
+  "metadata": {
+    "capture_date": "<TO_FILL_BY_OPERATOR YYYYMMDD>",
+    "environment": "real backend — STORAGE_BACKEND=postgres, EMBEDDING_BACKEND=openai, EMBEDDING_MODEL=text-embedding-3-large, EMBEDDING_DIMENSION=3072, CHAT_BACKEND=openai, CHAT_MODEL=gpt-4.1; OP-1 migrations applied; OP-2 bounded retry/backoff active at defaults; webhook secret set",
+    "host_redacted": true,
+    "notes": "Live operator evidence for the real-answer end-to-end value-loop proof. Per the REAL-1 redaction rule (RUNBOOK §\"Real-answer end-to-end smoke (REAL-1 / D-073)\"), credential-bearing values (OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, PUBLIC_HOSTNAME if used, webhook URL token) are replaced by <REDACTED> placeholders or a _redacted: true flag; structural outcomes (status strings, log-line shapes, row counts, fallback_mode values, prompt_version, latency_ms numeric magnitudes) are preserved verbatim. Operator action required before commit: (1) copy this file to docs/real-answer-drill/real-answer-smoke-<YYYYMMDD>-evidence.json (UTC-dated), (2) drop the top-level \"_template\": true flag, (3) replace every <TO_FILL_BY_OPERATOR> placeholder with the verbatim captured observation, (4) run the redaction grep checklist from the RUNBOOK subsection."
+  },
+  "preflight_state": {
+    "env_knobs": {
+      "STORAGE_BACKEND": "postgres",
+      "EMBEDDING_BACKEND": "openai",
+      "EMBEDDING_MODEL": "text-embedding-3-large",
+      "EMBEDDING_DIMENSION": 3072,
+      "CHAT_BACKEND": "openai",
+      "CHAT_MODEL": "gpt-4.1",
+      "OPENAI_API_KEY": "<REDACTED>",
+      "TELEGRAM_WEBHOOK_SECRET": "<REDACTED>",
+      "TELEGRAM_BOT_TOKEN": "<REDACTED>",
+      "PROVIDER_TIMEOUT_SECONDS": "<TO_FILL_BY_OPERATOR — defaults to 30.0 per D-047>",
+      "PROVIDER_MAX_ATTEMPTS": "<TO_FILL_BY_OPERATOR — defaults to 3 per D-047>"
+    },
+    "boot_log_line_shape": "app.created env=<env> version=<version> embedding_backend=openai embedding_dim=3072 chat_backend=openai chat_model=gpt-4.1",
+    "boot_log_line_verbatim": "<TO_FILL_BY_OPERATOR — verbatim app.created line from docker compose logs app; expected: embedding_backend=openai embedding_dim=3072 chat_backend=openai chat_model=gpt-4.1>",
+    "boot_gate_outcome": "ok",
+    "boot_gate_notes": "_verify_embedding_contour and _verify_chat_contour in src/memory_rag/app.py abort start on any canonical-knob mismatch (R-10); a successful app.created line implies both gates passed."
+  },
+  "note_round_trip": {
+    "request": {
+      "method": "POST",
+      "url_shape": "http(s)://<host>/telegram/webhook",
+      "url_redacted": true,
+      "headers": {
+        "Content-Type": "application/json",
+        "X-Telegram-Bot-Api-Secret-Token": "<REDACTED>"
+      },
+      "body_shape": {
+        "update_id": "<TO_FILL_BY_OPERATOR — integer>",
+        "message": {
+          "message_id": "<TO_FILL_BY_OPERATOR — integer>",
+          "date": "<TO_FILL_BY_OPERATOR — unix seconds>",
+          "chat": {"id": "<TO_FILL_BY_OPERATOR — integer>"},
+          "from": {"id": "<TO_FILL_BY_OPERATOR — integer>"},
+          "text": "<TO_FILL_BY_OPERATOR — e.g. \"/note 2026-05-09\\nHad a calm morning\\nTried a new book\">"
+        }
+      }
+    },
+    "response": {
+      "http_status": 200,
+      "body_shape": {"method": "sendMessage", "chat_id": "<int>", "text": "<reply>"},
+      "body_text_verbatim": "<TO_FILL_BY_OPERATOR — e.g. \"Saved 2 events for 2026-05-09.\">"
+    },
+    "post_ingest_row_counts": {
+      "source_messages_delta": "<TO_FILL_BY_OPERATOR — expected: +1>",
+      "notes_delta": "<TO_FILL_BY_OPERATOR — expected: +1>",
+      "event_chunks_delta": "<TO_FILL_BY_OPERATOR — expected: +N where N matches the count in the reply>"
+    },
+    "embedding_records_sample_row": {
+      "model_name": "text-embedding-3-large",
+      "embedding_dim_observed": 3072,
+      "rows_inserted": "<TO_FILL_BY_OPERATOR — expected: equal to event_chunks_delta>"
+    },
+    "event_chunks_status_transition": {
+      "before": "pending",
+      "after_observed": "<TO_FILL_BY_OPERATOR — expected: ready for every chunk in this /note>"
+    },
+    "provider_attempt_log_line_shape": "provider.attempt label=openai_embedding attempt=<n>/<N> outcome=<class> latency_ms=<int>",
+    "provider_attempt_log_line_verbatim": "<TO_FILL_BY_OPERATOR — verbatim line from grep 'provider.attempt' on app logs for the embedding call; attempt=2/3 outcome=success is acceptable if a transient 429 occurred>"
+  },
+  "ask_round_trip": {
+    "request": {
+      "method": "POST",
+      "url_shape": "http(s)://<host>/telegram/webhook",
+      "url_redacted": true,
+      "headers": {
+        "Content-Type": "application/json",
+        "X-Telegram-Bot-Api-Secret-Token": "<REDACTED>"
+      },
+      "body_shape": {
+        "update_id": "<TO_FILL_BY_OPERATOR — integer, distinct from /note>",
+        "message": {
+          "message_id": "<TO_FILL_BY_OPERATOR — integer>",
+          "date": "<TO_FILL_BY_OPERATOR — unix seconds>",
+          "chat": {"id": "<TO_FILL_BY_OPERATOR — same chat id as /note>"},
+          "from": {"id": "<TO_FILL_BY_OPERATOR — integer>"},
+          "text": "<TO_FILL_BY_OPERATOR — e.g. \"/ask book\">"
+        }
+      }
+    },
+    "response": {
+      "http_status": 200,
+      "body_shape": {"method": "sendMessage", "chat_id": "<int>", "text": "<grounded reply text>"},
+      "user_facing_reply_verbatim": "<TO_FILL_BY_OPERATOR — verbatim text the LLM produced through QueryService.answer; expected to reference the saved note content>"
+    },
+    "queries_row": {
+      "fallback": "none",
+      "community_id_redacted": true,
+      "query_text_verbatim": "<TO_FILL_BY_OPERATOR — verbatim Query.query_text>"
+    },
+    "retrieval_hits_row_counts_by_leg": {
+      "dense": "<TO_FILL_BY_OPERATOR — integer; expected: >= 1>",
+      "sparse": "<TO_FILL_BY_OPERATOR — integer; expected: >= 1>",
+      "merged": "<TO_FILL_BY_OPERATOR — integer; expected: >= 1, <= retrieval_top_k>"
+    },
+    "answer_traces_row": {
+      "fallback_mode": "none",
+      "model_name": "gpt-4.1",
+      "prompt_version": "v1",
+      "context_chunk_ids_non_empty": "<TO_FILL_BY_OPERATOR — expected: true; the post-RRF top-k chunks fed to the LLM>",
+      "latency_ms": "<TO_FILL_BY_OPERATOR — integer ms, expected > 0>",
+      "token_counts": {
+        "prompt": "<TO_FILL_BY_OPERATOR — integer, expected > 0>",
+        "completion": "<TO_FILL_BY_OPERATOR — integer, expected > 0>"
+      },
+      "answer_text_verbatim": "<TO_FILL_BY_OPERATOR — verbatim AnswerTrace.answer_text; should match user-facing reply modulo any dispatcher trailer>"
+    },
+    "provider_attempt_log_line_shape": "provider.attempt label=openai_chat attempt=<n>/<N> outcome=<class> latency_ms=<int>",
+    "provider_attempt_log_line_verbatim": "<TO_FILL_BY_OPERATOR — verbatim line from grep 'provider.attempt' on app logs for the chat call; attempt=2/3 outcome=success is acceptable if a transient 429 occurred>"
+  },
+  "out_of_scope_for_this_packet": [
+    "Any src/ / scripts / docker-compose.yml / schema / migration / tests/ change.",
+    "Any live OpenAI call inside make check or any new gated test.",
+    "Any harness extension, new aggregate, or retrieval/answer-path behavior change.",
+    "Resilience-knob tuning beyond D-047 / D-049 defaults.",
+    "RouteKind.ENTRY → NOTE / Note / D-026 rename work.",
+    "DEPLOY-1.7b cross-version upgrade drill work.",
+    "Slice 3.4 metadata-filter dimensions (child_id, visibility_scope).",
+    "Slice 3.7 dual-config tsvector and the unresolved D-038 Postgres baseline capture.",
+    "Multi-run / multi-query / multi-language statistical capture — the milestone is a one-shot value-loop proof."
+  ],
+  "summary": {
+    "note_round_trip_green": "<TO_FILL_BY_OPERATOR — expected: true if POST /telegram/webhook for /note returned 200, every chunk reached embedding_status=ready, and embedding_records carried model_name=text-embedding-3-large at dim 3072>",
+    "ask_round_trip_green": "<TO_FILL_BY_OPERATOR — expected: true if POST /telegram/webhook for /ask returned 200 and answer_traces carried fallback_mode=none, model_name=gpt-4.1, non-empty context_chunk_ids, non-zero latency_ms, non-empty token_counts>",
+    "answer_grounded": "<TO_FILL_BY_OPERATOR — expected: true if the user-facing reply text references the saved /note content and answer_traces.fallback_mode=none>",
+    "closes_real_1_0": false,
+    "closes_real_1_1": "<TO_FILL_BY_OPERATOR>",
+    "closes_real_1": "<TO_FILL_BY_OPERATOR>",
+    "verdict": "<TO_FILL_BY_OPERATOR>"
+  }
+}

@@ -218,6 +218,47 @@ SELECT q.created_at, q.query_text, a.fallback_mode, a.model_name,
 
 A-34 destructive-upgrade discipline applies: existing local Postgres volumes that pre-date the Slice 4.3b CHECK widening on `queries.fallback` and `answer_traces.fallback_mode` must be reset via `docker compose down -v` before the bootstrap DDL applies cleanly. Real provider adapters remain deferred to Phase 6.
 
+### Real-answer end-to-end smoke (REAL-1 / D-073)
+REAL-1 records the one-shot product-baseline proof that the wired OpenAI paths — D-024 embeddings + D-037 chat + boot gate — actually produce a grounded `/note` → retrieval → answer round-trip under the existing OP-2 bounded-retry / OP-4 backup / OP-5 inspection contours. It is **operator-deliberate, off-CI**, mirroring the OP-5 Postgres-mode pattern: `make check` runs no live OpenAI call, the gated `tests/test_chat_client_openai.py` and `tests/test_embedding_client_openai.py` are unchanged, and this procedure is invoked by the operator out-of-band.
+
+REAL-1 lands in two halves: **REAL-1.0** (this subsection + the committed evidence-file template at `docs/real-answer-drill/real-answer-smoke-TEMPLATE.json` + the decision-log entry / todo / execution-map registrations) is the operator-procedure prep; **REAL-1.1** is the operator-execution packet that produces a populated dated `docs/real-answer-drill/real-answer-smoke-<YYYYMMDD>-evidence.json`. REAL-1.0 does **not** close REAL-1 on its own — closure depends on REAL-1.1's populated artifact.
+
+#### Operator pre-conditions
+- Postgres is up via the OP-1 migrations bootstrap (`docker compose --profile vps up -d --build` brings the whole stack up; `STORAGE_BACKEND=postgres` selects the canonical durable backend).
+- `OPENAI_API_KEY` is available in the operator's secret store (real key, not a sandbox stub).
+- Canonical env knobs are set: `STORAGE_BACKEND=postgres`, `EMBEDDING_BACKEND=openai`, `EMBEDDING_MODEL=text-embedding-3-large`, `EMBEDDING_DIMENSION=3072`, `CHAT_BACKEND=openai`, `CHAT_MODEL=gpt-4.1`, `TELEGRAM_WEBHOOK_SECRET=<set>`. `_verify_embedding_contour` and `_verify_chat_contour` in `src/memory_rag/app.py` abort start on any mismatch (R-10) — a successful `app.created` log line is the boot-gate green signal.
+- The OP-2 bounded-retry / backoff defaults from D-047 / D-049 are active (no tuning is part of REAL-1); a transient 429 surfacing as `attempt=2/3 outcome=success` on a `provider.attempt` line is acceptable and is captured verbatim, not treated as a defect.
+- Sync indexing (D-024) means a `/note` request returns 200 only after the embedding has been persisted, so the `/ask` call that follows can rely on `embedding_status='ready'` for the just-ingested chunks without an extra wait.
+
+#### Numbered run procedure
+1. Export the canonical env knobs (above) into the shell or `.env`. Do not echo `OPENAI_API_KEY` / `TELEGRAM_BOT_TOKEN` / `TELEGRAM_WEBHOOK_SECRET` to a log file.
+2. Bring the stack up: `docker compose --profile vps up -d --build` (or the equivalent local bring-up).
+3. Confirm the boot-gate green signal: `docker compose logs app | grep app.created` and copy the verbatim line into `preflight_state.boot_log_line_verbatim`. Expected fields include `embedding_backend=openai embedding_dim=3072 chat_backend=openai chat_model=gpt-4.1`.
+4. POST one `/note` via the QUICKSTART recipe — reuse the curl block from `QUICKSTART.md` lines 87–92 unchanged in shape, swapping the `X-Telegram-Bot-Api-Secret-Token: dev-secret` header for the real `$TELEGRAM_WEBHOOK_SECRET` and the canonical `chat`/`from` ids you intend to use throughout the smoke. Capture the verbatim 200 response body into `note_round_trip.response.body_text_verbatim`.
+5. Confirm `embedding_status='ready'` for the just-ingested chunks via SQL (use the OP-3.1 inspection seam at `docs/RUNBOOK.md` §"Failed embeddings" — substitute `embedding_status='ready'`). Record the per-table deltas into `note_round_trip.post_ingest_row_counts` and the `embedding_records` sample shape into `note_round_trip.embedding_records_sample_row`.
+6. POST one `/ask` via the QUICKSTART recipe — reuse the curl block from `QUICKSTART.md` lines 95–99 unchanged in shape, with the same secret and chat id, and a query that should match the saved note content. Capture the verbatim 200 response body into `ask_round_trip.response.user_facing_reply_verbatim`.
+7. Capture the latest `answer_traces` row via the existing one-liner from §"Answer traces (D-034, D-035)" above, scoping to the test community and replacing `LIMIT 20` with `LIMIT 1`. Confirm `fallback_mode='none'`, `model_name='gpt-4.1'`, `prompt_version='v1'`, non-empty `context_chunk_ids`, `latency_ms > 0`, non-empty `token_counts`; copy the verbatim row into `ask_round_trip.answer_traces_row`.
+8. Capture the two `provider.attempt` log lines (one embedding, one chat) via `docker compose logs app | grep -E 'provider\.(attempt|exhausted)'` and copy each verbatim into the relevant `*_round_trip.provider_attempt_log_line_verbatim` field. `attempt=2/3 outcome=success` is acceptable; `attempt=1/3 outcome=success` is the happy path.
+9. Hand-assemble the dated working artifact: `cp docs/real-answer-drill/real-answer-smoke-TEMPLATE.json docs/real-answer-drill/real-answer-smoke-<YYYYMMDD>-evidence.json`, drop the top-level `"_template": true` flag, and replace every `<TO_FILL_BY_OPERATOR>` placeholder with the verbatim captured observation.
+10. Run the redaction grep checklist below before committing.
+
+#### Evidence-file shape
+The artifact carries five top-level branches mirroring the D-068 cross-version-drill template precedent: `metadata` (capture date, environment, redaction notes), `preflight_state` (env-knob set with secrets redacted; verbatim `app.created` line), `note_round_trip` (the `/note` request / response / post-ingest row counts / `embedding_records` sample / `event_chunks` status transition / one `provider.attempt label=openai_embedding …` line), `ask_round_trip` (the `/ask` request / response / `queries` row / `retrieval_hits` row counts by leg / one `answer_traces` row / verbatim user-facing reply / one `provider.attempt label=openai_chat …` line), and `summary` (`note_round_trip_green` / `ask_round_trip_green` / `answer_grounded` / `closes_real_1_0` / `closes_real_1_1` / `closes_real_1` booleans + verdict string). The committed `out_of_scope_for_this_packet` block is preserved verbatim.
+
+#### Redaction rule
+Credential text — `$OPENAI_API_KEY`, `$TELEGRAM_BOT_TOKEN`, `$TELEGRAM_WEBHOOK_SECRET`, `$PUBLIC_HOSTNAME` (if part of the request URL or any captured log line), and the webhook URL path token — **must not appear in the captured evidence file**. Structural outcomes (status strings, log-line shapes, row counts, `fallback_mode='none'`, `model_name='gpt-4.1'`, numeric `latency_ms` magnitudes, `token_counts` integers) are captured verbatim; credential-bearing values are replaced by `<REDACTED>` or a `_redacted: true` flag. Pre-commit, grep the evidence artifact for the literal `$OPENAI_API_KEY`, `$TELEGRAM_BOT_TOKEN`, `$TELEGRAM_WEBHOOK_SECRET`, and `$PUBLIC_HOSTNAME` values and confirm none appear literally:
+
+```bash
+grep -E "$OPENAI_API_KEY|$TELEGRAM_BOT_TOKEN|$TELEGRAM_WEBHOOK_SECRET|$PUBLIC_HOSTNAME" \
+  docs/real-answer-drill/real-answer-smoke-<YYYYMMDD>-evidence.json && echo "REDACTION FAILED" || echo "redaction grep clean"
+```
+
+#### Closure signal
+Closure of **REAL-1** is by a populated dated `docs/real-answer-drill/real-answer-smoke-<YYYYMMDD>-evidence.json` produced by REAL-1.1 with all three of `summary.note_round_trip_green`, `summary.ask_round_trip_green`, and `summary.answer_grounded` set to `true` and `summary.closes_real_1: true`. REAL-1.0 does not close REAL-1 on its own — it lands the procedure + template + cross-doc registration so that REAL-1.1 is a single bounded operator action.
+
+#### `make check` non-impact
+This procedure makes no contribution to `make check`. No new gated test is added; the existing `tests/test_chat_client_openai.py` and `tests/test_embedding_client_openai.py` smokes (env-gated by `MEMORY_RAG_OPENAI_TEST_KEY`) are unchanged. The captured artifact is documentation evidence, not a CI input.
+
 ### Selected-chunks recall (`/sources`, D-036)
 `/sources` exposes the **selected chunks as-is** for the chat's most recent `/ask` turn: the post-RRF top-k chunks `services/context_assembler.assemble_answer_context` produced and `build_answer_prompt` fed to the LLM — i.e. the same `chunk_id` list `AnswerTrace.context_chunk_ids` records, rendered with `note_date`, a 1-based `(i/N)` index, and the full `chunk_text` verbatim. The raw `chunk_id` is **not** surfaced to the user (D-069); operator forensics still join through `AnswerTrace.context_chunk_ids` via the SQL recipe in "Inspecting recent `/ask` retrieval traces (D-032)" above. The `(i/N)` marker is **per-last-`/ask` ephemeral ordering, not a stable cross-`/ask` identifier** — the index numbers the chunks within the current cached list in post-RRF order, and the cache is overwritten by the next `/ask`. It is not citations, not fine-grained attribution, and not the full pre-RRF candidate pool. Outbound delivery is one Telegram message by default and splits across multiple messages only when the 4096-char cap forces it (whole-block boundaries; `(part k/N)` footers on an oversized single chunk; identical packing semantics to `/drafts`). The `(i/N)` block header and the outbound `(part k/N)` packing footer live at distinct positions in the rendered message and do not collide.
 
