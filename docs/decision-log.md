@@ -2095,3 +2095,43 @@ The five-branch artifact shape (`metadata`, `preflight_state`, `note_round_trip`
 - Any `make real-*` convenience target (per the DEPLOY-1.2..1.7 precedent of deferring convenience targets).
 - A-43 logs-first observability scope work.
 - Any edit to `docs/INVARIANTS.md`, `docs/RUNTIME-INVARIANTS.md`, `docs/assumptions.md`, `docs/assumption-audit.md`, `docs/ARCHITECTURE.md`, `docs/product/{PRD,BuildPlan,TechSpec}.md`, `docs/GLOSSARY.md`, `docs/OPERATIONALIZATION-ROADMAP.md`, `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md`, `docs/RENAMING-ROADMAP.md`, `AGENTS.md`, `CLAUDE.md`, `README.md`, `QUICKSTART.md`.
+
+---
+
+## D-074 — Real-answer end-to-end value-loop proof (REAL-1) closure
+
+### Context
+
+REAL-1.0 (D-073) landed the operator procedure and evidence-file template for the real-answer smoke, but did not close REAL-1. The product-baseline gap remained open until one real-backend `/note` → retrieval → grounded-answer round-trip was captured as a populated dated evidence artifact using real Postgres, real OpenAI embeddings, real OpenAI chat, and the Telegram webhook secret contour.
+
+### Decision
+
+Close REAL-1.1 and therefore REAL-1 by recording the populated dated evidence artifact at `docs/real-answer-drill/real-answer-smoke-20260528-evidence.json`.
+
+The run used the canonical real-backend contour: `STORAGE_BACKEND=postgres`, `EMBEDDING_BACKEND=openai`, `EMBEDDING_MODEL=text-embedding-3-large`, `EMBEDDING_DIMENSION=3072`, `CHAT_BACKEND=openai`, `CHAT_MODEL=gpt-4.1`, and a set Telegram webhook secret. The boot gate emitted the expected `app.created ... embedding_backend=openai embedding_dim=3072 chat_backend=openai chat_model=gpt-4.1` line.
+
+The isolated smoke posted one `/note` into a fresh test community, persisted raw source data before enrichment, created one note and three event chunks, wrote three embedding records with `model_name='text-embedding-3-large'` and `dimension=3072`, and observed every chunk at `embedding_status='ready'`. The follow-up `/ask` produced a grounded user-facing answer from the saved note. Retrieval traces recorded dense, sparse, and merged rows; the answer trace recorded `fallback_mode='none'`, `model_name='gpt-4.1'`, `prompt_version='v1'`, non-empty `context_chunk_ids`, positive `latency_ms`, and non-empty token counts.
+
+### Why
+
+REAL-1 exists to prove the already-wired real provider paths produce user-visible value end to end, not only that the offline contracts and mock smokes pass. The populated artifact closes that gap with one bounded, inspectable value-loop run: capture through the Telegram webhook adapter, durable Postgres lineage, OpenAI embedding/indexing, hybrid retrieval, OpenAI grounded answer generation, and persisted traces.
+
+The evidence is intentionally one-shot and operator-deliberate. It does not turn live OpenAI calls into CI, does not add thresholds, and does not broaden the harness. It records the product-baseline proof needed before treating the real-answer path as closed.
+
+### Consequence
+
+- **New:** `docs/real-answer-drill/real-answer-smoke-20260528-evidence.json` — populated REAL-1.1 evidence artifact, derived from the D-073 template with `"_template": true` removed and credential-bearing values redacted.
+- **Changed:** `docs/decision-log.md` — this D-074 closure entry.
+- **Changed:** `docs/todo.md` — REAL-1 milestone marked complete; REAL-1.1 marked done.
+- **Changed:** `docs/execution-map.md` — REAL-1.1 row marked done (D-074) and pointed at the dated evidence artifact.
+- REAL-1 is closed by `summary.note_round_trip_green == true`, `summary.ask_round_trip_green == true`, `summary.answer_grounded == true`, and `summary.closes_real_1 == true`.
+- No `src/`, schema, migration, script, test, `docker-compose.yml`, `Dockerfile`, `.env`, `Makefile`, `pyproject.toml`, or `uv.lock` change is part of this closure.
+
+### Out of scope
+
+- Any runtime behavior change.
+- Any resilience-knob tuning beyond the D-047 / D-049 defaults.
+- Any live OpenAI call inside `make check` or any new gated test.
+- Any harness extension, quality aggregate, threshold, or CI gate.
+- Any schema, migration, retrieval, answer-path, or provider-adapter change.
+- DEPLOY-1.7b, D-038, Slice 3.4, Slice 3.7, D-026 rename work, and any multi-run statistical capture.
