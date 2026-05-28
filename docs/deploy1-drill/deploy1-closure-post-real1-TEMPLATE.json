@@ -1,0 +1,151 @@
+{
+  "_template": true,
+  "drill": "DEPLOY-1 closure procedure (post-REAL-1): re-confirm the deployed v3 contour against the existing log families and one /note → /ask round-trip (D-076 prep / DEPLOY-1 closure capture)",
+  "metadata": {
+    "capture_date": "<TO_FILL_BY_OPERATOR YYYYMMDD>",
+    "environment": "real VPS — Debian/Ubuntu LTS, public DNS + HTTPS contour up via Caddy + ACME (DEPLOY-1.3 / D-062), installer-state at INSTALLER_CONFIG_VERSION=3 (DEPLOY-1.6 / D-065), real-backend env knobs active (STORAGE_BACKEND=postgres, EMBEDDING_BACKEND=openai, EMBEDDING_MODEL=text-embedding-3-large, EMBEDDING_DIMENSION=3072, CHAT_BACKEND=openai, CHAT_MODEL=gpt-4.1, TELEGRAM_WEBHOOK_SECRET set)",
+    "host_redacted": true,
+    "notes": "Live operator evidence for the DEPLOY-1 closure procedure (post-REAL-1). Per the DEPLOY-1 closure-procedure redaction rule (RUNBOOK §\"DEPLOY-1 closure procedure (post-REAL-1) (D-076)\"), credential-bearing values (PUBLIC_HOSTNAME, BACKUP_S3_BUCKET, BACKUP_S3_ENDPOINT, BACKUP_S3_PATH_PREFIX, BACKUP_S3_ACCESS_KEY_ID, BACKUP_S3_SECRET_ACCESS_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, OPENAI_API_KEY, webhook URL token) are replaced by <REDACTED> placeholders or a _redacted: true flag; structural outcomes (status strings, log-line shapes, status transitions, latency_ms numeric magnitudes, fallback_mode values) are preserved verbatim. Operator action required before commit: (1) copy this file to docs/deploy1-drill/deploy1-closure-post-real1-<YYYYMMDD>-evidence.json (UTC-dated), (2) drop the top-level \"_template\": true flag, (3) replace every <TO_FILL_BY_OPERATOR> placeholder with the verbatim captured observation, (4) run the redaction grep checklist from the RUNBOOK subsection."
+  },
+  "installer_state": {
+    "source": "cat .installer-state.json on the deployed VPS",
+    "installer_config_version": 3,
+    "selected_defaults": {
+      "reverse_proxy": "caddy",
+      "installer_impl": "bash",
+      "backup_tool": "rclone"
+    },
+    "last_outcome": "success",
+    "loopback_health": "<TO_FILL_BY_OPERATOR — verbatim from .installer-state.json; expected: \"ok\">",
+    "public_tls_probe": "<TO_FILL_BY_OPERATOR — verbatim from .installer-state.json; expected: \"ok\">",
+    "offbox_backup_probe": "<TO_FILL_BY_OPERATOR — verbatim from .installer-state.json; expected: \"ok\">",
+    "webhook_registration": {
+      "status": "registered (https://<REDACTED>/telegram/webhook)",
+      "url_redacted": true,
+      "attempted_at": "<TO_FILL_BY_OPERATOR — verbatim UTC ISO from .installer-state.json>"
+    }
+  },
+  "live_probes": {
+    "_capture_note": "Each branch records a structural log-line shape plus a verbatim captured line from the existing log family (no new logging contract introduced by D-077; lines captured as already emitted by the deployed v3 contour). Credential text redacted; numeric magnitudes (update_id, latency_ms, integer counters) preserved verbatim.",
+    "pg_backup_family": {
+      "source": "docker compose logs --tail=50 pg_backup pg_offbox_uploader | grep pg_backup",
+      "cycle_ok_line_shape": "pg_backup.cycle.ok base=<base_id> ts=<UTC ISO>",
+      "cycle_ok_line_verbatim": "<TO_FILL_BY_OPERATOR — verbatim pg_backup.cycle.ok line; emitted by scripts/pg_backup/scheduler.sh after a clean backup+prune cycle>",
+      "offbox_begin_line_shape": "pg_backup.offbox.begin base=<base_id> ts=<UTC ISO>",
+      "offbox_begin_line_verbatim": "<TO_FILL_BY_OPERATOR — verbatim pg_backup.offbox.begin line; emitted by scripts/pg_offbox_uploader/uploader.sh at the start of a sync>",
+      "offbox_ok_line_shape": "pg_backup.offbox.ok base=<base_id>",
+      "offbox_ok_line_verbatim": "<TO_FILL_BY_OPERATOR — verbatim pg_backup.offbox.ok line; emitted by scripts/pg_offbox_uploader/uploader.sh after a successful rclone sync>"
+    },
+    "caddy_access": {
+      "source": "docker compose logs --tail=200 caddy | grep \"POST /telegram/webhook\"",
+      "line_shape": "POST /telegram/webhook 200",
+      "line_verbatim": "<TO_FILL_BY_OPERATOR — verbatim Caddy access-log line for one POST /telegram/webhook handled at the reverse-proxy contour (DEPLOY-1.3 / D-062); redact any PUBLIC_HOSTNAME / webhook URL token if present>"
+    },
+    "telegram_webhook": {
+      "source": "docker compose logs --tail=200 app | grep telegram.webhook",
+      "line_shape": "telegram.webhook update_id=<id> route=<route> route_source=<src> confidence=<n/a|low|high> edit_seq=<int> lifecycle=<lifecycle> effective_path=<path>",
+      "line_verbatim": "<TO_FILL_BY_OPERATOR — verbatim telegram.webhook line emitted by src/memory_rag/adapters/telegram/webhook.py; preserve update_id and route fields verbatim>"
+    },
+    "retrieval_hybrid": {
+      "source": "docker compose logs --tail=200 app | grep retrieval.hybrid",
+      "line_shape": "<TO_FILL_BY_OPERATOR — record the verbatim structural shape of the retrieval.hybrid log line as currently emitted by src/memory_rag/services/retrieval.py; do not invent fields>",
+      "line_verbatim": "<TO_FILL_BY_OPERATOR — verbatim retrieval.hybrid line from the /ask call in post_real1_round_trip below>"
+    },
+    "answer_path": {
+      "source": "docker compose logs --tail=200 app | grep -E 'answer\\.'",
+      "line_shape": "<TO_FILL_BY_OPERATOR — record the verbatim structural shape of the answer.* log line family as currently emitted by src/memory_rag/services/query_service.py and src/memory_rag/services/dispatcher.py; do not invent fields>",
+      "line_verbatim": "<TO_FILL_BY_OPERATOR — one verbatim answer.* line from the /ask call in post_real1_round_trip below>"
+    }
+  },
+  "post_real1_round_trip": {
+    "_capture_note": "Structurally identical envelope to docs/real-answer-drill/real-answer-smoke-20260528-evidence.json (REAL-1.1 / D-074) so the closure evidence is directly comparable to REAL-1 closure evidence. Single /note → single /ask round-trip against the deployed v3 contour, fresh community recommended to avoid cross-contamination.",
+    "note": {
+      "request_shape": {
+        "method": "POST",
+        "url_shape": "https://<host>/telegram/webhook",
+        "url_redacted": true,
+        "headers": {
+          "Content-Type": "application/json",
+          "X-Telegram-Bot-Api-Secret-Token": "<REDACTED>"
+        },
+        "body_shape": {
+          "update_id": "<TO_FILL_BY_OPERATOR — integer>",
+          "message": {
+            "message_id": "<TO_FILL_BY_OPERATOR — integer>",
+            "date": "<TO_FILL_BY_OPERATOR — unix seconds>",
+            "chat": {"id": "<TO_FILL_BY_OPERATOR — integer>"},
+            "from": {"id": "<TO_FILL_BY_OPERATOR — integer>"},
+            "text": "<TO_FILL_BY_OPERATOR — e.g. \"/note 2026-05-28\\nClosure-procedure capture\">"
+          }
+        }
+      },
+      "response_shape": {
+        "http_status": 200,
+        "body_text_verbatim": "<TO_FILL_BY_OPERATOR — verbatim user-facing reply, e.g. \"Saved 1 event for 2026-05-28.\">"
+      }
+    },
+    "ask": {
+      "request_shape": {
+        "method": "POST",
+        "url_shape": "https://<host>/telegram/webhook",
+        "url_redacted": true,
+        "headers": {
+          "Content-Type": "application/json",
+          "X-Telegram-Bot-Api-Secret-Token": "<REDACTED>"
+        },
+        "body_shape": {
+          "update_id": "<TO_FILL_BY_OPERATOR — integer, distinct from /note>",
+          "message": {
+            "message_id": "<TO_FILL_BY_OPERATOR — integer>",
+            "date": "<TO_FILL_BY_OPERATOR — unix seconds>",
+            "chat": {"id": "<TO_FILL_BY_OPERATOR — same chat id as /note>"},
+            "from": {"id": "<TO_FILL_BY_OPERATOR — integer>"},
+            "text": "<TO_FILL_BY_OPERATOR — e.g. \"/ask closure\">"
+          }
+        }
+      },
+      "response_shape": {
+        "http_status": 200,
+        "user_facing_reply_verbatim": "<TO_FILL_BY_OPERATOR — verbatim grounded user-facing reply text; should reference the saved /note content>"
+      }
+    },
+    "answer_traces_row_shape": {
+      "fallback_mode": "none",
+      "model_name": "gpt-4.1",
+      "prompt_version": "v1",
+      "context_chunk_ids_non_empty": "<TO_FILL_BY_OPERATOR — expected: true>",
+      "latency_ms": "<TO_FILL_BY_OPERATOR — integer ms, expected > 0>",
+      "token_counts": {
+        "prompt": "<TO_FILL_BY_OPERATOR — integer, expected > 0>",
+        "completion": "<TO_FILL_BY_OPERATOR — integer, expected > 0>"
+      },
+      "answer_text_verbatim": "<TO_FILL_BY_OPERATOR — verbatim AnswerTrace.answer_text; should match user-facing reply modulo any dispatcher trailer>"
+    },
+    "provider_attempt_line_shape": {
+      "embedding_line_shape": "provider.attempt label=openai_embedding attempt=<n>/<N> outcome=<class> latency_ms=<int>",
+      "embedding_line_verbatim": "<TO_FILL_BY_OPERATOR — verbatim line from grep 'provider.attempt' on app logs for the embedding call; attempt=2/3 outcome=success is acceptable if a transient 429 occurred>",
+      "chat_line_shape": "provider.attempt label=openai_chat attempt=<n>/<N> outcome=<class> latency_ms=<int>",
+      "chat_line_verbatim": "<TO_FILL_BY_OPERATOR — verbatim line from grep 'provider.attempt' on app logs for the chat call; attempt=2/3 outcome=success is acceptable if a transient 429 occurred>"
+    }
+  },
+  "summary": {
+    "closure_signals_observed": "<TO_FILL_BY_OPERATOR — expected: true if installer_state shows installer_config_version=3 + all four .installer-state.json probe fields ok and live_probes captured a verbatim line from each of the five families>",
+    "post_real1_round_trip_green": "<TO_FILL_BY_OPERATOR — expected: true if POST /telegram/webhook for /note returned 200, POST /telegram/webhook for /ask returned 200, and answer_traces row carried fallback_mode='none', model_name='gpt-4.1', non-empty context_chunk_ids, positive latency_ms, non-empty token_counts>",
+    "a43_logs_first_surface_emitting": "<TO_FILL_BY_OPERATOR — expected: true if every line in live_probes.{pg_backup_family,caddy_access,telegram_webhook,retrieval_hybrid,answer_path} was captured verbatim from the deployed v3 contour with no new logging contract introduced>",
+    "closes_deploy_1": "<TO_FILL_BY_OPERATOR — expected: true if the three booleans above are all true>",
+    "verdict": "<TO_FILL_BY_OPERATOR — e.g. \"DEPLOY-1 closed against the deployed v3 contour\">"
+  },
+  "out_of_scope_for_this_packet": [
+    "The DEPLOY-1.7b v2 → v3 cross-version upgrade drill — re-scoped to DEPLOY-2 prep by D-076; the committed template at docs/deploy1-drill/deploy1-cross-version-drill-TEMPLATE.json and the RUNBOOK subsection \"v2 → v3 cross-version upgrade drill (DEPLOY-1.7b / D-068)\" are retained verbatim for DEPLOY-2 use.",
+    "DEPLOY-2 managed-cloud reference deployment — deferred; A-41 stays open and is resolved when DEPLOY-2 is pulled.",
+    "Any new logging contract in src/ — A-43 closed (D-077) on the existing pg_backup.* / Caddy access / telegram.webhook / retrieval.hybrid / answer.* families with no new src/ logging.",
+    "The forward seam to remote sinks named by D-060 / D-077 — deliberately deferred to a later observability packet or DEPLOY-2 prep.",
+    "Multi-run / multi-query / quarterly closure re-capture — single-artifact closure pin per the DEPLOY-1.7a / D-067 precedent.",
+    "Any src/, schema, migration, scripts/, docker-compose.yml, Dockerfile, Caddyfile, Makefile, tests/, pyproject.toml, uv.lock, .env.example, or .gitignore change.",
+    "Any live OpenAI call inside make check or any new gated test.",
+    "Any make deploy-closure-* / make d1-close-* convenience target.",
+    "RouteKind.ENTRY → NOTE / Note / D-026 rename work.",
+    "Slice 3.4 metadata-filter dimensions (child_id, visibility_scope).",
+    "Slice 3.7 dual-config tsvector and the unresolved D-038 Postgres baseline capture."
+  ]
+}

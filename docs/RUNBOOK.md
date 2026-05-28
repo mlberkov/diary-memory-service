@@ -1117,6 +1117,79 @@ The evidence artifact carries **four top-level branches** — `pre_upgrade_state
 
 **DEPLOY-1.7b operator-procedure prep (D-068) is the docs landing — the operator drill against a real previously-installed v2 VPS is the sole remaining step to close DEPLOY-1.7b and DEPLOY-1.**
 
+### DEPLOY-1 closure procedure (post-REAL-1) (D-076)
+
+DEPLOY-1 closes by one operator-run procedure against the **already-deployed v3 VPS contour** — the same contour DEPLOY-1.7a (D-067) validated and REAL-1.1 (D-074) exercised end-to-end with real OpenAI. No new install, no new image, no new logging contract: D-076 lands the docs-first preparation (operator procedure + committed evidence-file template) for the operator drill, and DEPLOY-1.7b is **moved to DEPLOY-2 prep** by the same packet — the §"v2 → v3 cross-version upgrade drill (DEPLOY-1.7b / D-068)" subsection above and its committed template (`docs/deploy1-drill/deploy1-cross-version-drill-TEMPLATE.json`) are retained verbatim for DEPLOY-2 use, but the v2 → v3 cross-version drill is no longer a DEPLOY-1 closure dependency.
+
+DEPLOY-1 closure lands in two halves: **D-076** (this subsection + the committed evidence-file template at `docs/deploy1-drill/deploy1-closure-post-real1-TEMPLATE.json` + the §4 / §6 roadmap update + cross-doc registrations) is the operator-procedure prep; the **operator drill** is the live capture that produces a populated dated `docs/deploy1-drill/deploy1-closure-post-real1-<YYYYMMDD>-evidence.json` and closes DEPLOY-1. D-076 does **not** close DEPLOY-1 on its own — closure depends on that populated artifact.
+
+A-43 (logs-first observability scope) was pinned and closed in parallel by D-077: the closure procedure captures **only the existing log families already emitted by the deployed contour** — `pg_backup.*` (from `scripts/pg_backup/scheduler.sh` and `scripts/pg_offbox_uploader/uploader.sh`), Caddy access logs at the reverse-proxy contour (DEPLOY-1.3 / D-062), the app-side `telegram.webhook` line emitted by `src/memory_rag/adapters/telegram/webhook.py`, the `retrieval.hybrid` family emitted by `src/memory_rag/services/retrieval.py`, and the `answer.*` family emitted by `src/memory_rag/services/query_service.py` / `services/dispatcher.py`. **Captured verbatim, not invented**; no new logging contract is forced in `src/`.
+
+#### Operator pre-conditions
+
+- The deployed v3 VPS contour from DEPLOY-1.7a is up and reachable on its public hostname: `.installer-state.json` reads `installer_config_version: 3` and `last_outcome: "success"`; DNS A/AAAA records for `$PUBLIC_HOSTNAME` resolve from the public internet; Caddy's ACME-issued certificate continues to validate.
+- `.env` populated per the §"Installer / upgrade script (DEPLOY-1.4 / D-063)" + §"Telegram webhook registration (DEPLOY-1.5 / D-064)" + §"Off-box backup sink (DEPLOY-1.6 / D-065)" subsections — `PUBLIC_HOSTNAME`, `ACME_EMAIL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, and all five `BACKUP_S3_*` knobs — plus the canonical REAL-1 env knobs (§"Real-answer end-to-end smoke (REAL-1 / D-073)" pre-conditions): `STORAGE_BACKEND=postgres`, `EMBEDDING_BACKEND=openai`, `EMBEDDING_MODEL=text-embedding-3-large`, `EMBEDDING_DIMENSION=3072`, `CHAT_BACKEND=openai`, `CHAT_MODEL=gpt-4.1`, and a real `OPENAI_API_KEY` in the operator's secret store.
+- A Telegram client signed in as a user able to talk to the bot, for the `/note` → `/ask` round-trip.
+- The OP-2 bounded-retry / backoff defaults from D-047 / D-049 are active (no tuning is part of D-076).
+
+#### Numbered run procedure
+
+1. Snapshot the live installer state file verbatim into the evidence artifact's `installer_state` branch. Expected: `installer_config_version: 3`, `selected_defaults.backup_tool: "rclone"`, `last_outcome: "success"`, all four probe fields (`loopback_health`, `public_tls_probe`, `offbox_backup_probe`, `webhook_registration.status`) showing `ok` / `registered`. Redact the webhook URL token before pasting.
+
+   ```sh
+   cat .installer-state.json
+   ```
+
+2. Capture the verbatim **`pg_backup.*` family** lines (A-43 pin) for `live_probes.pg_backup_family`. Wait for one full nightly cycle (or trigger one via `make backup-run`) so all three lines (`pg_backup.cycle.ok`, `pg_backup.offbox.begin`, `pg_backup.offbox.ok`) are present:
+
+   ```sh
+   docker compose logs --tail=50 pg_backup pg_offbox_uploader | grep pg_backup
+   ```
+
+3. Capture one verbatim **Caddy access-log line** (A-43 pin) for `live_probes.caddy_access`. The line is the `POST /telegram/webhook 200` access entry produced when the bot receives an update through the reverse-proxy contour:
+
+   ```sh
+   docker compose logs --tail=200 caddy | grep "POST /telegram/webhook"
+   ```
+
+4. Send `/note` from the Telegram client (date + one content line; reuse the REAL-1 procedure's `/note` shape from §"Real-answer end-to-end smoke (REAL-1 / D-073)"). Capture the verbatim 200 response body into `post_real1_round_trip.note.response_shape.body_text_verbatim`. Then capture the verbatim **`telegram.webhook` line** (A-43 pin) for `live_probes.telegram_webhook`:
+
+   ```sh
+   docker compose logs --tail=200 app | grep telegram.webhook
+   ```
+
+5. Send `/ask` from the Telegram client (a query that should match the saved note). Capture the verbatim 200 response body into `post_real1_round_trip.ask.response_shape.user_facing_reply_verbatim`. Then capture the verbatim **`retrieval.hybrid` line** and one verbatim **`answer.*` line** (A-43 pins) for `live_probes.retrieval_hybrid` and `live_probes.answer_path`:
+
+   ```sh
+   docker compose logs --tail=200 app | grep retrieval.hybrid
+   docker compose logs --tail=200 app | grep -E 'answer\.'
+   ```
+
+   Capture the latest `answer_traces` row via the existing one-liner from §"Answer traces (D-034, D-035)" with `LIMIT 1` into `post_real1_round_trip.answer_traces_row_shape`. Confirm `fallback_mode='none'`, `model_name='gpt-4.1'`, `prompt_version='v1'`, non-empty `context_chunk_ids`, `latency_ms > 0`, non-empty `token_counts`. Capture the two `provider.attempt` lines (embedding + chat) into `post_real1_round_trip.provider_attempt_line_shape.*_line_verbatim`.
+
+6. Hand-assemble the dated working artifact: `cp docs/deploy1-drill/deploy1-closure-post-real1-TEMPLATE.json docs/deploy1-drill/deploy1-closure-post-real1-<YYYYMMDD>-evidence.json`, drop the top-level `"_template": true` flag, replace every `<TO_FILL_BY_OPERATOR>` placeholder with the verbatim captured observation. Then run the redaction grep checklist below before committing.
+
+#### Evidence-file shape
+
+The artifact carries six top-level branches: `metadata` (capture date, environment, redaction notes), `installer_state` (verbatim `.installer-state.json` after the canonical install on the deployed VPS — `installer_config_version: 3`, `selected_defaults`, `last_outcome`, the four probe fields), `live_probes` (the five A-43-pinned existing log families captured verbatim — `pg_backup_family`, `caddy_access`, `telegram_webhook`, `retrieval_hybrid`, `answer_path`), `post_real1_round_trip` (one `/note` + one `/ask` round-trip envelope structurally identical to REAL-1.1's evidence so closure is directly comparable — request shape / response shape / `answer_traces` row shape / `provider.attempt` line shapes), `summary` (`closure_signals_observed`, `post_real1_round_trip_green`, `a43_logs_first_surface_emitting`, `closes_deploy_1`, `verdict`), and `out_of_scope_for_this_packet`. The committed `out_of_scope_for_this_packet` block is preserved verbatim.
+
+#### Redaction rule
+
+No credential text, bucket name, endpoint URL, prefix value, public hostname, Telegram URL token, or OpenAI key may appear in the captured evidence file. Capture structural outcomes (status strings, log-line shapes, `update_id` integers, `fallback_mode` values, numeric `latency_ms` magnitudes, `token_counts` integers) **verbatim**; replace identifying values with `<REDACTED>` or a `_redacted: true` flag. Pre-commit, grep the artifact for the literal `$PUBLIC_HOSTNAME`, `$BACKUP_S3_BUCKET`, `$BACKUP_S3_ENDPOINT`, `$BACKUP_S3_PATH_PREFIX`, `$BACKUP_S3_ACCESS_KEY_ID`, `$BACKUP_S3_SECRET_ACCESS_KEY`, `$TELEGRAM_BOT_TOKEN`, `$TELEGRAM_WEBHOOK_SECRET`, and `$OPENAI_API_KEY` values and confirm none appear literally:
+
+```bash
+grep -E "$PUBLIC_HOSTNAME|$BACKUP_S3_BUCKET|$BACKUP_S3_ENDPOINT|$BACKUP_S3_PATH_PREFIX|$BACKUP_S3_ACCESS_KEY_ID|$BACKUP_S3_SECRET_ACCESS_KEY|$TELEGRAM_BOT_TOKEN|$TELEGRAM_WEBHOOK_SECRET|$OPENAI_API_KEY" \
+  docs/deploy1-drill/deploy1-closure-post-real1-<YYYYMMDD>-evidence.json && echo "REDACTION FAILED" || echo "redaction grep clean"
+```
+
+#### Closure signal
+
+DEPLOY-1 closes by a populated dated `docs/deploy1-drill/deploy1-closure-post-real1-<YYYYMMDD>-evidence.json` with `summary.closure_signals_observed`, `summary.post_real1_round_trip_green`, `summary.a43_logs_first_surface_emitting`, and `summary.closes_deploy_1` all `true`. The closure flag is anchored on the still-green REAL-1.1 evidence at `docs/real-answer-drill/real-answer-smoke-20260528-evidence.json` (D-074), the still-green DEPLOY-1.7a evidence at `docs/deploy1-drill/deploy1-pilot-smoke-20260527-evidence.json` (D-067), and the new closure-procedure evidence together. D-076 does not close DEPLOY-1 on its own — it lands the procedure + template + cross-doc registration so that the operator run is a single bounded action.
+
+#### `make check` non-impact
+
+This procedure makes no contribution to `make check`. No new gated test is added; the existing `tests/test_chat_client_openai.py` and `tests/test_embedding_client_openai.py` smokes (env-gated by `MEMORY_RAG_OPENAI_TEST_KEY`) are unchanged. The captured artifact is documentation evidence, not a CI input.
+
 ## Useful reads when stuck
 - Workflow & recovery: this file.
 - Architecture, adapter axes, deployment shapes: `docs/ARCHITECTURE.md`.
