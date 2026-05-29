@@ -2398,3 +2398,40 @@ D-078 fixed the contract on paper; until the classifier matched it, the document
 - Any reopening of the draft floor or `core.routing.lifecycle_for` mapping beyond enforcing D-078.
 - D-072 routing-contract rescue (stays parked on its sibling branch).
 - Author-name display, group-use, multi-diary work.
+
+## D-080 — Reconcile residual "classifier change deferred" doc clauses to D-079 past-tense enforcement (docs-only)
+
+### Context
+
+D-078 recorded the routing-contract correction (command-less plain text routes only to the draft floor; NOTE/ASK reached only via explicit `/note` / `/ask`) as a docs-only packet, and D-079 then enforced it in code — `classify_plain_text` now collapses the heuristic plain-text NOTE/ASK branches into the draft floor. D-079 also flipped the invariant docs to past tense (`INVARIANTS.md` I-14, `RUNTIME-INVARIANTS.md` R-11/R-13) and refreshed `QUICKSTART.md` / `RUNBOOK.md`.
+
+But six product-and-supporting-doc clauses were outside D-079's scope and still asserted that classifier enforcement was *deferred / lands in a later packet*. That left a prose divergence: the invariant files read "D-079 enforces it in code" while these clauses still read "deferred." D-080 is the minimal docs-only reconciliation that removes the last of that invariant-vs-runtime divergence and makes the Stage-1 capture/routing baseline-correction milestone internally consistent. It is a follow-up to D-078 (docs contract) and D-079 (code enforcement); it introduces no new behavior.
+
+### Decision
+
+Flip the residual "classifier code change deferred / lands in a later packet" clauses to truthful past-tense enforcement by D-079, using the wording already established in I-14 / R-11 / R-13 (`D-078 records this contract; D-079 enforces it in code — `classify_plain_text` routes command-less plain text only to the draft floor.`). Docs-only; no `src/`, `tests/`, schema, migration, or config change. The runtime is byte-identical to its post-D-079 state.
+
+### Why
+
+D-078 fixed the contract on paper and D-079 made the code conform, but until these residual clauses were corrected the canonical docs still contradicted both the live runtime and the already-flipped invariant files. Closing this prose gap removes the last documentation inconsistency in the milestone before the branch is considered for PR. Packet 3 (`/note`-without-explicit-date → "today") remains a legitimately deferred companion and is untouched.
+
+### Consequence
+
+- **Changed:** `docs/assumptions.md` — the A-16/A-17 Routing & UX pointer line flipped from "classifier code change deferred to a later packet" to D-079 past-tense enforcement.
+- **Changed:** `docs/assumption-audit.md` — the A-16 row tail flipped to `retired → D-078 / enforced in code → D-079`. The A-17 row carries no deferral clause (it concerns CLARIFY surviving only as an explicit-command conflict reply) and is unchanged.
+- **Changed:** `docs/product/PRD.md` — both the §5 "Command-less plain text → draft" paragraph and the §6 in-scope bullet flipped to D-079 past-tense enforcement.
+- **Changed:** `docs/ARCHITECTURE.md` — the "No command → draft" routing-contract line flipped to D-079 past-tense enforcement.
+- **Changed:** `docs/product/TechSpec.md` — the §"Convenience routing" enforcement clause flipped to D-079 past-tense enforcement.
+- **Changed:** `docs/todo.md` — new "Packet 2.1 — residual doc-clause reconciliation: done (D-080)" line; Packet 3 stays **pending**.
+- **Changed:** `docs/execution-map.md` — new Stage-1 "Packet 2.1" row marking the reconciliation done (D-080); classifier enforcement is now both recorded and enforced consistently across all canonical docs. Packet 3 row unchanged (Pending).
+- **The historical D-078 and D-079 entries are not edited** — they are immutable records; D-080 references them by number only.
+- **No `src/`, `tests/`, schema, migration, or config change.** A-28 stays **open** (the `/note`-without-explicit-date → "today" companion is Packet 3).
+
+### Out of scope (per packet boundaries)
+
+- Packet 3: `/note` without an explicit first-line date → "today" (A-12 / A-28-adjacent).
+- Any `parse_note` / date-parsing strictness change or A-28 closure.
+- Any rewrite of D-078's historical record beyond the existing D-079/D-080 references.
+- Any `src/`, `tests/`, schema, or migration change.
+- D-072 routing-contract rescue (stays parked on its sibling branch).
+- Author-name display, group-use, multi-diary work.

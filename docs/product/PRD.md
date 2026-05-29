@@ -98,7 +98,7 @@ Fell asleep 20 minutes earlier than usual
 
 ### Command-less plain text → draft (D-078)
 
-Command-less plain text routes only to the draft floor; no heuristic auto-routes it to note or ask, and the draft floor never silently discards (D-027 / D-028 / D-078). Note and ask are reached only via the explicit `/note` / `/ask` commands. (D-078 records this contract; the classifier code change that enforces it lands in a later packet of the Stage-1 capture/routing baseline correction.)
+Command-less plain text routes only to the draft floor; no heuristic auto-routes it to note or ask, and the draft floor never silently discards (D-027 / D-028 / D-078). Note and ask are reached only via the explicit `/note` / `/ask` commands. (D-078 records this contract; D-079 enforces it in code — `classify_plain_text` routes command-less plain text only to the draft floor.)
 
 ### Naming note
 
@@ -109,7 +109,7 @@ The Telegram command surface is `/note`, `/ask`, `/drafts`, `/export` (D-031). T
 ### In scope for MVP
 - Telegram text input,
 - explicit `/note`, `/ask`, and `/drafts` commands (the explicit `/draft` command was removed in D-030 — the no-command default carries the draft floor),
-- command-less plain text persists as a draft — there is no heuristic auto-routing of plain text to note or ask; NOTE and ASK are reached only via explicit `/note` / `/ask` (D-027 / D-028 / D-078; D-078 records this contract, with the classifier code change deferred to a later packet),
+- command-less plain text persists as a draft — there is no heuristic auto-routing of plain text to note or ask; NOTE and ASK are reached only via explicit `/note` / `/ask` (D-027 / D-028 / D-078 / D-079; D-078 records this contract and D-079 enforces it in code),
 - date parsing,
 - line-by-line event splitting,
 - one event per chunk,

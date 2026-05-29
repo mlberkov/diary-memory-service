@@ -110,7 +110,7 @@ Target control surface (D-027):
 - `/note <text>` — explicit note. Triggers the full ingestion pipeline.
 - `/draft <text>` — explicit draft. Raw persistence only.
 - `/ask <text>` — query.
-- **No command** — routes to **draft** only (D-078). Absence of an explicit command never silently discards, downgrades, or upgrades raw persistence; heuristics do not auto-route plain text to note or ask — those lifecycles are reached only via the explicit `/note` / `/ask` commands. (D-078 records this contract; the classifier code change that enforces it lands in a later packet of the Stage-1 capture/routing baseline correction.)
+- **No command** — routes to **draft** only (D-078). Absence of an explicit command never silently discards, downgrades, or upgrades raw persistence; heuristics do not auto-route plain text to note or ask — those lifecycles are reached only via the explicit `/note` / `/ask` commands. (D-078 records this contract; D-079 enforces it in code — `classify_plain_text` routes command-less plain text only to the draft floor.)
 
 The Telegram implementation exposes `/note`, `/ask`, `/drafts`, and `/export` (D-031); the explicit `/draft` command was removed in D-030, and the no-command-→-draft default is enforced in code (D-028). The lifecycle state is carried by `SourceMessage.detected_route` (extended with `RouteKind.DRAFT`), with `core.routing.lifecycle_for` as the canonical mapping helper — no separate lifecycle column. The routing enum value `RouteKind.NOTE` is persisted as `detected_route='note'` (D-042 renamed these from `RouteKind.ENTRY` / `detected_route='entry'`).
 

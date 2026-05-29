@@ -19,7 +19,7 @@ When an item is decided, move it to `docs/decision-log.md` (next D-### id) and r
 | A-13 | Timezone source | Wrong `note_date` | Spec + tests | agent | Phase 2.3 |
 | A-14 | Family/child bootstrap | UX confusion; orphan records | Define onboarding flow | human | Phase 2.1 |
 | A-15 | Visibility scopes | Privacy gaps in shared mode | Enumerate + review | human | Phase 8 |
-| ~~A-16~~ | ~~Routing confidence threshold~~ | — | — | — | Closed → D-020; heuristic plain-text NOTE/ASK auto-routing retired → D-078 (command-less plain text routes only to the draft floor; classifier code change deferred) |
+| ~~A-16~~ | ~~Routing confidence threshold~~ | — | — | — | Closed → D-020; heuristic plain-text NOTE/ASK auto-routing retired → D-078 / enforced in code → D-079 (command-less plain text routes only to the draft floor) |
 | ~~A-17~~ | ~~Clarification UX~~ | — | — | — | Closed → D-020; after D-078 CLARIFY survives only as an explicit-command active-conflict reply (not a plain-text route — dormant since D-028) |
 | A-18 | Data residency | Compliance failure | Stakeholder confirmation | human | before prod |
 | A-19 | Retention policy | Storage growth; user trust | Policy doc + sample math | human | Phase 8 |

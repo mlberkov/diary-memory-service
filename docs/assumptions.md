@@ -16,7 +16,7 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 - **A-15. Visibility scopes**: enumerated values for `visibility_scope` are undefined. Required before Phase 8.
 
 ## Routing & UX
-*A-16 → D-020. A-17 → D-020. (Heuristic plain-text NOTE/ASK auto-routing portion retired by D-078 — command-less plain text routes only to the draft floor; classifier code change deferred to a later packet of the Stage-1 capture/routing baseline correction.)*
+*A-16 → D-020. A-17 → D-020. (Heuristic plain-text NOTE/ASK auto-routing portion retired by D-078 — command-less plain text routes only to the draft floor; D-079 enforces it in code — `classify_plain_text` routes command-less plain text only to the draft floor.)*
 
 ## Privacy & lifecycle
 - **A-18. Data residency**: not stated.
