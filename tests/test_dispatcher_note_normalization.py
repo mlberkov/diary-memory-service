@@ -148,22 +148,11 @@ def test_dispatch_explicit_note_with_unmatched_first_line_returns_new_error_word
     assert store.len_notes() == 0
 
 
-def test_dispatch_heuristic_note_route_is_not_normalized() -> None:
-    # The legacy heuristic plain-text NOTE auto-route is not coupled to
-    # the new whitelist. A heuristic-routed message with 2026/05/09 on
-    # the first line forwards the payload unchanged, so the strict
-    # parser still rejects it. (This test pins that the seam respects
-    # is_heuristic; the broader question of whether the legacy
-    # heuristic should exist at all is deferred to a separate cleanup.)
-    dispatcher, store = _dispatcher()
-    result = dispatcher.dispatch(
-        _inbound("2026/05/09\nfoo", route_source="heuristic"),
-    )
-    # Strict parse_note rejects 2026/05/09 → INVALID_INPUT reply, plus
-    # the heuristic marker appended by the dispatcher.
-    assert "First line must be a date like 2026-05-09." in result.reply_text
-    assert "Got: '2026/05/09'." in result.reply_text
-    assert store.len_notes() == 0
+# The heuristic-routed NOTE normalize-seam (the dispatcher's former
+# ``if not is_heuristic:`` guard) was removed with D-079: heuristic plain-text
+# NOTE is no longer reachable (NOTE comes only from the explicit ``/note``
+# command, which always normalizes). The test that pinned that seam was
+# removed alongside it.
 
 
 # ---------------------------------------------------------------------------

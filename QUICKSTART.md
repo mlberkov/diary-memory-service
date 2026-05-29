@@ -113,33 +113,31 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
 # → text: "First line must be a date like 2026-05-09. Got: 'not-a-date'."
 ```
 
-#### Heuristic plain-text routing (`/note` / `/ask` optional)
+#### Plain text without a command — draft floor
 
-Plain text without a slash command is classified by `core.routing.classifier`: a dated body becomes a note, a question becomes an ask, anything else gets a clarification reply. Heuristic-routed replies carry an explicit marker so the user can see what happened (D-006, R-6, R-11).
-
-> **Target contract (D-078):** the heuristic plain-text NOTE/ASK auto-routing shown below is being retired — under the recorded contract, command-less plain text routes only to a draft, and NOTE/ASK are reached only via explicit `/note` / `/ask`. The examples in this section reflect the **current live behavior**, which is unchanged until the classifier code packet of the Stage-1 capture/routing baseline correction lands.
+Plain text without a slash command is classified by `core.routing.classifier` and routes only to the **draft floor**: it is persisted raw as a draft and never parsed, chunked, embedded, indexed, or retrieved. NOTE and ASK lifecycles are reached only via the explicit `/note` / `/ask` commands — no heuristic auto-routes a dated line or a question (D-078, enforced in code by D-079; D-027 / D-028 / R-13). The reply tells the user how to promote the draft.
 
 ```bash
-# 5. Dated plain text — heuristic NOTE
+# 5. Dated plain text — stored as a draft (NOT auto-committed as a note)
 curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
   -d '{"update_id":5,"message":{"message_id":5,"date":1715300400,"chat":{"id":42},"from":{"id":7},"text":"2026-05-10\nLearned a new recipe\nWalked 5km"}}'
-# → text: "Saved 2 events for 2026-05-10.\n(routed as note — send /note next time to be explicit)"
+# → text: "Stored as draft. Send /note <YYYY-MM-DD> on the first line to commit it as a note, or /ask to query."
 
-# 6. Plain question — heuristic ASK (terminal "?" stripped before hybrid retrieval)
+# 6. Plain question — stored as a draft (NOT auto-run as a query)
 curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
   -d '{"update_id":6,"message":{"message_id":6,"date":1715300500,"chat":{"id":42},"from":{"id":7},"text":"recipe?"}}'
-# → text: "Found 1 memory:\n- [2026-05-10] Learned a new recipe\n(hybrid retrieval — dense+sparse RRF)\n(routed as question — send /ask next time to be explicit)"
+# → text: "Stored as draft. Send /note <YYYY-MM-DD> on the first line to commit it as a note, or /ask to query."
 
-# 7. Ambiguous text — CLARIFY (no persistence, no guessed route)
+# 7. Ambiguous text — stored as a draft (no guessed route)
 curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
   -d '{"update_id":7,"message":{"message_id":7,"date":1715300600,"chat":{"id":42},"from":{"id":7},"text":"recipe yesterday"}}'
-# → text: "I couldn't tell if that's a diary entry or a question. Send /note <YYYY-MM-DD> on the first line then your events to record it, or /ask <your question> to query."
+# → text: "Stored as draft. Send /note <YYYY-MM-DD> on the first line to commit it as a note, or /ask to query."
 ```
 
 #### Durable local store (Postgres)

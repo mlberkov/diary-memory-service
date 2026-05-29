@@ -68,8 +68,6 @@ _REPLY_CLARIFY = (
 _REPLY_EXPORT_USAGE = "Usage: /export json | /export txt — pick a format."
 _REPLY_DRAFTS_USAGE = "Usage: /drafts [N]. N must be a positive integer."
 _REPLY_DRAFTS_EMPTY = "No drafts to show."
-_HEURISTIC_MARKER_NOTE = "(routed as note — send /note next time to be explicit)"
-_HEURISTIC_MARKER_ASK = "(routed as question — send /ask next time to be explicit)"
 _DRAFT_REPLY_PREFIX = "Stored as draft"
 _DRAFT_REPLY_HINT = (
     "Send /note <YYYY-MM-DD> on the first line to commit it as a note, or /ask to query."
@@ -88,11 +86,12 @@ def _format_ingest_reply(result: IngestResult) -> str:
 
 
 def _normalize_note_first_line(message: InboundMessage) -> InboundMessage:
-    """Rewrite the first non-empty line of an explicit ``/note`` payload to canonical ISO.
+    """Rewrite the first non-empty line of a ``/note`` payload to canonical ISO.
 
-    Used only on the explicit ``/note`` dispatch path (``is_heuristic=False``).
-    The non-empty-line rule must match :func:`parse_note`'s behavior so the
-    surface the user sees matches what the parser will then read.
+    NOTE is reached only via the explicit ``/note`` command (D-079), so this
+    runs on every NOTE dispatch. The non-empty-line rule must match
+    :func:`parse_note`'s behavior so the surface the user sees matches what
+    the parser will then read.
     """
     payload = message.payload
     if not payload:
@@ -193,10 +192,6 @@ def _format_answer_reply(result: AnswerResult) -> str:
     return _REPLY_UNKNOWN
 
 
-def _append_marker(reply: str, marker: str) -> str:
-    return f"{reply}\n{marker}"
-
-
 def _format_drafts_header(*, returned: int, requested: int, explicit: bool, max_limit: int) -> str:
     plural = "draft" if returned == 1 else "drafts"
     if not explicit:
@@ -247,19 +242,15 @@ class Dispatcher:
 
     def dispatch(self, message: InboundMessage) -> DispatchResult:
         route = message.route
-        is_heuristic = message.route_source == "heuristic"
 
         if route is RouteKind.START:
             return DispatchResult(reply_text=_REPLY_START, route=route)
         if route is RouteKind.HELP:
             return DispatchResult(reply_text=_REPLY_HELP, route=route)
         if route is RouteKind.NOTE:
-            if not is_heuristic:
-                message = _normalize_note_first_line(message)
+            message = _normalize_note_first_line(message)
             ingest = self._domain.ingest(message)
             reply = _format_ingest_reply(ingest)
-            if is_heuristic:
-                reply = _append_marker(reply, _HEURISTIC_MARKER_NOTE)
             return DispatchResult(
                 reply_text=reply,
                 route=route,
@@ -296,8 +287,6 @@ class Dispatcher:
                 )
             self._update_latest_sources(message.external_chat_id, answer)
             reply = _format_answer_reply(answer)
-            if is_heuristic:
-                reply = _append_marker(reply, _HEURISTIC_MARKER_ASK)
             return DispatchResult(
                 reply_text=reply,
                 route=route,

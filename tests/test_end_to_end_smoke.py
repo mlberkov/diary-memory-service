@@ -211,13 +211,10 @@ def test_explicit_note_with_unpadded_date_is_rejected() -> None:
     assert store.len_chunks() == 0
 
 
-def test_heuristic_classifier_not_broadened_by_packet_2() -> None:
-    # Regression guardrail (NOT a contract assertion about the desired
-    # long-term shape of the heuristic): the legacy plain-text NOTE
-    # auto-route was not coupled to the D-070 whitelist. Plain text
-    # starting with 2026/05/09 still does not auto-promote to NOTE.
-    # The legacy heuristic itself is slated for separate cleanup; this
-    # test only proves Packet 2 did not enlarge its surface.
+def test_command_less_dated_plain_text_routes_to_draft_floor() -> None:
+    # D-079 contract: command-less plain text routes only to the draft floor —
+    # the heuristic plain-text NOTE auto-route is retired. A dated first line
+    # (even a near-ISO form) does not auto-promote to a NOTE.
     client, store = _client_with_fresh_store()
 
     resp = _post(client, _update("2026/05/09\nfoo", update_id=1))
@@ -241,37 +238,34 @@ def test_ask_before_any_note_returns_no_evidence() -> None:
     )
 
 
-def test_dated_plain_text_is_ingested_as_note_via_heuristic() -> None:
+def test_dated_plain_text_is_stored_as_draft() -> None:
+    # D-079: command-less dated plain text is persisted raw as a draft, not
+    # auto-promoted to a NOTE — no parse, no chunks, no routing marker.
     client, store = _client_with_fresh_store()
 
     resp = _post(client, _update("2026-05-10\nLearned a new recipe\nWalked 5km", update_id=1))
 
     assert resp.status_code == 200
-    assert resp.json()["text"] == (
-        "Saved 2 events for 2026-05-10.\n" "(routed as note — send /note next time to be explicit)"
-    )
-    assert store.len_chunks() == 2
+    text = resp.json()["text"]
+    assert text.startswith("Stored as draft")
+    assert "routed as note" not in text
+    assert store.len_chunks() == 0
+    assert store.len_notes() == 0
 
 
-def test_question_plain_text_returns_grounded_reply_via_heuristic() -> None:
-    client, _ = _client_with_fresh_store()
+def test_question_plain_text_is_stored_as_draft() -> None:
+    # D-079: command-less question-shaped plain text is persisted raw as a
+    # draft, not auto-routed to ASK — no retrieval, no answer, no marker.
+    client, store = _client_with_fresh_store()
 
     _post(client, _update("/note 2026-05-10\nLearned a new recipe\nWalked 5km", update_id=1))
     resp = _post(client, _update("recipe?", update_id=2, message_id=2))
 
     assert resp.status_code == 200
     text = resp.json()["text"]
-    # Reply shape: answer_text body + single `\n` + heuristic marker. The
-    # success-case retrieval trailer is no longer appended between them.
-    assert text.startswith("Mock answer grounded in 1 diary chunk(s):")
-    assert text.endswith("(routed as question — send /ask next time to be explicit)")
-    assert "dense+sparse RRF" not in text
-    assert "hybrid retrieval" not in text
-    # No extra blank trailer remains between answer_text and the heuristic
-    # marker — body and marker are now separated by a single `\n`, not `\n\n`.
-    assert "\n\n" not in text
-    assert "Found 1 memory" not in text
-    assert "Learned a new recipe" not in text
+    assert text.startswith("Stored as draft")
+    assert "routed as question" not in text
+    assert "Mock answer grounded" not in text
 
 
 def test_ambiguous_plain_text_persists_as_draft_under_no_command_default() -> None:

@@ -143,38 +143,10 @@ def test_dispatcher_clarify_reply_explains_both_commands() -> None:
     assert result.metadata["route_source"] == "heuristic"
 
 
-def test_dispatcher_appends_heuristic_marker_to_note_reply() -> None:
-    result = _dispatcher().dispatch(
-        _inbound(
-            RouteKind.NOTE,
-            text="2026-05-10\nLearned a new recipe",
-            payload="2026-05-10\nLearned a new recipe",
-            route_source="heuristic",
-        )
-    )
-    assert result.reply_text.endswith("(routed as note — send /note next time to be explicit)")
-    assert result.metadata["route_source"] == "heuristic"
-
-
-def test_dispatcher_appends_heuristic_marker_to_ask_reply() -> None:
-    dispatcher = _dispatcher()
-    dispatcher.dispatch(
-        _inbound(
-            RouteKind.NOTE,
-            text="2026-05-10\nLearned a new recipe",
-            payload="2026-05-10\nLearned a new recipe",
-        )
-    )
-    result = dispatcher.dispatch(
-        _inbound(
-            RouteKind.ASK,
-            text="recipe?",
-            payload="recipe?",
-            route_source="heuristic",
-        )
-    )
-    assert result.reply_text.endswith("(routed as question — send /ask next time to be explicit)")
-    assert result.metadata["route_source"] == "heuristic"
+# Heuristic NOTE/ASK is no longer a reachable state after D-079 (command-less
+# plain text routes only to the draft floor; NOTE/ASK come only from explicit
+# commands), so the dispatcher no longer appends routing markers. The two tests
+# that pinned those markers were removed with the marker machinery.
 
 
 def test_command_routed_note_reply_has_no_heuristic_marker() -> None:
