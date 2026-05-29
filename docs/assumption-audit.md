@@ -19,8 +19,8 @@ When an item is decided, move it to `docs/decision-log.md` (next D-### id) and r
 | A-13 | Timezone source | Wrong `note_date` | Spec + tests | agent | Phase 2.3 |
 | A-14 | Family/child bootstrap | UX confusion; orphan records | Define onboarding flow | human | Phase 2.1 |
 | A-15 | Visibility scopes | Privacy gaps in shared mode | Enumerate + review | human | Phase 8 |
-| A-16 | Routing confidence threshold | Misclassification or noise | Heuristic + small eval | agent | Phase 1.4 |
-| A-17 | Clarification UX | User confusion | Mock chat exchange + review | human | Phase 1.4 |
+| ~~A-16~~ | ~~Routing confidence threshold~~ | — | — | — | Closed → D-020; heuristic plain-text NOTE/ASK auto-routing retired → D-078 / enforced in code → D-079 (command-less plain text routes only to the draft floor) |
+| ~~A-17~~ | ~~Clarification UX~~ | — | — | — | Closed → D-020; after D-078 CLARIFY survives only as an explicit-command active-conflict reply (not a plain-text route — dormant since D-028) |
 | A-18 | Data residency | Compliance failure | Stakeholder confirmation | human | before prod |
 | A-19 | Retention policy | Storage growth; user trust | Policy doc + sample math | human | Phase 8 |
 | A-20 | Export/delete semantics — export half directionally answered by D-027 (raw export in JSON or TXT, scope-bounded); remaining open: delivery channel and the deletion half (see A-39, A-10) | Compliance, trust | Spec + prototype | human | Phase 8 |
@@ -30,7 +30,7 @@ When an item is decided, move it to `docs/decision-log.md` (next D-### id) and r
 | ~~A-24~~ | ~~Python package name `diary_rag`~~ | — | — | — | Closed → D-042 (renaming roadmap; R-4 renamed `diary_rag` → `memory_rag`) |
 | A-25 | `/health` is liveness-only at 1.1 | Misleading readiness signal | Replace with R-10 readiness checks | agent | Phase 2/3 |
 | A-26 | Webhook fails closed when `TELEGRAM_WEBHOOK_SECRET` is unset or mismatched | Open webhook accepts spoofed traffic | Verified in Slice 1.2 secret-header tests | agent | end of Phase 1 |
-| A-28 | Mock `/note` accepts ISO-only `YYYY-MM-DD` on first line | Demos misclassify locale dates / relative dates as invalid | Replaced by A-12 decision (Phase 2.3) | agent | Phase 2.3 |
+| A-28 | Mock `/note` accepts ISO-only `YYYY-MM-DD` on first line (heuristic NOTE auto-route consumer retired → D-078; `/note`-without-date→today deferred; parser strictness unchanged so the row stays open) | Demos misclassify locale dates / relative dates as invalid | Replaced by A-12 decision (Phase 2.3) | agent | Phase 2.3 |
 | ~~A-29~~ | ~~Mock retrieval is case-insensitive substring match~~ | — | — | — | Closed → D-025 (baseline hybrid retrieval lands) |
 | ~~A-30~~ | ~~Mock state is process-local and non-idempotent~~ | — | — | — | Closed → D-023 |
 | ~~A-34~~ | ~~No migration tool; local schema upgrades are destructive~~ | — | — | — | Closed → D-046 (OP-1.2 — non-destructive schema-changing upgrade `0002` demonstrated over populated data; OP-1 complete) |

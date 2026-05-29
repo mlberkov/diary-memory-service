@@ -16,7 +16,7 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 - **A-15. Visibility scopes**: enumerated values for `visibility_scope` are undefined. Required before Phase 8.
 
 ## Routing & UX
-*A-16 → D-020. A-17 → D-020.*
+*A-16 → D-020. A-17 → D-020. (Heuristic plain-text NOTE/ASK auto-routing portion retired by D-078 — command-less plain text routes only to the draft floor; D-079 enforces it in code — `classify_plain_text` routes command-less plain text only to the draft floor.)*
 
 ## Privacy & lifecycle
 - **A-18. Data residency**: not stated.
@@ -37,7 +37,7 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 - **A-26. Webhook secret enforcement**: the `/telegram/webhook` endpoint fails closed when `TELEGRAM_WEBHOOK_SECRET` is unset or mismatched (returns 401). The `X-Telegram-Bot-Api-Secret-Token` header is compared with `secrets.compare_digest`.
 
 ## Mock contour (current)
-- **A-28. Mock `/note` accepts ISO-only dates**: the date parser in `core/domain/parser.py` recognizes only `YYYY-MM-DD` on the first non-empty line. Anything else returns `INVALID_INPUT`. Precursor to A-12 (date parsing scope).
+- **A-28. Mock `/note` accepts ISO-only dates**: the date parser in `core/domain/parser.py` recognizes only `YYYY-MM-DD` on the first non-empty line. Anything else returns `INVALID_INPUT`. Precursor to A-12 (date parsing scope). The only heuristic auto-route that consumed this strict parser (plain-text NOTE detection) is retired by D-078; A-28 stays **open** because the parser strictness itself is unchanged, and the `/note`-without-explicit-date → "today" correction is its deferred companion packet.
 *A-29 → D-025.*
 *A-30 → D-023.*
 - **A-31. Mock per-route persistence**: in the current in-memory contour, only NOTE messages persist a `SourceMessage`; ASK and CLARIFY do not. This describes mock behavior only — it is not an architectural rule about durable storage. Per-route persistence semantics are an open design question for Phase 2 and are not bound by this assumption.
@@ -69,8 +69,8 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 - A-2 → D-017 (`uv` as dependency and environment manager).
 - A-3 → D-018 (Ruff + Mypy + Pytest as baseline toolchain).
 - A-4 → D-019 (Telegram webhook transport, dev via tunnel).
-- A-16 → D-020 (heuristic routing rule set with explicit confidence labels).
-- A-17 → D-020 (CLARIFY reply naming both `/entry` and `/ask`).
+- A-16 → D-020 (heuristic routing rule set with explicit confidence labels); heuristic plain-text NOTE/ASK auto-routing portion later retired by D-078 (command-less plain text routes only to the draft floor).
+- A-17 → D-020 (CLARIFY reply naming both `/entry` and `/ask`); CLARIFY survives only as an explicit-command active-conflict reply after D-078 (it is not a plain-text route — dormant since D-028).
 - A-30 → D-023 (mock non-idempotent state; idempotency now enforced across all backends).
 - A-32 → D-022 (Postgres replaces SQLite as the canonical durable backend; SQLite stays opt-in).
 - A-5 → D-024 (pgvector chosen for dense storage).

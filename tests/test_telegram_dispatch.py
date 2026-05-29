@@ -83,20 +83,22 @@ def test_dispatch_called_with_route_ask_for_question_command() -> None:
     assert fake.calls[0].payload == "what did we do?"
 
 
-def test_dispatch_called_with_route_note_for_dated_plain_text() -> None:
+def test_dispatch_called_with_route_draft_for_dated_plain_text() -> None:
+    # D-079: command-less dated plain text routes to the draft floor, not NOTE.
     client, fake = _client_with_fake()
     response = _post(client, _message_update("2026-05-10\nLearned a new recipe"))
     assert response.status_code == 200
-    assert fake.calls[0].route is RouteKind.NOTE
+    assert fake.calls[0].route is RouteKind.DRAFT
     assert fake.calls[0].route_source == "heuristic"
     assert fake.calls[0].payload == "2026-05-10\nLearned a new recipe"
 
 
-def test_dispatch_called_with_route_ask_for_question_plain_text() -> None:
+def test_dispatch_called_with_route_draft_for_question_plain_text() -> None:
+    # D-079: command-less question-shaped plain text routes to the draft floor, not ASK.
     client, fake = _client_with_fake()
     response = _post(client, _message_update("what did I learn"))
     assert response.status_code == 200
-    assert fake.calls[0].route is RouteKind.ASK
+    assert fake.calls[0].route is RouteKind.DRAFT
     assert fake.calls[0].route_source == "heuristic"
 
 

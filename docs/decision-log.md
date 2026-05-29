@@ -2307,3 +2307,131 @@ The "no new logging contract in `src/`" constraint is what makes this pin a docs
 - The closure procedure operator drill (D-076's evidence-capture step).
 - Managed-cloud reference deployment (DEPLOY-2 reopens A-41 when pulled).
 - D-026 / D-042 rename reopens; Slice 3.4 / 3.7 work; D-038 baseline capture; D-072 routing-contract rescue.
+
+---
+
+## D-078 — Retire heuristic plain-text auto-routing to NOTE/ASK; command-less plain text routes only to the draft floor (docs-first; classifier code change deferred)
+
+### Context
+
+D-020 (Slice 1.4) shipped deterministic heuristic plain-text routing into three routes — then-named ENTRY (first non-empty line a valid ISO `YYYY-MM-DD` date with at least one event line), ASK (terminal `?` or an interrogative/imperative first token), and CLARIFY otherwise — with a user-facing marker and a CLARIFY reply naming both commands. D-027 then committed drafts as the unconditional safety floor, and D-028 enforced that floor in code: `core.routing.classifier.classify_plain_text` began routing "everything else" to `RouteKind.DRAFT` (reason `draft_floor_no_signal`) and the plain-text CLARIFY branch went dormant (no plain-text path emits CLARIFY). D-028 **deliberately kept** the two high-confidence heuristics layered on top of the draft floor — the first-line-ISO-date→NOTE auto-route (`first_line_iso_date_with_events`) and the question-shape→ASK auto-route (`question_mark_terminator`, `interrogative_or_imperative_first_token`).
+
+Subsequent packets repeatedly flagged that surviving auto-route as misaligned with the drafts-vs-notes product contract and slated it for "separate cleanup": D-070's R-13 narrative, the RUNBOOK §"Command surface" scope note (which states the legacy plain-text NOTE auto-route "is misaligned with the drafts-vs-notes product contract and is slated for separate cleanup in a future milestone (not closed by D-070)"), and the TechSpec §"Convenience routing" paragraph. The drafts-vs-notes contract is load-bearing: a draft is stored raw but never parsed, chunked, embedded, indexed, or retrievable, whereas a NOTE runs the full ingestion pipeline. A surviving auto-route can therefore silently upgrade a casual dated line into a fully-indexed, retrievable NOTE the user never asked to commit. D-078 is that cleanup, recorded as the docs contract.
+
+### Decision
+
+Retire the heuristic auto-routing of command-less plain text to NOTE and to ASK. Command-less plain text routes **only** to the draft floor (`RouteKind.DRAFT`, reason `draft_floor_no_signal`; D-027 / D-028 / R-13). The two heuristics retired are: (a) NOTE when the first non-empty line is a canonical `YYYY-MM-DD` date with at least one event line; (b) ASK on a terminal `?` or an interrogative/imperative first token. After D-078 the only ways to reach NOTE or ASK are the explicit `/note` and `/ask` commands. `core/domain/parser.parse_note` keeps its strict canonical-ISO contract unchanged — D-078 retires the auto-route that consumed the parser, not the parser. CLARIFY is unchanged: it is not a plain-text route (dormant since D-028) and survives only as an explicit-command active-conflict reply shape.
+
+**Narrow supersession.** D-078 supersedes **only the heuristic plain-text NOTE/ASK routing portions** of D-020 and D-028 — not those entries wholesale. The parts that survive unchanged: the draft floor itself (D-027 / D-028), the `RouteKind.DRAFT` value and `draft_floor_no_signal` reason, the `core.routing.lifecycle_for` mapping, the `SourceMessage.detected_route` lifecycle carrier (D-028), and the dormant-CLARIFY / CLARIFY-as-explicit-command-conflict-reply framing (D-020 / D-028).
+
+**Docs-first; code deferred.** This is the docs/contract packet of a multi-packet correction on the `feat/stage1-capture-routing-baseline-correction` branch. The live classifier in `src/memory_rag/core/routing/classifier.py` **still auto-routes** high-confidence plain-text NOTE/ASK until a **separate later code packet** collapses those branches into the draft floor and updates the routing tests. D-078 records the target contract only; no `src/` or `tests/` change lands here, and no doc in this packet claims the runtime already routes draft-only. The companion `/note`-without-explicit-date→"today" default is a **distinct later packet**, explicitly deferred and not designed here.
+
+D-072 stays parked on the sibling `rescue/d072-doc-closure-and-routing-contract` branch (its checkpoint commit message reads *"preserve D-072 routing/doc work before baseline reprioritization"*) and is not reused; this entry takes the next free number D-078, so the rescue work can land later at its original number without renumbering.
+
+### Why
+
+The draft floor already guarantees no inbound message is lost (D-027 / R-13), so the surviving NOTE/ASK auto-route adds no safety — it only adds surprise: a dated line or a question-shaped sentence is silently committed as a fully-indexed NOTE or run as an ASK the user never explicitly requested, which conflicts with the drafts-vs-notes contract and with the I-14 spirit that absence of an explicit command never silently changes the persistence outcome. Removing the auto-route loses no data-safety and makes the command surface predictable: explicit `/note` / `/ask` for note/query lifecycles, draft for everything else. The cleanup was already named as pending by D-070, the RUNBOOK scope note, and TechSpec §"Convenience routing"; D-078 records the contract so the later classifier code packet has a spec to conform to.
+
+### Consequence
+
+- **Changed:** `docs/assumptions.md` — the `*A-16 → D-020. A-17 → D-020.*` Routing & UX pointer and the two "Recently closed" A-16 / A-17 lines annotated that the heuristic plain-text NOTE/ASK routing portion is superseded by D-078 (the `→ D-020` closure attribution is retained — the assumptions were genuinely closed by D-020; D-078 reverses only the routing behavior). The A-28 entry annotated that its only auto-route consumer is retired by D-078; A-28 stays **open** as the A-12 date-parsing-scope precursor, with `/note`-without-date→today as its deferred companion.
+- **Changed:** `docs/assumption-audit.md` — A-16 and A-17 rows struck through (`Closed → D-020; heuristic plain-text NOTE/ASK routing retired → D-078`), which also reconciles a standing inconsistency (assumptions.md listed them closed while the audit rows were still open). A-28 row stays open with a parenthetical noting the D-078 consumer retirement and deferred `/note`-today.
+- **Changed:** `docs/INVARIANTS.md` — I-14 reworded (adds "or upgrade"; states drafts are the only command-less route per D-078; heuristics do not auto-route plain text to NOTE/ASK; classifier enforcement lands in a later packet of this milestone).
+- **Changed:** `docs/RUNTIME-INVARIANTS.md` — R-11 and R-13 reworded so command-less plain text resolves only to the draft floor (heuristics no longer auto-route it to NOTE/ASK; D-078), each carrying the "classifier code change enforces this in a later packet" clause so the invariant reads as the recorded target rather than a claim the code already complies.
+- **Changed:** `docs/ARCHITECTURE.md` — the target-control-surface "No command → draft" line narrowed (the "Heuristics MAY suggest a stronger route (note or ask)" allowance retired; NOTE/ASK reachable only via explicit commands; D-078) and the lifecycle-rules clarification-path clause reworded.
+- **Changed:** `docs/product/PRD.md` — §6 in-scope bullet corrected (command-less plain text persists as a draft; no heuristic auto-routing to note/ask; D-027 / D-028 / D-078).
+- **Changed:** `docs/product/TechSpec.md` — §"Convenience routing" corrected (command-less plain text routes only to the draft floor; the high-confidence NOTE/ASK heuristics kept by D-028 are retired by D-078; classifier code change pending). §"Safety rule" and §"Lifecycle representation" untouched.
+- **Changed:** `QUICKSTART.md` — a forward-looking note added to the "Heuristic plain-text routing" section recording the D-078 target draft-only contract; the example payloads and `# → text:` outputs are **unchanged** because they show current live behavior until the classifier code packet.
+- **Changed:** `docs/RUNBOOK.md` — §"Command surface" routing description keeps the accurate current behavior and adds the D-078 target-contract note; the D-070 scope note updated to record that D-078 is the contract that retires the auto-route (classifier code change + `/note`-without-date→today deferred to later packets). Header citation extended to include D-078.
+- **Changed:** `docs/execution-map.md` — slice 1.4 row annotated that the heuristic plain-text NOTE/ASK auto-route is later retired by D-078; new "Stage-1 capture/routing baseline correction" section added.
+- **Changed:** `docs/todo.md` — new "Stage-1 capture/routing baseline correction" milestone block near the top.
+- **No `src/`, `tests/`, schema, migration, `docker-compose.yml`, `Caddyfile`, `Makefile`, `pyproject.toml`, `uv.lock`, `.env.example`, `.gitignore`, or `.dockerignore` change.** The live classifier behavior is unchanged.
+- **`README.md` not touched** — it carries no routing-behavior assertion.
+- **D-078 does touch `docs/INVARIANTS.md` and `docs/RUNTIME-INVARIANTS.md`** (unlike D-073 / D-077), because the routing contract is an invariant-level statement.
+- **The historical D-020 and D-028 entries are not edited** — they are immutable records (D-020 in pre-rename vocabulary); D-078 supersedes their routing portions by reference only.
+
+### Out of scope (per packet boundaries)
+
+- The `classify_plain_text` code change collapsing the NOTE/ASK branches into the draft floor, and its test updates (`tests/test_routing_classifier.py`, dispatcher / end-to-end tests) — the next code packet in this milestone.
+- The `/note`-without-explicit-date → "today" default (a distinct later packet; A-12 / A-28-adjacent).
+- Any change to `parse_note` / `_parse_iso_date` / `normalize_iso_date_token` strictness (byte-for-byte preserved).
+- Removing CLARIFY from the dispatcher (it survives for explicit-command active-conflict).
+- Closing A-28 (it concerns `parse_note` strictness, which is unchanged here).
+- D-072 routing-contract rescue (stays parked on its sibling branch at its original number).
+- Author-name display, group-use, multi-diary; D-026 / D-042 rename reopens; Slice 3.4 / 3.7 work; D-038 baseline capture; A-43 forward-seam follow-ups.
+
+## D-079 — Enforce D-078 in code: collapse the heuristic plain-text NOTE/ASK branches into the draft floor
+
+### Context
+
+D-078 recorded the routing-contract correction (command-less plain text routes only to the draft floor; NOTE/ASK reached only via explicit `/note` / `/ask`) but was a docs-only packet: it explicitly deferred the classifier code change to "a separate later code packet" of the Stage-1 capture/routing baseline correction, and the live classifier in `src/memory_rag/core/routing/classifier.py` kept auto-routing high-confidence plain-text NOTE (first non-empty line a canonical `YYYY-MM-DD` date with ≥1 event line) and ASK (terminal `?` or interrogative/imperative first token). This is Packet 2 — the code change that brings the runtime into compliance with D-078.
+
+### Decision
+
+Collapse the two heuristic branches in `classify_plain_text` so command-less plain text resolves only to `RouteKind.DRAFT` (reason `draft_floor_no_signal`); the defensive empty→`CLARIFY` branch (`empty_after_strip`) is unchanged. The now-unused `parse_note` import and the `_QUESTION_WORDS` / `_TRAILING_PUNCT` constants are removed from the classifier module. Because heuristic-routed NOTE/ASK is now an impossible runtime state (NOTE/ASK arrive only from explicit commands, `route_source == "command"`), the dispatcher's dead machinery for that state is removed: the `is_heuristic` local, the `if not is_heuristic:` `/note` normalize-gate (normalization now runs on every NOTE), the `_HEURISTIC_MARKER_NOTE` / `_HEURISTIC_MARKER_ASK` constants and their appends, and the now-unused `_append_marker` helper. The webhook still tags classifier output `route_source="heuristic"`, so a command-less plain-text DRAFT is still recorded as heuristic-sourced (R-11 provenance unchanged).
+
+`core/domain/parser.parse_note` and the ISO-date strictness helpers are unchanged (A-28 stays **open**; the `/note`-without-explicit-date → "today" companion remains a distinct deferred packet, D-078 §Out-of-scope). CLARIFY is unchanged (defensive empty branch + explicit-command active-conflict reply shape).
+
+### Why
+
+D-078 fixed the contract on paper; until the classifier matched it, the documented invariants I-14 / R-11 / R-13 still read "enforcement lands in a later packet" and the live runtime still silently upgraded casual dated lines / questions into committed notes and queries. This packet closes that invariant-vs-code divergence before the branch is considered for PR. Removing the dispatcher markers and the normalize-gate is not opportunistic cleanup: those branches are reachable only by a heuristic NOTE/ASK route that can no longer occur, so keeping them would be dead code asserting an impossible state.
+
+### Consequence
+
+- **Changed:** `src/memory_rag/core/routing/classifier.py` — `classify_plain_text` returns only DRAFT / CLARIFY; module docstring rewritten; `parse_note` import, `_QUESTION_WORDS`, `_TRAILING_PUNCT` removed.
+- **Changed:** `src/memory_rag/services/dispatcher.py` — `is_heuristic` local, NOTE normalize-gate, both heuristic markers + appends, and `_append_marker` removed; `_normalize_note_first_line` docstring updated. `route_source` metadata recording and the CLARIFY branch are unchanged.
+- **Changed:** `tests/test_routing_classifier.py` — the six retired-branch cases flipped to draft-floor assertions and renamed `..._falls_through_to_draft_floor`; docstring updated.
+- **Changed:** `tests/test_telegram_dispatch.py` — the dated-text and question-text cases now assert `RouteKind.DRAFT` (still `route_source == "heuristic"`); renamed.
+- **Changed:** `tests/test_end_to_end_smoke.py` — the two "...via_heuristic" cases rewritten to draft outcomes; the D-070 `2026/05/09` guardrail repurposed as a positive draft-floor assertion (`test_command_less_dated_plain_text_routes_to_draft_floor`).
+- **Removed (impossible-state tests):** `test_dispatcher_appends_heuristic_marker_to_note_reply` and `test_dispatcher_appends_heuristic_marker_to_ask_reply` (`tests/test_telegram_reply.py`); `test_weak_evidence_heuristic_still_appends_route_marker` (`tests/test_dispatcher_retrieval_fallback.py`); `test_dispatch_heuristic_note_route_is_not_normalized` (`tests/test_dispatcher_note_normalization.py`). Each replaced by a short comment recording why. The "no marker" guards on command-NOTE and DRAFT replies and `test_sibling_fallback_wording_unchanged` are kept.
+- **Changed:** `QUICKSTART.md` — §"Heuristic plain-text routing" retitled and rewritten to draft-only; all three example outputs now show the `Stored as draft. …` reply (this also corrects a pre-existing stale example that showed CLARIFY for `recipe yesterday`, which the live classifier already routed to DRAFT).
+- **Changed:** `docs/RUNBOOK.md` — §"Command surface" and the D-070 §"`/note` first-line date" scope note moved to past tense (the heuristic auto-routes are retired by D-079, not "still applied").
+- **Changed:** `docs/INVARIANTS.md` (I-14) and `docs/RUNTIME-INVARIANTS.md` (R-11, R-13) — only the trailing "enforcement lands in a later packet" deferral clause replaced with past-tense enforcement (D-079); the invariant statements themselves are unchanged.
+- **Changed:** `docs/todo.md` — Packet 2 marked done (D-079); Packet 3 stays pending.
+- **Changed:** `docs/execution-map.md` — Stage-1 section marks Packet 2 done; slice 1.4 parenthetical updated to note D-079 enforced the retirement in code.
+- **No schema, migration, `docker-compose.yml`, `Caddyfile`, `Makefile`, `pyproject.toml`, `uv.lock`, or `.env.example` change.** `detected_route` already admits `draft` (D-028).
+
+### Out of scope (per packet boundaries)
+
+- Packet 3: `/note` without an explicit first-line date → "today" (A-12 / A-28-adjacent).
+- Any `parse_note` / date-parsing strictness change or A-28 closure.
+- Any reopening of the draft floor or `core.routing.lifecycle_for` mapping beyond enforcing D-078.
+- D-072 routing-contract rescue (stays parked on its sibling branch).
+- Author-name display, group-use, multi-diary work.
+
+## D-080 — Reconcile residual "classifier change deferred" doc clauses to D-079 past-tense enforcement (docs-only)
+
+### Context
+
+D-078 recorded the routing-contract correction (command-less plain text routes only to the draft floor; NOTE/ASK reached only via explicit `/note` / `/ask`) as a docs-only packet, and D-079 then enforced it in code — `classify_plain_text` now collapses the heuristic plain-text NOTE/ASK branches into the draft floor. D-079 also flipped the invariant docs to past tense (`INVARIANTS.md` I-14, `RUNTIME-INVARIANTS.md` R-11/R-13) and refreshed `QUICKSTART.md` / `RUNBOOK.md`.
+
+But six product-and-supporting-doc clauses were outside D-079's scope and still asserted that classifier enforcement was *deferred / lands in a later packet*. That left a prose divergence: the invariant files read "D-079 enforces it in code" while these clauses still read "deferred." D-080 is the minimal docs-only reconciliation that removes the last of that invariant-vs-runtime divergence and makes the Stage-1 capture/routing baseline-correction milestone internally consistent. It is a follow-up to D-078 (docs contract) and D-079 (code enforcement); it introduces no new behavior.
+
+### Decision
+
+Flip the residual "classifier code change deferred / lands in a later packet" clauses to truthful past-tense enforcement by D-079, using the wording already established in I-14 / R-11 / R-13 (`D-078 records this contract; D-079 enforces it in code — `classify_plain_text` routes command-less plain text only to the draft floor.`). Docs-only; no `src/`, `tests/`, schema, migration, or config change. The runtime is byte-identical to its post-D-079 state.
+
+### Why
+
+D-078 fixed the contract on paper and D-079 made the code conform, but until these residual clauses were corrected the canonical docs still contradicted both the live runtime and the already-flipped invariant files. Closing this prose gap removes the last documentation inconsistency in the milestone before the branch is considered for PR. Packet 3 (`/note`-without-explicit-date → "today") remains a legitimately deferred companion and is untouched.
+
+### Consequence
+
+- **Changed:** `docs/assumptions.md` — the A-16/A-17 Routing & UX pointer line flipped from "classifier code change deferred to a later packet" to D-079 past-tense enforcement.
+- **Changed:** `docs/assumption-audit.md` — the A-16 row tail flipped to `retired → D-078 / enforced in code → D-079`. The A-17 row carries no deferral clause (it concerns CLARIFY surviving only as an explicit-command conflict reply) and is unchanged.
+- **Changed:** `docs/product/PRD.md` — both the §5 "Command-less plain text → draft" paragraph and the §6 in-scope bullet flipped to D-079 past-tense enforcement.
+- **Changed:** `docs/ARCHITECTURE.md` — the "No command → draft" routing-contract line flipped to D-079 past-tense enforcement.
+- **Changed:** `docs/product/TechSpec.md` — the §"Convenience routing" enforcement clause flipped to D-079 past-tense enforcement.
+- **Changed:** `docs/todo.md` — new "Packet 2.1 — residual doc-clause reconciliation: done (D-080)" line; Packet 3 stays **pending**.
+- **Changed:** `docs/execution-map.md` — new Stage-1 "Packet 2.1" row marking the reconciliation done (D-080); classifier enforcement is now both recorded and enforced consistently across all canonical docs. Packet 3 row unchanged (Pending).
+- **The historical D-078 and D-079 entries are not edited** — they are immutable records; D-080 references them by number only.
+- **No `src/`, `tests/`, schema, migration, or config change.** A-28 stays **open** (the `/note`-without-explicit-date → "today" companion is Packet 3).
+
+### Out of scope (per packet boundaries)
+
+- Packet 3: `/note` without an explicit first-line date → "today" (A-12 / A-28-adjacent).
+- Any `parse_note` / date-parsing strictness change or A-28 closure.
+- Any rewrite of D-078's historical record beyond the existing D-079/D-080 references.
+- Any `src/`, `tests/`, schema, or migration change.
+- D-072 routing-contract rescue (stays parked on its sibling branch).
+- Author-name display, group-use, multi-diary work.

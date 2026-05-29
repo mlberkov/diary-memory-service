@@ -210,20 +210,10 @@ def test_parse_failure_replies_with_retry_hint() -> None:
     assert "Walked the dog" not in result.reply_text
 
 
-def test_weak_evidence_heuristic_still_appends_route_marker() -> None:
-    """Heuristic-routed marker is still appended on top of the new fallback trailers."""
-    dispatcher = _build_dispatcher(
-        AnswerResult(
-            fallback=FallbackMode.WEAK_EVIDENCE,
-            query_text="book",
-            evidence=_evidence(),
-        )
-    )
-
-    result = dispatcher.dispatch(_ask("book", route_source="heuristic"))
-
-    assert "(weak evidence — model expressed uncertainty)" in result.reply_text
-    assert "(routed as question — send /ask next time to be explicit)" in result.reply_text
+# Heuristic-routed ASK is no longer reachable after D-079 (ASK comes only from
+# the explicit /ask command), so the dispatcher no longer appends a routing
+# marker on top of the fallback trailers. The test that pinned that combination
+# was removed with the marker machinery.
 
 
 def test_sibling_fallback_wording_unchanged() -> None:
