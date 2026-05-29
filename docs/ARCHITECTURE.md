@@ -110,7 +110,7 @@ Target control surface (D-027):
 - `/note <text>` — explicit note. Triggers the full ingestion pipeline.
 - `/draft <text>` — explicit draft. Raw persistence only.
 - `/ask <text>` — query.
-- **No command** — defaults to **draft**. Heuristics MAY suggest a stronger route (note or ask), but they MUST NOT override the draft floor: absence of an explicit command never silently discards or downgrades raw persistence.
+- **No command** — routes to **draft** only (D-078). Absence of an explicit command never silently discards, downgrades, or upgrades raw persistence; heuristics do not auto-route plain text to note or ask — those lifecycles are reached only via the explicit `/note` / `/ask` commands. (D-078 records this contract; the classifier code change that enforces it lands in a later packet of the Stage-1 capture/routing baseline correction.)
 
 The Telegram implementation exposes `/note`, `/ask`, `/drafts`, and `/export` (D-031); the explicit `/draft` command was removed in D-030, and the no-command-→-draft default is enforced in code (D-028). The lifecycle state is carried by `SourceMessage.detected_route` (extended with `RouteKind.DRAFT`), with `core.routing.lifecycle_for` as the canonical mapping helper — no separate lifecycle column. The routing enum value `RouteKind.NOTE` is persisted as `detected_route='note'` (D-042 renamed these from `RouteKind.ENTRY` / `detected_route='entry'`).
 
@@ -119,7 +119,7 @@ Lifecycle rules:
 - Draft and note share the same raw `SourceMessage` shape; what differs is the lifecycle state and which downstream steps run.
 - A draft may later be promoted to a note via an explicit user action. Promotion is replayable from the persisted raw text under the active parser/embedding versions (I-12).
 - Drafts participate in raw export (see "Raw export"). They do not participate in retrieval.
-- Low-confidence heuristic routing on top of the draft floor remains a clarification path (R-11); CLARIFY (D-020) is still valid for cases where the heuristic actively conflicts with intent. The new safety floor is "raw always persists", regardless of routing confidence.
+- Command-less plain text persists as a draft regardless of routing confidence (R-11, R-13, D-078); no heuristic auto-routes it to note or ask. CLARIFY (D-020) survives only as a reply when an explicit command actively conflicts with intent — it is not a plain-text route. The safety floor is "raw always persists", regardless of routing confidence.
 
 Specific draft retention, expiry, and promotion mechanics are bracketed as open assumptions.
 

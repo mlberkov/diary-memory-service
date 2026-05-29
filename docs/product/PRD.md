@@ -96,9 +96,9 @@ Fell asleep 20 minutes earlier than usual
 - the first line contains the date,
 - each following line is a separate event and becomes its own chunk.
 
-### Heuristics on top of the draft floor
+### Command-less plain text → draft (D-078)
 
-Heuristics MAY suggest a stronger route (note or ask) for plain text, but MUST NOT override the draft floor. A heuristic that cannot suggest with confidence falls back to draft — never to silent discard.
+Command-less plain text routes only to the draft floor; no heuristic auto-routes it to note or ask, and the draft floor never silently discards (D-027 / D-028 / D-078). Note and ask are reached only via the explicit `/note` / `/ask` commands. (D-078 records this contract; the classifier code change that enforces it lands in a later packet of the Stage-1 capture/routing baseline correction.)
 
 ### Naming note
 
@@ -109,7 +109,7 @@ The Telegram command surface is `/note`, `/ask`, `/drafts`, `/export` (D-031). T
 ### In scope for MVP
 - Telegram text input,
 - explicit `/note`, `/ask`, and `/drafts` commands (the explicit `/draft` command was removed in D-030 — the no-command default carries the draft floor),
-- heuristic auto-routing by date presence on top of the draft floor: high-confidence NOTE/ASK signals route as before; everything else persists as a draft (D-028),
+- command-less plain text persists as a draft — there is no heuristic auto-routing of plain text to note or ask; NOTE and ASK are reached only via explicit `/note` / `/ask` (D-027 / D-028 / D-078; D-078 records this contract, with the classifier code change deferred to a later packet),
 - date parsing,
 - line-by-line event splitting,
 - one event per chunk,

@@ -117,6 +117,8 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
 
 Plain text without a slash command is classified by `core.routing.classifier`: a dated body becomes a note, a question becomes an ask, anything else gets a clarification reply. Heuristic-routed replies carry an explicit marker so the user can see what happened (D-006, R-6, R-11).
 
+> **Target contract (D-078):** the heuristic plain-text NOTE/ASK auto-routing shown below is being retired — under the recorded contract, command-less plain text routes only to a draft, and NOTE/ASK are reached only via explicit `/note` / `/ask`. The examples in this section reflect the **current live behavior**, which is unchanged until the classifier code packet of the Stage-1 capture/routing baseline correction lands.
+
 ```bash
 # 5. Dated plain text — heuristic NOTE
 curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
