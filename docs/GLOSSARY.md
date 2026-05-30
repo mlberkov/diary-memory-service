@@ -10,6 +10,10 @@ Canonical vocabulary for the shared-memory core. D-041 fixes these terms; this f
 
 New **core** code adopts `community` / `subject` for the outer-scope and sub-entity concepts rather than ad-hoc generic names or use-case nouns (D-041, extending D-026).
 
+## Author display name
+
+The canonical author identity is the **opaque `author_user_id`** carried on `SourceMessage`, `Note`, and `EventChunk` (I-6). An **author display name** is a presentation-only rendering of that identity, resolved **only at the host adapter seam** (the Telegram adapter today) from host-supplied identity fields — for Telegram, the fallback chain `username → first_name → opaque short-ID`. Display names are host-supplied and **non-authoritative**; they never replace `author_user_id` in storage, retrieval, scoping, or provenance. See D-081 and `docs/assumptions.md` A-44.
+
 ## First-use-case mapping
 
 The first implemented use case is a family/child diary in Telegram. Its use-case nouns map onto the core vocabulary as:

@@ -133,6 +133,14 @@ external_message_id, edit_seq)` is the idempotency key enforced by Runtime
 invariant R-2 (D-023): for Telegram, `edit_seq` is `0` for an original
 delivery and the `edit_date` epoch seconds for an edited state.
 
+`author_user_id` is the **opaque core author identifier** (mandatory per I-6).
+The core stores and scopes by it but never decodes or renders it; a
+human-readable **author display name** is resolved only at the host adapter
+seam (Telegram today) from host-supplied identity fields
+(`username → first_name → opaque short-ID`) and is non-authoritative
+presentation, not a core field. The sole sanctioned display surface this
+milestone is `/sources`; answer-reply attribution is deferred (D-081, A-44).
+
 ### Note
 Fields:
 - note_id
