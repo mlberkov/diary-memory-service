@@ -14,6 +14,10 @@ New **core** code adopts `community` / `subject` for the outer-scope and sub-ent
 
 The canonical author identity is the **opaque `author_user_id`** carried on `SourceMessage`, `Note`, and `EventChunk` (I-6). An **author display name** is a presentation-only rendering of that identity, resolved **only at the host adapter seam** (the Telegram adapter today) from host-supplied identity fields — for Telegram, the fallback chain `username → first_name → opaque short-ID`. Display names are host-supplied and **non-authoritative**; they never replace `author_user_id` in storage, retrieval, scoping, or provenance. See D-081 and `docs/assumptions.md` A-44.
 
+## Author display input
+
+The **host-supplied identity fields** (`username`, `first_name`) snapshotted at the adapter/storage seam at ingest time (D-082), used only as inputs to later adapter-side author-display-name resolution. They are **nullable** (a user may withhold either) and **non-authoritative** (a user may change them at any time); they are never a core field and never a substitute for `author_user_id`. See D-082 and `docs/assumptions.md` A-44.
+
 ## First-use-case mapping
 
 The first implemented use case is a family/child diary in Telegram. Its use-case nouns map onto the core vocabulary as:
