@@ -2435,3 +2435,45 @@ D-078 fixed the contract on paper and D-079 made the code conform, but until the
 - Any `src/`, `tests/`, schema, or migration change.
 - D-072 routing-contract rescue (stays parked on its sibling branch).
 - Author-name display, group-use, multi-diary work.
+
+## D-081 — Author display-name contract: opaque-ID → display-name seam + initial `/sources` surface (docs-only)
+
+### Context
+
+Authorship is already persisted via the opaque `author_user_id`, mandatory at `SourceMessage`, `Note`, and `EventChunk` (I-6; foundational decision D-014) and also carried on `Query` (`docs/product/TechSpec.md` §5). But the repository has **no** documented contract for resolving that opaque core identifier into a human-readable author name, **no** named resolution seam, and **no** sanctioned user-facing surface for author attribution. "Author-name display" has appeared so far only as a deferred forward-seam item in the out-of-scope lists of D-078 / D-079 / D-080 and in `docs/todo.md`. This docs-only packet pins the contract before any adapter, storage, or rendering code lands.
+
+### Decision
+
+`author_user_id` remains the canonical opaque core identifier. The core neither decodes nor renders it; it carries authorship as an opaque value only (I-1, I-6; `docs/ARCHITECTURE.md` "the core receives an already-resolved scope"). Human-readable author display is resolved **only at the Telegram adapter seam**, from host-supplied identity fields, with the fallback chain `username → first_name → opaque short-ID`. Resolved display names are host-supplied and **non-authoritative** (a Telegram user may change or withhold them); they are presentation, not identity, and never replace `author_user_id` in storage, retrieval, scoping, or provenance.
+
+The single sanctioned display surface for this milestone is `/sources` (D-036). Answer-reply (`/ask` reply) author attribution is explicitly deferred to a later named decision/packet and is recorded as a named placeholder in `docs/execution-map.md` and `docs/todo.md`. A-44 records the resolution + fallback assumption. A-15 (visibility scopes) is unchanged: this contract governs who-authored *display*, not who-may-see *visibility*.
+
+This is a docs-only packet — no `src/`, `tests/`, schema, DDL, migration, or config change, and no claim that runtime behavior has changed. The existing invariant surface (I-1 channel boundary + I-6 authorship) already bounds the contract; no new numbered invariant or runtime invariant is added — only a narrow cross-reference to D-081 / A-44 is added to I-6.
+
+### Why
+
+Pinning the contract first keeps the opaque-identifier core boundary (D-026 / D-041) intact while giving the upcoming capture/render packets an unambiguous seam to build against: display resolution is adapter-only, the fallback order is fixed, and the values are explicitly non-authoritative so no later code mistakes a Telegram display name for identity. Naming `/sources` as the sole surface and deferring answer-reply attribution keeps the first milestone narrow and prevents scope creep into group-use / multi-diary work.
+
+### Consequence
+
+- **Changed:** `docs/decision-log.md` — this D-081 entry.
+- **Changed:** `docs/assumptions.md` — new open assumption **A-44** (author display-name resolution + fallback; host-supplied / non-authoritative; resolution is adapter-only; A-15 unchanged).
+- **Changed:** `docs/assumption-audit.md` — new open **A-44** row (opened by D-081; not closed — capture/render is future work).
+- **Changed:** `docs/GLOSSARY.md` — short "author display name" entry: `participant` / `author_user_id` is the canonical opaque identity; display is adapter-resolved and non-authoritative.
+- **Changed:** `docs/ARCHITECTURE.md` — Axis 5 (tenant/auth mapping) and the "What belongs to adapters" bullets note author-identity → display-name resolution as a Telegram adapter-seam concern; the core carries only the opaque `author_user_id`.
+- **Changed:** `docs/product/TechSpec.md` — §5 authorship note: `author_user_id` is the opaque core identifier; display names are adapter-resolved, not a core field; `/sources` is the sole current display surface.
+- **Changed:** `docs/RUNBOOK.md` — the `/sources` (D-036) section gains a forward note that author attribution, when surfaced, is adapter-resolved per D-081 (not asserted as rendered today).
+- **Changed:** `docs/INVARIANTS.md` — narrow cross-reference added to I-6 pointing at D-081 / A-44; **no new invariant**.
+- **Changed:** `docs/execution-map.md` + `docs/todo.md` — D-081 recorded; deferred `/ask`-reply author attribution recorded as a named placeholder item.
+- **No `src/`, `tests/`, schema, migration, or config change.** A-15 stays unchanged; A-44 is opened **open**.
+
+### Out of scope (per packet boundaries)
+
+- Any `src/` or `tests/` change.
+- Any schema, DDL, migration, or persistence-shape decision.
+- Any implementation of `username` / `first_name` capture or storage.
+- Any `/sources` author-rendering implementation.
+- Answer-reply (`/ask` reply) author attribution — deferred to a later named decision/packet (placeholder recorded in `docs/execution-map.md` / `docs/todo.md`).
+- Group-use enablement, multi-diary / subject-dimension work.
+- Any change to Phase-8 visibility / A-15 beyond acknowledging it remains unchanged.
+- Any claim that runtime behavior has already changed in code.

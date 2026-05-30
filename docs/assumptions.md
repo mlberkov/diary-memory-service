@@ -62,6 +62,9 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 - **A-42. DEPLOY-1 invariants**: closed by D-060 — the DEPLOY-1 self-hosted VPS reference shape pins five invariants (OS family Debian / Ubuntu LTS; single-community / single-tenant default for the first pilot; public DNS + HTTPS required; off-box backup destination required, S3-compatible or equivalent — local-only does not qualify; operator-facing idempotent install/upgrade script). See `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` §2 for the mirrored invariant list and `docs/decision-log.md` D-060 for the authoritative statement.
 *A-43 → D-077.*
 
+## Author display (opened by D-081)
+- **A-44. Author display-name resolution**: human-readable author display is resolved **only at the Telegram adapter seam** from host-supplied identity fields, with the fallback chain `username → first_name → opaque short-ID`. The canonical core identifier stays the opaque `author_user_id` (I-6); the core never decodes or renders it. Resolved names are host-supplied and **non-authoritative** (a Telegram user may change or withhold `username` / `first_name`) — presentation, not identity, never a substitute for `author_user_id` in storage, retrieval, scoping, or provenance. The single sanctioned display surface this milestone is `/sources` (D-036); answer-reply (`/ask` reply) attribution is deferred to a later named packet. This does **not** change A-15 visibility semantics (it governs who-authored display, not who-may-see). Opened by D-081. Required before any author display-name capture / rendering packet.
+
 ---
 
 ## Recently closed

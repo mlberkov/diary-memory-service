@@ -268,6 +268,8 @@ Fail-closed: when nothing is cached, `/sources` returns `"No selected chunks ava
 
 Multi-worker caveat: each uvicorn worker / pod holds its own dispatcher singleton, so `/ask` on worker A followed by `/sources` on worker B will fail closed (or return stale chunks). The current contour is single-process local dev; promoting the cache to a durable seam (e.g. `DomainRepository.get_latest_answer_trace_for_family(community_id)` + per-chunk lookups via `get_event_chunk`) is the named follow-up trigger if the deployment shape flips.
 
+Author attribution (forward note, D-081): `/sources` does **not** render author display names today. D-081 pins the contract for when it does — author display is resolved **only at the Telegram adapter seam** from host-supplied identity fields (`username → first_name → opaque short-ID`, non-authoritative); the core carries only the opaque `author_user_id`. `/sources` is the sole sanctioned display surface for that attribution this milestone; answer-reply (`/ask` reply) attribution is deferred (see `docs/assumptions.md` A-44).
+
 ### Retrieval-quality inspection harness (D-038)
 `src/memory_rag/eval/retrieval/` ships a hand-curated harness that measures the D-025 baseline contour against a small fixture corpus + gold-query set. It is **inspection, not a gate** — the CLI exit code is always `0` regardless of the observed metrics.
 

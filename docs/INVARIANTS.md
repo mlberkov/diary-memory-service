@@ -22,7 +22,7 @@ Every `EventChunk` references its `Note` and `SourceMessage`. Lineage from chunk
 Each diary event line becomes exactly one `EventChunk`. Multiple events do not share a chunk; one event does not split across chunks.
 
 ## I-6. Authorship
-`author_user_id` is mandatory at `SourceMessage`, `Note`, and `EventChunk`. Shared diary mode never erases authorship.
+`author_user_id` is mandatory at `SourceMessage`, `Note`, and `EventChunk`. Shared diary mode never erases authorship. `author_user_id` is an opaque core identifier; human-readable author display names are resolved only at the host adapter seam and are non-authoritative presentation, never a substitute for it (D-081; `docs/assumptions.md` A-44).
 
 ## I-7. Community scoping
 Every persisted record outside `SourceMessage` carries `community_id`. No retrieval may cross communities.
