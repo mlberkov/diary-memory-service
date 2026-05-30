@@ -139,7 +139,7 @@ human-readable **author display name** is resolved only at the host adapter
 seam (Telegram today) from host-supplied identity fields
 (`username → first_name → opaque short-ID`) and is non-authoritative
 presentation, not a core field. The sole sanctioned display surface this
-milestone is `/sources`; answer-reply attribution is deferred (D-081, A-44).
+milestone is `/sources`; answer-reply attribution is deferred (D-081, A-44). The adapter/storage-owned snapshot capture shape for those host identity fields (`username` / `first_name`; nullable, non-authoritative; for later adapter-side display resolution only) is pinned by D-082; the core adds no display field.
 
 ### Note
 Fields:

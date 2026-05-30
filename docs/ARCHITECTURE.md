@@ -14,7 +14,7 @@ Hosts and integrations vary along five axes. Each axis has a single explicit sea
 2. **Control surface** — how users invoke ingest vs. ask. `/note` and `/ask` in Telegram; UI buttons, endpoints, or app screens elsewhere. Routing logic is core-shaped; its binding to a transport is adapter-side.
 3. **Storage / infrastructure** — `DomainRepository` and `SearchRepository` Protocols. Mock, SQLite (dev), local Postgres + pgvector, managed Postgres, or a host's existing database when embedded.
 4. **Embedding / LLM providers** — `EmbeddingClient`, `ChatClient`. OpenAI today, but also self-hosted models, on-prem inference, host-provided gateways, mocks for tests.
-5. **Tenant / auth mapping** — maps the host's identity model (Telegram chat → family scope; TheyGrow account → workspace; OSS deployment → single-tenant default) onto the core's scope. The mapping function is adapter; the scoped query is core. Resolving an author's **display name** from host-supplied identity fields is likewise adapter-side; the core carries only the opaque `author_user_id` (D-081, A-44).
+5. **Tenant / auth mapping** — maps the host's identity model (Telegram chat → family scope; TheyGrow account → workspace; OSS deployment → single-tenant default) onto the core's scope. The mapping function is adapter; the scoped query is core. Resolving an author's **display name** from host-supplied identity fields is likewise adapter-side; the core carries only the opaque `author_user_id` (D-081, A-44). Capturing and persisting those host identity fields as an adapter/storage-owned snapshot is likewise adapter-side (D-082).
 
 ### What belongs to the core
 
@@ -35,6 +35,7 @@ Hosts and integrations vary along five axes. Each axis has a single explicit sea
 - Provider SDKs (`openai`, host-provided model gateways).
 - Host identity mapping (Telegram chat → tenant; TheyGrow workspace → tenant; OSS → single default tenant).
 - Author display-name resolution (host-supplied identity fields → presentation name; for Telegram, `username → first_name → opaque short-ID`). The core carries only the opaque `author_user_id`; display names are non-authoritative presentation (D-081, A-44).
+- Author display-input capture / persistence shape (host-supplied `username` / `first_name` snapshotted at the adapter/storage seam; nullable, non-authoritative; for later display resolution only). The core stores no display field; authorship stays the opaque `author_user_id` (D-082).
 - Transport-bound presentation (Telegram message formatting, marker trailers, UI rendering).
 
 ### What must not leak into the core

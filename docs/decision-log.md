@@ -2477,3 +2477,47 @@ Pinning the contract first keeps the opaque-identifier core boundary (D-026 / D-
 - Group-use enablement, multi-diary / subject-dimension work.
 - Any change to Phase-8 visibility / A-15 beyond acknowledging it remains unchanged.
 - Any claim that runtime behavior has already changed in code.
+
+## D-082 — Author display-input persistence shape + capture contract (docs-only)
+
+### Context
+
+D-081 pinned the author *resolution* contract: `author_user_id` stays the canonical opaque core identifier; a human-readable author display name is resolved **only at the Telegram adapter seam** from host-supplied identity fields (`username → first_name → opaque short-ID`), host-supplied and non-authoritative; `/sources` (D-036) is the sole sanctioned surface; `/ask`-reply attribution is deferred (A-44). D-081 deliberately left the *persistence* story open: `docs/execution-map.md` records the next author row as "needs a schema/persistence story first", and A-44 stays open pending it. No capture column, snapshot, or storage rule may land until that shape is pinned. This docs-only packet supplies that decision before any adapter, storage, or migration code lands.
+
+### Decision
+
+Adopt **Option 3 (hybrid)**: pin a **minimal snapshot-oriented persistence shape now**, and **defer any adapter-side identity directory/projection to a later group-use milestone**.
+
+The capture contract: when the Telegram adapter ingests a source message it may capture a **point-in-time snapshot** of the host-supplied identity fields `username` and `first_name` alongside the raw message. Those captured inputs are **nullable** (a Telegram user may withhold either), **non-authoritative** (a user may change them at any time; they are presentation, not identity), **adapter/storage-owned**, and exist **only** to feed later adapter-side display resolution per the D-081 / A-44 fallback chain. They never substitute for `author_user_id` in storage, retrieval, scoping, or provenance.
+
+The persistence-shape boundary: these inputs live behind the storage/adapter seam as a snapshot only. They **must never** appear in core domain models, core types, or core function signatures (D-026 / D-041). The core continues to carry authorship as the opaque `author_user_id` alone (I-1, I-6; foundational D-014); this packet adds no core authorship field and no new invariant. The exact storage representation (column name / DDL / migration) is **not** decided here — that is Packet 2.
+
+This is a docs-only packet — no `src/`, `tests/`, schema, DDL, migration, or config change, and no claim that runtime behavior has changed. D-082 is the decision of record created now; Packet 2 (the capture/migration code packet) cites it.
+
+### Why
+
+Pinning the shape before code gives Packet 2 an unambiguous contract: what is captured (`username`, `first_name`), with what properties (nullable, non-authoritative, adapter/storage-owned), and where it may live (behind the storage seam, never the core). Choosing the minimal snapshot and explicitly deferring any identity directory/projection keeps this milestone narrow, preserves the opaque-identifier core boundary (D-026 / D-041), and prevents scope creep into group-use / multi-diary work before that milestone exists.
+
+### Consequence
+
+- **Changed:** `docs/decision-log.md` — this D-082 entry.
+- **Changed:** `docs/execution-map.md` — author block gains a D-082 row (snapshot-oriented persistence shape + capture contract, docs-only); the "capture + `/sources` rendering" row's blocker is narrowed from "needs a schema/persistence story first" to "persistence shape pinned by D-082; code capture/migration is a later packet."
+- **Changed:** `docs/assumptions.md` — A-44 narrowed (capture/persistence shape pinned by D-082; resolution + `/sources` rendering remain future work). A-44 stays **open**.
+- **Changed:** `docs/assumption-audit.md` — A-44 row narrowed the same way; row stays **open**.
+- **Changed:** `docs/todo.md` — D-082 recorded under the author-display block; the capture item's blocker narrowed to point at D-082.
+- **Changed:** `docs/product/TechSpec.md` — §5 authorship note: a cross-reference that D-082 pins the adapter/storage-owned snapshot capture shape for the host identity fields; the core adds no display field.
+- **Changed:** `docs/ARCHITECTURE.md` — Axis 5 + "what belongs to adapters" bullets note that author display-input capture / persistence shape is adapter/storage-owned (D-082); the core carries only the opaque `author_user_id`.
+- **Changed:** `docs/GLOSSARY.md` — new "author display input" term: host-supplied `username` / `first_name` snapshotted at the adapter/storage seam, nullable, non-authoritative, never a core field.
+- **Changed:** `docs/INVARIANTS.md` — narrow clause added to I-6 (display-input capture/persistence is adapter/storage-owned per D-082); **no new invariant**.
+- **No `src/`, `tests/`, schema, DDL, migration, or config change.** A-15 stays unchanged; A-44 stays **open**; capture code + DDL are **Packet 2**.
+
+### Out of scope (per packet boundaries)
+
+- Any `src/`, `tests/`, schema, DDL, migration, or config change — all deferred to Packet 2.
+- The exact storage column/representation for the captured snapshot (Packet 2).
+- Adapter-side identity directory/projection semantics — deferred to a later group-use milestone (Option 3).
+- `/sources` author rendering and any other display-surface implementation.
+- Answer-reply (`/ask` reply) author attribution — remains the deferred named placeholder from D-081.
+- Group-use enablement, multi-diary / subject-dimension work.
+- Any change to Phase-8 visibility / A-15 beyond acknowledging it remains unchanged.
+- Any claim that runtime behavior has already changed in code.
