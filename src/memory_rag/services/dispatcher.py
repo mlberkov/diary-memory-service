@@ -86,12 +86,26 @@ def _format_ingest_reply(result: IngestResult) -> str:
 
 
 def _normalize_note_first_line(message: InboundMessage) -> InboundMessage:
-    """Rewrite the first non-empty line of a ``/note`` payload to canonical ISO.
+    """Normalize the first non-empty line of a ``/note`` payload before parsing.
 
     NOTE is reached only via the explicit ``/note`` command (D-079), so this
     runs on every NOTE dispatch. The non-empty-line rule must match
     :func:`parse_note`'s behavior so the surface the user sees matches what
     the parser will then read.
+
+    Three cases on the first non-empty line:
+
+    * a recognized near-ISO date (the D-070 six-form whitelist) is rewritten
+      in place to canonical ``YYYY-MM-DD`` (an already-canonical date is left
+      untouched);
+    * a line that is **not** a recognized date defaults the note to "today"
+      (D-085): a canonical ``YYYY-MM-DD`` line for ``message.received_at`` is
+      prepended, so the previously-first line and everything after it become
+      event lines. "today" is the UTC date the message was received — a
+      deterministic, per-message source, not a dispatch wall-clock.
+
+    An empty or whitespace-only payload is returned unchanged, so it still
+    falls through to :func:`parse_note` and yields ``INVALID_INPUT``.
     """
     payload = message.payload
     if not payload:
@@ -102,7 +116,10 @@ def _normalize_note_first_line(message: InboundMessage) -> InboundMessage:
         if not stripped:
             continue
         canonical = normalize_iso_date_token(stripped)
-        if canonical is None or canonical == stripped:
+        if canonical is None:
+            today_iso = message.received_at.date().isoformat()
+            return dataclasses.replace(message, payload=f"{today_iso}\n{payload}")
+        if canonical == stripped:
             return message
         leading_len = len(raw) - len(raw.lstrip())
         trailing = raw[leading_len + len(stripped) :]

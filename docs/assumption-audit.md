@@ -30,7 +30,7 @@ When an item is decided, move it to `docs/decision-log.md` (next D-### id) and r
 | ~~A-24~~ | ~~Python package name `diary_rag`~~ | — | — | — | Closed → D-042 (renaming roadmap; R-4 renamed `diary_rag` → `memory_rag`) |
 | A-25 | `/health` is liveness-only at 1.1 | Misleading readiness signal | Replace with R-10 readiness checks | agent | Phase 2/3 |
 | A-26 | Webhook fails closed when `TELEGRAM_WEBHOOK_SECRET` is unset or mismatched | Open webhook accepts spoofed traffic | Verified in Slice 1.2 secret-header tests | agent | end of Phase 1 |
-| A-28 | Mock `/note` accepts ISO-only `YYYY-MM-DD` on first line (heuristic NOTE auto-route consumer retired → D-078; `/note`-without-date→today deferred; parser strictness unchanged so the row stays open) | Demos misclassify locale dates / relative dates as invalid | Replaced by A-12 decision (Phase 2.3) | agent | Phase 2.3 |
+| A-28 | Mock `/note` accepts ISO-only `YYYY-MM-DD` on first line (heuristic NOTE auto-route consumer retired → D-078; `/note`-without-date→today landed → D-085 in the dispatcher seam, INVALID_INPUT now only for empty/whitespace `/note`; parser strictness unchanged so the row stays open) | Demos misclassify locale dates / relative dates as invalid | Replaced by A-12 decision (Phase 2.3) | agent | Phase 2.3 |
 | ~~A-29~~ | ~~Mock retrieval is case-insensitive substring match~~ | — | — | — | Closed → D-025 (baseline hybrid retrieval lands) |
 | ~~A-30~~ | ~~Mock state is process-local and non-idempotent~~ | — | — | — | Closed → D-023 |
 | ~~A-34~~ | ~~No migration tool; local schema upgrades are destructive~~ | — | — | — | Closed → D-046 (OP-1.2 — non-destructive schema-changing upgrade `0002` demonstrated over populated data; OP-1 complete) |

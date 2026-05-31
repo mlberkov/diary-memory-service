@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -49,6 +50,13 @@ def _client_with_fresh_store(
     app = create_app(settings)
     app.dependency_overrides[get_dispatcher] = lambda: dispatcher
     return TestClient(app), store
+
+
+def _today_iso(update_id: int = 1) -> str:
+    # Mirror the webhook's received_at derivation (webhook.py:
+    # datetime.fromtimestamp(message.date, tz=UTC)) so the today-default
+    # (D-085) assertions are computed, not hardcoded.
+    return datetime.fromtimestamp(1715300000 + update_id, tz=UTC).date().isoformat()
 
 
 def _post(client: TestClient, payload: dict[str, Any]) -> Any:
@@ -147,14 +155,31 @@ def test_ask_with_no_match_returns_no_evidence_fallback() -> None:
     assert trace.answer_text == ""
 
 
-def test_note_with_invalid_first_line_returns_invalid_input_and_persists_source() -> None:
+def test_note_with_dateless_first_line_defaults_to_today_and_saves() -> None:
+    # D-085: an explicit /note whose first line is not a date defaults to the
+    # received_at date; the previously-first line and the rest become events.
     client, store = _client_with_fresh_store()
 
     resp = _post(client, _update("/note not-a-date\nfoo", update_id=1))
 
     assert resp.status_code == 200
+    assert resp.json()["text"] == f"Saved 2 events for {_today_iso(1)}."
+    assert store.len_sources() == 1
+    assert store.len_notes() == 1
+    assert store.len_chunks() == 2
+
+
+def test_empty_note_returns_invalid_input_and_persists_source() -> None:
+    # D-085: the today-default fires only when there IS a non-empty first
+    # line. A bare /note keeps the INVALID_INPUT contour and de-leaked wording,
+    # and the raw source is still persisted before the parse decision.
+    client, store = _client_with_fresh_store()
+
+    resp = _post(client, _update("/note", update_id=1))
+
+    assert resp.status_code == 200
     text = resp.json()["text"]
-    assert text == "First line must be a date like 2026-05-09. Got: 'not-a-date'."
+    assert text == "First line must be a date like 2026-05-09. Got: ''."
     # D-070: the dev-leaking "Mock" label is no longer in the user-facing reply.
     assert "Mock" not in text
     assert store.len_sources() == 1
@@ -199,16 +224,18 @@ def test_explicit_note_with_dot_separated_date_is_normalized_and_saved() -> None
     assert store.len_chunks() == 1
 
 
-def test_explicit_note_with_unpadded_date_is_rejected() -> None:
-    # D-070 whitelist is exact — unpadded forms (2026-5-9) remain rejected.
+def test_explicit_note_with_unpadded_date_defaults_to_today() -> None:
+    # The near-ISO whitelist is exact (D-070): 2026-5-9 is not a recognized
+    # date, so under D-085 it is a non-date first line that defaults to today
+    # and becomes an event line rather than being rejected.
     client, store = _client_with_fresh_store()
 
     resp = _post(client, _update("/note 2026-5-9\nfoo", update_id=1))
 
     assert resp.status_code == 200
-    assert resp.json()["text"] == "First line must be a date like 2026-05-09. Got: '2026-5-9'."
-    assert store.len_notes() == 0
-    assert store.len_chunks() == 0
+    assert resp.json()["text"] == f"Saved 2 events for {_today_iso(1)}."
+    assert store.len_notes() == 1
+    assert store.len_chunks() == 2
 
 
 def test_command_less_dated_plain_text_routes_to_draft_floor() -> None:

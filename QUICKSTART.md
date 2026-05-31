@@ -105,12 +105,20 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -d '{"update_id":3,"message":{"message_id":3,"date":1715300200,"chat":{"id":42},"from":{"id":7},"text":"/ask snowstorm"}}'
 # → text: "Nothing in your saved notes matched 'snowstorm'. Try rephrasing the question, or use words that appear in your notes."
 
-# 4. Non-ISO first line → INVALID_INPUT reply; raw SourceMessage is still recorded
+# 4. Dateless first line → defaults to "today" (the message's received date, UTC);
+#    the text becomes event lines (D-085). Here message date 1715300300 → 2024-05-10.
 curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
   -d '{"update_id":4,"message":{"message_id":4,"date":1715300300,"chat":{"id":42},"from":{"id":7},"text":"/note not-a-date\nfoo"}}'
-# → text: "First line must be a date like 2026-05-09. Got: 'not-a-date'."
+# → text: "Saved 2 events for 2024-05-10."
+
+# 5. Empty /note → INVALID_INPUT reply; raw SourceMessage is still recorded
+curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
+  -d '{"update_id":5,"message":{"message_id":5,"date":1715300400,"chat":{"id":42},"from":{"id":7},"text":"/note"}}'
+# → text: "First line must be a date like 2026-05-09. Got: ''."
 ```
 
 #### Plain text without a command — draft floor
