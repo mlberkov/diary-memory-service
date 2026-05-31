@@ -139,7 +139,7 @@ human-readable **author display name** is resolved only at the host adapter
 seam (Telegram today) from host-supplied identity fields
 (`username → first_name → opaque short-ID`) and is non-authoritative
 presentation, not a core field. The sole sanctioned display surface this
-milestone is `/sources`; answer-reply attribution is deferred (D-081, A-44). The adapter/storage-owned snapshot capture shape for those host identity fields (`username` / `first_name`; nullable, non-authoritative; for later adapter-side display resolution only) is pinned by D-082; the core adds no display field.
+milestone is `/sources`; answer-reply attribution is deferred (D-081, A-44). The adapter/storage-owned snapshot capture shape for those host identity fields (`username` / `first_name`; nullable, non-authoritative; for later adapter-side display resolution only) is pinned by D-082; the core adds no display field. D-083 pins the landing seam (Option A): that snapshot lands in a separate adapter-owned side table written through an adapter-owned storage port distinct from the core `DomainRepository`, keyed by the message idempotency tuple `external_chat_id + external_message_id + edit_seq` as opaque scalars; the core repository signature is unchanged.
 
 ### Note
 Fields:

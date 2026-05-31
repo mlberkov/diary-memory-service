@@ -41,6 +41,40 @@ def test_telegram_update_ignores_unknown_fields() -> None:
     assert update.message.text == "/help"
 
 
+def test_telegram_user_parses_display_inputs_when_present() -> None:
+    payload = {
+        "update_id": 1,
+        "message": {
+            "message_id": 1,
+            "date": 1715300000,
+            "chat": {"id": 42},
+            "from": {"id": 7, "username": "alice", "first_name": "Alice"},
+            "text": "/note 2026-05-09\nA",
+        },
+    }
+    update = TelegramUpdate.model_validate(payload)
+    assert update.message is not None
+    assert update.message.from_.username == "alice"
+    assert update.message.from_.first_name == "Alice"
+
+
+def test_telegram_user_display_inputs_default_to_none() -> None:
+    payload = {
+        "update_id": 1,
+        "message": {
+            "message_id": 1,
+            "date": 1715300000,
+            "chat": {"id": 42},
+            "from": {"id": 7},
+            "text": "/start",
+        },
+    }
+    update = TelegramUpdate.model_validate(payload)
+    assert update.message is not None
+    assert update.message.from_.username is None
+    assert update.message.from_.first_name is None
+
+
 def test_telegram_update_accepts_update_without_message() -> None:
     update = TelegramUpdate.model_validate({"update_id": 5})
     assert update.update_id == 5

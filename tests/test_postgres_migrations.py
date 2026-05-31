@@ -32,6 +32,7 @@ DOMAIN_TABLES = (
     "retrieval_hits",
     "answer_traces",
     "indexing_dead_letters",
+    "author_display_inputs",
 )
 
 #: Id of the OP-1.2 / D-046 upgrade migration (filename stem).
@@ -40,11 +41,14 @@ UPGRADE_MIGRATION_ID = "0002.index-embedding-status"
 #: Id of the OP-2.2 / D-048 dead-letter-table upgrade migration (filename stem).
 DEAD_LETTER_MIGRATION_ID = "0003.indexing-dead-letter-table"
 
+#: Id of the D-084 author display-input side-table migration (filename stem).
+AUTHOR_DISPLAY_MIGRATION_ID = "0004.author-display-inputs"
+
 #: Index added by the OP-1.2 upgrade migration on ``event_chunks``.
 EMBEDDING_STATUS_INDEX = "idx_event_chunks_embedding_status"
 
-#: Number of versioned migrations in the history (baseline + two upgrades).
-MIGRATION_COUNT = 3
+#: Number of versioned migrations in the history (baseline + three upgrades).
+MIGRATION_COUNT = 4
 
 PG_DSN = os.environ.get("MEMORY_RAG_PG_TEST_DSN")
 
@@ -65,11 +69,12 @@ if PG_DSN is not None:
 
 
 def test_migrations_discoverable() -> None:
-    """The migration set is the baseline plus the two upgrades, in order."""
+    """The migration set is the baseline plus the three upgrades, in order."""
     assert migration_ids() == [
         BASELINE_MIGRATION_ID,
         UPGRADE_MIGRATION_ID,
         DEAD_LETTER_MIGRATION_ID,
+        AUTHOR_DISPLAY_MIGRATION_ID,
     ]
 
 
@@ -81,6 +86,7 @@ def test_migrations_dir_is_packaged() -> None:
         "0001.baseline-schema.sql",
         "0002.index-embedding-status.sql",
         "0003.indexing-dead-letter-table.sql",
+        "0004.author-display-inputs.sql",
     ]
 
 

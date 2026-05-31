@@ -16,7 +16,7 @@ The canonical author identity is the **opaque `author_user_id`** carried on `Sou
 
 ## Author display input
 
-The **host-supplied identity fields** (`username`, `first_name`) snapshotted at the adapter/storage seam at ingest time (D-082), used only as inputs to later adapter-side author-display-name resolution. They are **nullable** (a user may withhold either) and **non-authoritative** (a user may change them at any time); they are never a core field and never a substitute for `author_user_id`. See D-082 and `docs/assumptions.md` A-44.
+The **host-supplied identity fields** (`username`, `first_name`) snapshotted at the adapter/storage seam at ingest time (D-082), used only as inputs to later adapter-side author-display-name resolution. They are **nullable** (a user may withhold either) and **non-authoritative** (a user may change them at any time); they are never a core field and never a substitute for `author_user_id`. The snapshot lands in a separate **Telegram-adapter-owned side table** written through an **adapter-owned storage port** distinct from the core `DomainRepository`, keyed by the message idempotency tuple `external_chat_id + external_message_id + edit_seq` as opaque scalars (D-083). See D-082, D-083 and `docs/assumptions.md` A-44.
 
 ## First-use-case mapping
 

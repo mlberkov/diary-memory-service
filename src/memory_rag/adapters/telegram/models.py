@@ -13,6 +13,11 @@ from pydantic import BaseModel, ConfigDict, Field
 class TelegramUser(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
     id: int
+    # Host-supplied, non-authoritative display inputs (D-084). Either may be
+    # withheld. Captured behind the adapter-owned storage seam only; never
+    # carried into a core type.
+    username: str | None = None
+    first_name: str | None = None
 
 
 class TelegramChat(BaseModel):

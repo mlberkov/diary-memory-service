@@ -76,6 +76,9 @@ class MockDomainStore:
         self._retrieval_hits: dict[str, RetrievalHit] = {}
         self._answer_traces: dict[str, AnswerTrace] = {}
         self._dead_letters: dict[str, IndexingDeadLetter] = {}
+        # Adapter-owned author display-input snapshots (D-084), keyed by the
+        # message idempotency tuple, holding the raw (username, first_name).
+        self._author_display_inputs: dict[tuple[str, str, int], tuple[str | None, str | None]] = {}
 
     def save_source_message(self, source: SourceMessage) -> None:
         key = (source.external_chat_id, source.external_message_id, source.edit_seq)
@@ -304,6 +307,31 @@ class MockDomainStore:
     def get_indexing_dead_letter(self, dead_letter_id: str) -> IndexingDeadLetter | None:
         return self._dead_letters.get(dead_letter_id)
 
+    def save_author_display_input(
+        self,
+        *,
+        external_chat_id: str,
+        external_message_id: str,
+        edit_seq: int,
+        username: str | None,
+        first_name: str | None,
+    ) -> None:
+        # Idempotent on the message tuple (R-2): an existing snapshot is left
+        # untouched, never duplicated or silently mutated (D-084).
+        key = (external_chat_id, external_message_id, edit_seq)
+        if key in self._author_display_inputs:
+            return
+        self._author_display_inputs[key] = (username, first_name)
+
+    def get_author_display_input(
+        self,
+        *,
+        external_chat_id: str,
+        external_message_id: str,
+        edit_seq: int,
+    ) -> tuple[str | None, str | None] | None:
+        return self._author_display_inputs.get((external_chat_id, external_message_id, edit_seq))
+
     def len_sources(self) -> int:
         return len(self._sources)
 
@@ -338,6 +366,7 @@ class MockDomainStore:
         self._retrieval_hits.clear()
         self._answer_traces.clear()
         self._dead_letters.clear()
+        self._author_display_inputs.clear()
 
 
 def _cosine_distance(a: list[float], b: list[float]) -> float:
