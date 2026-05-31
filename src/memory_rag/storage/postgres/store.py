@@ -672,6 +672,47 @@ class PostgresDomainStore:
             return None
         return _row_to_dead_letter(row)
 
+    def save_author_display_input(
+        self,
+        *,
+        external_chat_id: str,
+        external_message_id: str,
+        edit_seq: int,
+        username: str | None,
+        first_name: str | None,
+    ) -> None:
+        # ON CONFLICT DO NOTHING makes re-delivery of the same tuple a no-op
+        # that preserves the original snapshot (R-2 / D-084); an edit (new
+        # edit_seq) is a distinct key and lands a new row.
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO author_display_inputs "
+                "(external_chat_id, external_message_id, edit_seq, username, first_name) "
+                "VALUES (%s, %s, %s, %s, %s) "
+                "ON CONFLICT (external_chat_id, external_message_id, edit_seq) "
+                "DO NOTHING",
+                (external_chat_id, external_message_id, edit_seq, username, first_name),
+            )
+            conn.commit()
+
+    def get_author_display_input(
+        self,
+        *,
+        external_chat_id: str,
+        external_message_id: str,
+        edit_seq: int,
+    ) -> tuple[str | None, str | None] | None:
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT username, first_name FROM author_display_inputs "
+                " WHERE external_chat_id = %s AND external_message_id = %s AND edit_seq = %s",
+                (external_chat_id, external_message_id, edit_seq),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return (row[0], row[1])
+
 
 def _row_to_dead_letter(row: dict[str, Any]) -> IndexingDeadLetter:
     return IndexingDeadLetter(

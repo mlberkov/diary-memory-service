@@ -22,6 +22,10 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 
 from memory_rag.adapters.answers import build_chat_client
 from memory_rag.adapters.embeddings import build_embedding_client
+from memory_rag.adapters.telegram.author_display import (
+    AuthorDisplayInputStore,
+    TelegramBackendStore,
+)
 from memory_rag.adapters.telegram.client import HttpxTelegramClient, TelegramClient
 from memory_rag.adapters.telegram.commands import parse_command
 from memory_rag.adapters.telegram.drafts_packing import pack_drafts_into_messages
@@ -34,15 +38,15 @@ from memory_rag.core.routing.classifier import classify_plain_text
 from memory_rag.logging import get_logger
 from memory_rag.services import Dispatcher, DomainService, ExportService, QueryService
 from memory_rag.storage.mock import MockDomainStore
-from memory_rag.storage.search_repository import HybridDomainStore
 
 log = get_logger(__name__)
 
 _dispatcher: Dispatcher | None = None
+_store: TelegramBackendStore | None = None
 _telegram_client: TelegramClient | None = None
 
 
-def _build_store(settings: Settings) -> HybridDomainStore:
+def _build_store(settings: Settings) -> TelegramBackendStore:
     if settings.storage_backend == "postgres":
         from memory_rag.storage.postgres import PostgresDomainStore
 
@@ -54,11 +58,25 @@ def _build_store(settings: Settings) -> HybridDomainStore:
     return MockDomainStore()
 
 
+def _get_store(settings: Settings) -> TelegramBackendStore:
+    """Build the per-process backend store once and share it.
+
+    The dispatcher (core ingest + retrieval seams) and the adapter-owned author
+    display-input port (D-084) are both backed by this single instance, so a
+    snapshot written through the port lands in the same backend the dispatcher
+    persists source messages to.
+    """
+    global _store
+    if _store is None:
+        _store = _build_store(settings)
+    return _store
+
+
 def get_dispatcher() -> Dispatcher:
     global _dispatcher
     if _dispatcher is None:
         settings = get_settings()
-        store = _build_store(settings)
+        store = _get_store(settings)
         embedding_client = build_embedding_client(settings)
         chat_client = build_chat_client(settings)
         _dispatcher = Dispatcher(
@@ -88,6 +106,15 @@ def get_dispatcher() -> Dispatcher:
             settings.retrieval_candidate_k,
         )
     return _dispatcher
+
+
+def get_author_display_input_store() -> AuthorDisplayInputStore:
+    """Adapter-owned author display-input port (D-084).
+
+    Returns the same per-process store the dispatcher uses, typed as the
+    adapter-owned port distinct from the core ``DomainRepository``.
+    """
+    return _get_store(get_settings())
 
 
 def get_telegram_client() -> TelegramClient:
@@ -123,6 +150,7 @@ def register_telegram_webhook(app: FastAPI) -> None:
         settings: Annotated[Settings, Depends(get_settings)],
         dispatcher: Annotated[Dispatcher, Depends(get_dispatcher)],
         telegram_client: Annotated[TelegramClient, Depends(get_telegram_client)],
+        display_store: Annotated[AuthorDisplayInputStore, Depends(get_author_display_input_store)],
         x_telegram_bot_api_secret_token: Annotated[str | None, Header()] = None,
     ) -> dict[str, Any]:
         _verify_secret(settings.telegram_webhook_secret, x_telegram_bot_api_secret_token)
@@ -159,6 +187,31 @@ def register_telegram_webhook(app: FastAPI) -> None:
             lifecycle_for(result.route),
             effective_path,
         )
+
+        # Capture the adapter-owned author display-input snapshot for routes
+        # that land a source message (note/draft lifecycles), keyed by the same
+        # idempotency tuple (D-084). Values come straight from the raw Telegram
+        # ``from_`` — never via the core ``InboundMessage`` / ``SourceMessage``.
+        # Best-effort: a snapshot-write failure must not break the reply.
+        if lifecycle_for(result.route) in ("note", "draft"):
+            try:
+                display_store.save_author_display_input(
+                    external_chat_id=inbound.external_chat_id,
+                    external_message_id=inbound.external_message_id,
+                    edit_seq=inbound.edit_seq,
+                    username=message.from_.username,
+                    first_name=message.from_.first_name,
+                )
+            except Exception as exc:
+                log.warning(
+                    "author_display.capture_failed chat_id=%s message_id=%s "
+                    "edit_seq=%s error_class=%s",
+                    inbound.external_chat_id,
+                    inbound.external_message_id,
+                    inbound.edit_seq,
+                    exc.__class__.__name__,
+                )
+
         if result.document is not None:
             try:
                 telegram_client.send_document(

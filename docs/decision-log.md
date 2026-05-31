@@ -2575,3 +2575,43 @@ Pinning Option A first gives the code packet an unambiguous, settled seam to bui
 - Group-use enablement, multi-diary / subject-dimension work.
 - Any change to Phase-8 visibility / A-15 beyond acknowledging it remains unchanged.
 - Any claim that runtime behavior has already changed in code.
+
+## D-084 — Author display-input capture + durable landing (adapter-owned side table & co-located port)
+
+### Context
+
+D-081 / D-082 / D-083 pinned, docs-only, the author display-name contract, the snapshot persistence shape + capture contract, and the adapter-owned landing seam (Option A: a separate Telegram-adapter-owned side table written through an adapter-owned storage port distinct from the core `DomainRepository`, keyed by the message idempotency tuple as opaque scalars). This is the first **code** packet: it makes the Telegram-side display-input snapshot actually land durably across all backends, without crossing the core boundary.
+
+### Decision
+
+Implement the D-083 seam exactly as pinned:
+
+- **Capture.** `TelegramUser` now models the nullable host-supplied `username` / `first_name`. The webhook writes a snapshot **only for source-message-bearing routes** (note/draft lifecycles), reading the values straight from the raw `message.from_` — never via `InboundMessage` or `SourceMessage`. Capture is best-effort: a snapshot-write failure logs `author_display.capture_failed` and never breaks the user's reply (Fallback Rule).
+- **Port (owner-fixed topology).** A new adapter-owned `AuthorDisplayInputStore` Protocol (`save_author_display_input` / `get_author_display_input`) is **co-located on the existing per-backend store object**. It is distinct from `DomainRepository`, uses opaque-scalar signatures only, and imports no core type. The combined `TelegramBackendStore` Protocol (adapter layer) lets the webhook build one store and hand it to both the dispatcher and the port; the storage layer never imports the adapter port. `get_author_display_input` is a raw storage read — it returns the stored `(username, first_name)` and carries **no** display-resolution / fallback-chain logic.
+- **Side table + migration.** New `author_display_inputs` table (mock dict / SQLite `_DDL` / Postgres forward migration `0004.author-display-inputs.sql`), keyed by composite PRIMARY KEY `(external_chat_id, external_message_id, edit_seq)`, with nullable `username` / `first_name`, no FK, no core-type dependency.
+- **Idempotency / edits (R-2).** Re-delivery of the same tuple is a no-op that preserves the original snapshot (`ON CONFLICT DO NOTHING` / `INSERT OR IGNORE` / dict-key guard) — never duplicated, never silently mutated even if a redelivered payload carries different values; an edit (new `edit_seq`) lands a new row.
+- **Nulls.** Either field may be `None`, and a **both-null snapshot is still written** — recording the point-in-time "withheld" state uniformly. This is a decision of this packet, not an assumption; no new runtime invariant is enforced for it.
+
+The core `DomainRepository`, `SearchRepository`, `InboundMessage`, `SourceMessage`, and `get_or_create_source_message` are unchanged. A-44 stays **open**: capture + durable landing are now implemented, but resolution and `/sources` rendering remain future work.
+
+### Why
+
+The seam was fully pinned by D-083, so this packet chooses no architecture inside the diff. Keeping the snapshot behind a dedicated adapter-owned port co-located on the store object — keyed only by opaque scalars — preserves the shared-core / adapter-owned split (D-026 / D-041) and the opaque-identifier core boundary (I-1, I-6) while making the display inputs durably available for the later resolution / `/sources` packet. Gating capture on source-message-bearing routes mirrors D-082's "when the adapter ingests a source message," so snapshots key 1:1 with persisted source rows.
+
+### Consequence
+
+- **Added:** `src/memory_rag/adapters/telegram/author_display.py` — `AuthorDisplayInputStore` port + combined `TelegramBackendStore` seam.
+- **Added:** `src/memory_rag/storage/postgres/migrations/0004.author-display-inputs.sql` — forward migration for the side table.
+- **Changed:** `src/memory_rag/adapters/telegram/models.py` — `TelegramUser` gains nullable `username` / `first_name`.
+- **Changed:** `src/memory_rag/adapters/telegram/webhook.py` — shared per-process store singleton, `get_author_display_input_store` dependency, best-effort capture on note/draft routes.
+- **Changed:** `src/memory_rag/storage/{mock,sqlite,postgres}/store.py` — co-located port implementation with backend parity.
+- **Added:** `tests/test_author_display_capture.py`, `tests/test_author_display_boundary.py`; **Changed:** `tests/test_telegram_models.py`.
+- **Changed:** `docs/decision-log.md` (this entry), `docs/assumptions.md` (A-44 status: capture + landing implemented, resolution/`/sources` still open), `docs/execution-map.md` + `docs/todo.md` (capture row → done; rendering still pending).
+- A-15 unchanged; A-44 stays **open**.
+
+### Out of scope (per packet boundaries)
+
+- `/sources` author rendering; the adapter-side display-resolution helper (the `username → first_name → short-ID` fallback chain).
+- Answer-reply (`/ask` reply) author attribution — remains the deferred named placeholder from D-081.
+- Adapter-side identity directory/projection semantics; group-use enablement; multi-diary / subject-dimension work.
+- A-15 / visibility changes; any widening of core domain/routing types or the `DomainRepository` signature; a `captured_at` provenance column.

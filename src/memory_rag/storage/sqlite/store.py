@@ -177,6 +177,15 @@ CREATE INDEX IF NOT EXISTS idx_indexing_dead_letters_community_id
 
 CREATE INDEX IF NOT EXISTS idx_indexing_dead_letters_source_message_id
     ON indexing_dead_letters(source_message_id);
+
+CREATE TABLE IF NOT EXISTS author_display_inputs (
+    external_chat_id    TEXT NOT NULL,
+    external_message_id TEXT NOT NULL,
+    edit_seq            INTEGER NOT NULL DEFAULT 0,
+    username            TEXT,
+    first_name          TEXT,
+    PRIMARY KEY (external_chat_id, external_message_id, edit_seq)
+);
 """
 
 
@@ -676,6 +685,44 @@ class SqliteDomainStore:
         if row is None:
             return None
         return _row_to_dead_letter(row)
+
+    def save_author_display_input(
+        self,
+        *,
+        external_chat_id: str,
+        external_message_id: str,
+        edit_seq: int,
+        username: str | None,
+        first_name: str | None,
+    ) -> None:
+        # INSERT OR IGNORE makes re-delivery of the same tuple a no-op that
+        # preserves the original snapshot (R-2 / D-084); an edit (new edit_seq)
+        # is a distinct key and lands a new row.
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO author_display_inputs "
+                "(external_chat_id, external_message_id, edit_seq, username, first_name) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (external_chat_id, external_message_id, edit_seq, username, first_name),
+            )
+            conn.commit()
+
+    def get_author_display_input(
+        self,
+        *,
+        external_chat_id: str,
+        external_message_id: str,
+        edit_seq: int,
+    ) -> tuple[str | None, str | None] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT username, first_name FROM author_display_inputs "
+                " WHERE external_chat_id = ? AND external_message_id = ? AND edit_seq = ?",
+                (external_chat_id, external_message_id, edit_seq),
+            ).fetchone()
+        if row is None:
+            return None
+        return (row["username"], row["first_name"])
 
 
 def _row_to_dead_letter(row: sqlite3.Row) -> IndexingDeadLetter:
