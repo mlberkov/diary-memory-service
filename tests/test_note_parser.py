@@ -31,7 +31,11 @@ def test_skips_leading_blank_lines_before_date() -> None:
 
 
 def test_returns_none_when_first_line_not_iso_date() -> None:
+    # Boundary pin (D-085): the parser stays strict ISO-only. The
+    # "missing first-line date defaults to today" behavior lives in the
+    # /note dispatcher seam, never in parse_note.
     assert parse_note("not-a-date\nfoo") is None
+    assert parse_note("walk in park") is None
 
 
 def test_returns_none_for_non_iso_locale_date() -> None:

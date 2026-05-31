@@ -411,16 +411,18 @@ The explicit `/note` dispatcher path normalizes a small whitelist of near-ISO fi
 
 **DD-first inputs are always interpreted as DD/MM/YYYY by intentional product convention** — there is no fallback heuristic and no per-input ambiguity branch. Concrete pin: `05/09/2026` → `2026-09-05` (5 September 2026, never 9 May 2026). The same convention applies to the other DD-first separators.
 
-Rejected categories (fall through to the user-facing error below):
+Forms **not** recognized as a date (the whitelist is exact):
 
 - Unpadded month or day: `2026-5-9`, `9/5/2026`, etc.
 - Mixed separators: `2026-05/09`, `09.05-2026`.
 - Natural-language or relative dates: `May 9 2026`, `today`, `yesterday`.
 - Impossible calendar dates: `2026-02-30`, `30-02-2026`.
 
-User-facing failure UX: when the first line does not match the whitelist, the reply is exactly `"First line must be a date like 2026-05-09. Got: '<first-line>'."`. The raw `SourceMessage` is still recorded (I-15); no `Note` or `EventChunk` is created. Operator script for the parent: "Send `/note 2026-05-09` on the first line, then one event per line." If the parent prefers DD-first, remind them DD/MM/YYYY is the convention so May/September do not get swapped.
+Missing-date default (D-085): when the first non-empty line is **not** a recognized date, the explicit `/note` path no longer rejects it. Instead it defaults the note to **today** — the UTC date the message was received (`InboundMessage.received_at.date()`, set from the Telegram message send-time) — by prepending a canonical `YYYY-MM-DD` line, so the previously-first line and everything after it become event lines. "today" is per-message and deterministic, not a dispatch wall-clock. Note the prepended line is also what lands in the persisted `raw_text` (the dispatcher normalizes the payload before `DomainService.ingest`, the same seam D-070 established); the original command text is retained on `InboundMessage.text` but not persisted.
 
-Scope note: this normalization is applied only on the explicit `/note` dispatch path. There is no longer a plain-text NOTE auto-route — `core/routing/classifier.py` routes all command-less plain text to the draft floor (D-078, enforced in code by D-079), so a dated plain-text line is persisted as a draft, never auto-committed as a NOTE. The `/note`-without-explicit-date → "today" companion remains deferred to a later packet of the Stage-1 capture/routing baseline correction.
+User-facing UX: the only `/note` that still returns the INVALID_INPUT reply `"First line must be a date like 2026-05-09. Got: ''."` is an **empty or whitespace-only** payload (a bare `/note`); the raw `SourceMessage` is still recorded (I-15), no `Note` or `EventChunk` is created. Operator script for the parent: "`/note` with a date on the first line saves under that date; `/note` with no date saves under today; one event per line." If the parent prefers DD-first, remind them DD/MM/YYYY is the convention so May/September do not get swapped.
+
+Scope note: this normalization is applied only on the explicit `/note` dispatch path. There is no longer a plain-text NOTE auto-route — `core/routing/classifier.py` routes all command-less plain text to the draft floor (D-078, enforced in code by D-079), so a dated plain-text line is persisted as a draft, never auto-committed as a NOTE. The `/note`-without-explicit-date → "today" companion landed in D-085 (closing the Stage-1 capture/routing baseline correction milestone); `core/domain/parser.parse_note` itself stays strict ISO-only — the default lives in the dispatcher seam, not the parser.
 
 Schema upgrade note: the `source_messages.detected_route` CHECK constraint extended from `{start, help, note, ask, clarify, unknown}` to `{start, help, note, ask, draft, clarify, unknown}` (D-028). Per A-34, existing local Postgres volumes must be reset with `docker compose down -v` before the new CHECK applies; SQLite has no enum constraint on the column. Until the reset is performed, inserts with `detected_route='draft'` raise a CHECK violation against the live Postgres backend.
 

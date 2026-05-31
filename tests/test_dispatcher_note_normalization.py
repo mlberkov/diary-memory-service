@@ -9,9 +9,18 @@ milestone (D-067 §Observations bullet 1):
 - Heuristic-routed messages are forwarded unchanged regardless of first
   line shape — the legacy classifier surface is not coupled to the new
   whitelist.
-- The de-leaked user-facing error wording is in effect for unmatched
-  first lines, and the ``/start`` blurb proactively names the accepted
+- The de-leaked user-facing error wording is in effect for empty/whitespace
+  ``/note`` payloads, and the ``/start`` blurb proactively names the accepted
   formats and the DD/MM/YYYY convention.
+
+Also pins Packet 3 of the "Stage-1 capture/routing baseline correction"
+milestone (D-085):
+
+- A ``/note`` whose first non-empty line is not a recognized date defaults
+  the note to "today" (``message.received_at``, UTC) by prepending a canonical
+  ``YYYY-MM-DD`` line, so the text becomes event lines instead of producing
+  ``INVALID_INPUT``. The ``INVALID_INPUT`` contour survives only for an
+  empty/whitespace-only payload.
 """
 
 from __future__ import annotations
@@ -89,21 +98,36 @@ def test_normalize_helper_is_noop_for_canonical_form() -> None:
     assert out.payload == "2026-05-09\nfoo"
 
 
-def test_normalize_helper_is_noop_for_unmatched_first_line() -> None:
-    # Junk first line stays as-is so the existing strict parser then
-    # produces INVALID_INPUT with the new user-facing wording.
+def test_normalize_helper_prepends_today_for_unmatched_first_line() -> None:
+    # D-085: a non-date first line on the explicit /note path defaults the
+    # note to today (message.received_at, UTC); the junk line becomes an
+    # event rather than producing INVALID_INPUT.
     msg = _inbound("not-a-date\nfoo")
     out = _normalize_note_first_line(msg)
-    assert out is msg
-    assert out.payload == "not-a-date\nfoo"
+    assert out.payload == "2026-05-10\nnot-a-date\nfoo"
 
 
-def test_normalize_helper_is_noop_for_unpadded_form() -> None:
-    # Owner whitelist is exact: 2026-5-9 is rejected by the normalizer
-    # and falls through to the existing INVALID_INPUT path.
+def test_normalize_helper_prepends_today_for_unpadded_form() -> None:
+    # The near-ISO whitelist is exact: 2026-5-9 is not a recognized date, so
+    # D-085 treats it as a non-date first line and defaults to today rather
+    # than "fixing" it into a date.
     msg = _inbound("2026-5-9\nfoo")
     out = _normalize_note_first_line(msg)
-    assert out is msg
+    assert out.payload == "2026-05-10\n2026-5-9\nfoo"
+
+
+def test_normalize_helper_prepends_today_for_multi_event_dateless_note() -> None:
+    msg = _inbound("walk\nslept well")
+    out = _normalize_note_first_line(msg)
+    assert out.payload == "2026-05-10\nwalk\nslept well"
+
+
+def test_normalize_helper_prepends_today_before_leading_blank_lines() -> None:
+    # The prepended today line precedes the original payload verbatim; the
+    # parser then ignores the interior blank lines.
+    msg = _inbound("\n\nwalk")
+    out = _normalize_note_first_line(msg)
+    assert out.payload == "2026-05-10\n\n\nwalk"
 
 
 def test_normalize_helper_skips_leading_blank_lines_like_parser() -> None:
@@ -113,6 +137,8 @@ def test_normalize_helper_skips_leading_blank_lines_like_parser() -> None:
 
 
 def test_normalize_helper_preserves_payload_for_empty_input() -> None:
+    # Empty payload has no non-empty first line, so the today-default does not
+    # fire — it falls through unchanged to parse_note → INVALID_INPUT.
     msg = _inbound("")
     out = _normalize_note_first_line(msg)
     assert out is msg
@@ -140,12 +166,55 @@ def test_dispatch_explicit_note_with_dd_first_date_uses_dd_mm_yyyy_convention() 
     assert store.len_notes() == 1
 
 
-def test_dispatch_explicit_note_with_unmatched_first_line_returns_new_error_wording() -> None:
+def test_dispatch_explicit_dateless_note_saves_under_today() -> None:
+    # D-085: a dateless /note defaults to the message's received_at date
+    # (2026-05-10 in this fixture); the text becomes a single event.
     dispatcher, store = _dispatcher()
-    result = dispatcher.dispatch(_inbound("not-a-date\nfoo"))
-    assert result.reply_text == "First line must be a date like 2026-05-09. Got: 'not-a-date'."
+    result = dispatcher.dispatch(_inbound("walk in park"))
+    assert result.reply_text == "Saved 1 event for 2026-05-10."
+    assert store.len_notes() == 1
+    assert store.len_chunks() == 1
+
+
+def test_dispatch_explicit_dateless_multi_line_note_saves_all_events_under_today() -> None:
+    dispatcher, store = _dispatcher()
+    result = dispatcher.dispatch(_inbound("walk\nslept well"))
+    assert result.reply_text == "Saved 2 events for 2026-05-10."
+    assert store.len_notes() == 1
+    assert store.len_chunks() == 2
+
+
+# ---------------------------------------------------------------------------
+# Sibling-wording guards — the INVALID_INPUT contour stays reachable and
+# byte-identical for empty/whitespace-only /note (the today-default fires only
+# when there IS a non-empty first line), and the sibling /note reply literals
+# do not drift under this packet's edit.
+# ---------------------------------------------------------------------------
+
+
+def test_dispatch_explicit_empty_note_still_returns_invalid_input_wording() -> None:
+    dispatcher, store = _dispatcher()
+    result = dispatcher.dispatch(_inbound(""))
+    assert result.reply_text == "First line must be a date like 2026-05-09. Got: ''."
     assert "Mock" not in result.reply_text
     assert store.len_notes() == 0
+
+
+def test_dispatch_explicit_whitespace_only_note_still_returns_invalid_input_wording() -> None:
+    dispatcher, store = _dispatcher()
+    result = dispatcher.dispatch(_inbound("   "))
+    assert result.reply_text == "First line must be a date like 2026-05-09. Got: ''."
+    assert store.len_notes() == 0
+
+
+def test_dispatch_explicit_dateless_note_with_no_events_uses_saved_no_events_wording() -> None:
+    # A single non-date line becomes one event, so reaching the
+    # "no event lines" literal would require a today-line with nothing after
+    # it — only possible via an explicit canonical date with no body. Pin that
+    # sibling literal here so it cannot drift.
+    dispatcher, _ = _dispatcher()
+    result = dispatcher.dispatch(_inbound("2026-05-09"))
+    assert result.reply_text == "Saved 2026-05-09 with no event lines."
 
 
 # The heuristic-routed NOTE normalize-seam (the dispatcher's former
