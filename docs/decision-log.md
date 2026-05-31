@@ -2521,3 +2521,57 @@ Pinning the shape before code gives Packet 2 an unambiguous contract: what is ca
 - Group-use enablement, multi-diary / subject-dimension work.
 - Any change to Phase-8 visibility / A-15 beyond acknowledging it remains unchanged.
 - Any claim that runtime behavior has already changed in code.
+
+## D-083 — Adapter-owned author display-input storage port + side-table seam (docs-only)
+
+### Context
+
+D-081 pinned author display *resolution* (`author_user_id` stays the canonical opaque core identifier; a human-readable display name is resolved **only at the Telegram adapter seam** from host-supplied identity fields, `username → first_name → opaque short-ID`, non-authoritative; `/sources` the sole surface; `/ask`-reply attribution deferred — A-44). D-082 pinned the *persistence shape*: a minimal point-in-time snapshot of host-supplied `username` / `first_name`, nullable, non-authoritative, adapter/storage-owned, for later adapter-side display resolution only — and explicitly deferred "the exact storage representation (column name / DDL / migration)" **and the seam by which that snapshot reaches durable storage** to a later packet.
+
+That seam is a genuine architecture choice. The only existing write path to `source_messages` is fully core-typed: `services/domain_service.py` calls `DomainRepository.get_or_create_source_message(candidate)` where `candidate` is the core `SourceMessage` domain model, and the Telegram adapter never touches storage directly. Routing the snapshot down that path would push host-supplied identity into `InboundMessage` (a core routing type) or `SourceMessage` (a core domain type), violating the opaque-identifier core boundary (D-026 / D-041) and D-082's own prohibition. This packet records the owner-fixed seam decision before any adapter, storage, or migration code lands; it is the decision of record the following code packet cites.
+
+### Decision
+
+Adopt **Option A**: the durable landing for the author display-input snapshot is a **separate, Telegram-adapter-owned side table**, written through an **adapter-owned storage port distinct from the core `DomainRepository`**. The core repository, its signatures, and the core domain/routing types are unchanged.
+
+**Open-source / shared-core rule.** This repository is intended to remain open-source and reusable across different users and adapter/front-end setups. Therefore common/core capabilities (ingestion, retrieval, answering, traces, the domain model, invariants) stay a single shared subsystem reusable across hosts; an adapter-dependent host-identity feature such as display-input capture must remain **adapter-owned** and must not become a core capability (D-026 / D-041). The side table and its port are Telegram-adapter artifacts; host-specific naming is permitted *there*, but the core continues to carry authorship only as the opaque `author_user_id` (I-1, I-6; foundational D-014).
+
+**Keying / idempotency contract (spec level).** Each snapshot row is keyed by the **same message idempotency tuple** the raw message uses — `external_chat_id` + `external_message_id` + `edit_seq` (R-2 / D-023) — carried as **opaque scalars**. The side table references the message by that tuple only; it does **not** import, embed, or depend on any core type. Re-delivery or an edited state (a new `edit_seq`) follows R-2: it must not duplicate or silently mutate a prior snapshot.
+
+**Boundary.** The captured snapshot **must never** appear in `InboundMessage`, `SourceMessage`, any other core type, or any core function signature (including `DomainRepository.get_or_create_source_message`). It reaches durable storage **only** through the adapter-owned port.
+
+**Properties (carried from D-082).** The snapshot stays **nullable** (a user may withhold `username` or `first_name`), **non-authoritative** (host-supplied, may change at any time; presentation, not identity), **host-supplied**, and exists **only** to feed later adapter-side display resolution per the D-081 / A-44 fallback chain. It never substitutes for `author_user_id` in storage, retrieval, scoping, or provenance.
+
+**Migration surface (descriptive only).** The code packet adds a new forward migration — the next file in `src/memory_rag/storage/postgres/migrations/` — creating the adapter-owned side table. The exact table name, column names, DDL, and migration file content are **not** decided here; they belong to that code packet.
+
+This is a docs-only packet — no `src/`, `tests/`, schema, DDL, migration, or config change, and no claim that runtime behavior has changed. A-44 stays **open** (narrowed: the landing seam is now pinned; capture implementation and resolution/`/sources` rendering remain future work).
+
+### Why
+
+Pinning Option A first gives the code packet an unambiguous, settled seam to build against rather than choosing architecture inside a diff. Keeping the snapshot behind a dedicated adapter-owned side table and port — distinct from the core repository and keyed only by opaque scalars — preserves the shared-core / adapter-owned split that the open-source posture depends on, keeps the opaque-identifier core boundary intact (D-026 / D-041), and leaves the later group-use directory/projection milestone free to evolve the adapter side without touching the core. Naming the migration surface only descriptively keeps docs from outrunning code.
+
+### Consequence
+
+- **Changed:** `docs/decision-log.md` — this D-083 entry.
+- **Changed:** `docs/assumptions.md` — A-44 narrowed (landing seam pinned by D-083: separate adapter-owned side table + adapter-owned storage port distinct from `DomainRepository`, Option A; capture implementation and resolution/rendering remain future work). A-44 stays **open**.
+- **Changed:** `docs/assumption-audit.md` — A-44 row narrowed the same way; row stays **open**.
+- **Changed:** `docs/ARCHITECTURE.md` — Axis 5 + "what belongs to adapters" bullets note that the display-input landing is a separate adapter-owned side table written via an adapter-owned storage port distinct from the core `DomainRepository` (D-083).
+- **Changed:** `docs/GLOSSARY.md` — "author display input" term: the snapshot lands in a Telegram-adapter-owned side table via an adapter-owned storage port, keyed by the message idempotency tuple, never a core field (D-083).
+- **Changed:** `docs/product/TechSpec.md` — §5 authorship note: D-083 pins the adapter-owned landing seam (separate side table + adapter-owned port distinct from `DomainRepository`); the core repository signature is unchanged and the core adds no display field.
+- **Changed:** `docs/INVARIANTS.md` — narrow clause added to I-6 (the adapter/storage-owned landing is a separate side table via an adapter-owned port distinct from the core repository; D-083); **no new invariant**.
+- **Changed:** `docs/execution-map.md` — author block gains a D-083 row; the capture row's blocker narrowed from "persistence shape pinned by D-082" to "seam pinned by D-083 (adapter-owned side table + port); code capture/migration is the next packet."
+- **Changed:** `docs/todo.md` — D-083 recorded under the author-display block; the capture item's blocker narrowed the same way.
+- **No `src/`, `tests/`, schema, DDL, migration, or config change.** A-15 stays unchanged; A-44 stays **open**; capture code, the side-table DDL, the forward migration, the adapter-owned-port implementation, and backend parity are the next packet.
+
+### Out of scope (per packet boundaries)
+
+- Any `src/`, `tests/`, schema, DDL, migration, or config change — all deferred to the code packet.
+- The exact table name / column names / DDL / migration file contents (code packet).
+- Telegram-side `username` / `first_name` capture and the adapter→port wiring (code packet).
+- The adapter-owned storage-port implementation and mock / sqlite / postgres parity (code packet).
+- `/sources` author rendering and any other display-surface implementation.
+- Answer-reply (`/ask` reply) author attribution — remains the deferred named placeholder from D-081.
+- Adapter-side identity directory/projection semantics — deferred to a later group-use milestone.
+- Group-use enablement, multi-diary / subject-dimension work.
+- Any change to Phase-8 visibility / A-15 beyond acknowledging it remains unchanged.
+- Any claim that runtime behavior has already changed in code.
