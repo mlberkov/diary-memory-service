@@ -136,7 +136,7 @@ def test_restart_survival() -> None:
         assert fetched is not None
         assert fetched.source_message_id == "s1"
 
-        chunk = second.get_event_chunk("c1")
+        chunk = second.get_event_chunk("c1", community_id="fam-A")
         assert chunk is not None
         assert chunk.chunk_text == "Walked the dog"
     finally:

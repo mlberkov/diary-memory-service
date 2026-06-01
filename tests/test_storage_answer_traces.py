@@ -25,6 +25,7 @@ from memory_rag.core.domain.models import (
 )
 from memory_rag.core.routing import RouteKind
 from memory_rag.storage.mock import MockDomainStore
+from memory_rag.storage.repository import DomainRepository
 from memory_rag.storage.sqlite import SqliteDomainStore
 
 PG_DSN = os.environ.get("MEMORY_RAG_PG_TEST_DSN")
@@ -120,14 +121,14 @@ def test_mock_save_and_get_answer_trace_round_trip() -> None:
     store.save_query(_query())
     trace = _trace(latency_ms=42, token_counts={"prompt": 100, "completion": 25})
     store.save_answer_trace(trace)
-    fetched = store.get_answer_trace_for_query("q1")
+    fetched = store.get_answer_trace_for_query("q1", community_id="fam-A")
     assert fetched == trace
     assert store.len_answer_traces() == 1
 
 
 def test_mock_get_answer_trace_missing_returns_none() -> None:
     store = MockDomainStore()
-    assert store.get_answer_trace_for_query("missing") is None
+    assert store.get_answer_trace_for_query("missing", community_id="fam-A") is None
 
 
 def test_mock_save_answer_trace_rejects_duplicate_query_id() -> None:
@@ -149,7 +150,7 @@ def test_mock_save_answer_trace_with_empty_context_chunk_ids() -> None:
         latency_ms=0,
     )
     store.save_answer_trace(trace)
-    fetched = store.get_answer_trace_for_query("q1")
+    fetched = store.get_answer_trace_for_query("q1", community_id="fam-A")
     assert fetched is not None
     assert fetched.context_chunk_ids == ()
     assert fetched.answer_text == ""
@@ -173,7 +174,7 @@ def test_mock_round_trips_new_fallback_modes(mode: FallbackMode) -> None:
     store.save_query(_query(fallback=mode))
     trace = _trace(fallback_mode=mode, latency_ms=11, token_counts={"prompt": 3})
     store.save_answer_trace(trace)
-    fetched = store.get_answer_trace_for_query("q1")
+    fetched = store.get_answer_trace_for_query("q1", community_id="fam-A")
     assert fetched is not None
     assert fetched.fallback_mode is mode
 
@@ -196,13 +197,13 @@ def test_sqlite_save_and_get_answer_trace_round_trip(tmp_path: Path) -> None:
     store.save_query(_query())
     trace = _trace(latency_ms=42, token_counts={"prompt": 100, "completion": 25})
     store.save_answer_trace(trace)
-    fetched = store.get_answer_trace_for_query("q1")
+    fetched = store.get_answer_trace_for_query("q1", community_id="fam-A")
     assert fetched == trace
 
 
 def test_sqlite_get_answer_trace_missing_returns_none(tmp_path: Path) -> None:
     store = _sqlite_store(tmp_path)
-    assert store.get_answer_trace_for_query("missing") is None
+    assert store.get_answer_trace_for_query("missing", community_id="fam-A") is None
 
 
 def test_sqlite_save_answer_trace_rejects_duplicate_query_id(tmp_path: Path) -> None:
@@ -224,7 +225,7 @@ def test_sqlite_save_answer_trace_with_empty_context_chunk_ids(tmp_path: Path) -
         latency_ms=0,
     )
     store.save_answer_trace(trace)
-    fetched = store.get_answer_trace_for_query("q1")
+    fetched = store.get_answer_trace_for_query("q1", community_id="fam-A")
     assert fetched is not None
     assert fetched.context_chunk_ids == ()
     assert fetched.token_counts == {}
@@ -237,7 +238,7 @@ def test_sqlite_round_trips_new_fallback_modes(tmp_path: Path, mode: FallbackMod
     store.save_query(_query(fallback=mode))
     trace = _trace(fallback_mode=mode, latency_ms=11, token_counts={"prompt": 3})
     store.save_answer_trace(trace)
-    fetched = store.get_answer_trace_for_query("q1")
+    fetched = store.get_answer_trace_for_query("q1", community_id="fam-A")
     assert fetched is not None
     assert fetched.fallback_mode is mode
 
@@ -288,13 +289,13 @@ def test_pg_save_and_get_answer_trace_round_trip(pg_store: PostgresDomainStore) 
     pg_store.save_query(_query())
     trace = _trace(latency_ms=42, token_counts={"prompt": 100, "completion": 25})
     pg_store.save_answer_trace(trace)
-    fetched = pg_store.get_answer_trace_for_query("q1")
+    fetched = pg_store.get_answer_trace_for_query("q1", community_id="fam-A")
     assert fetched == trace
 
 
 @pgmark
 def test_pg_get_answer_trace_missing_returns_none(pg_store: PostgresDomainStore) -> None:
-    assert pg_store.get_answer_trace_for_query("missing") is None
+    assert pg_store.get_answer_trace_for_query("missing", community_id="fam-A") is None
 
 
 @pgmark
@@ -318,7 +319,7 @@ def test_pg_save_answer_trace_with_empty_context_chunk_ids(
         latency_ms=0,
     )
     pg_store.save_answer_trace(trace)
-    fetched = pg_store.get_answer_trace_for_query("q1")
+    fetched = pg_store.get_answer_trace_for_query("q1", community_id="fam-A")
     assert fetched is not None
     assert fetched.context_chunk_ids == ()
     assert fetched.token_counts == {}
@@ -333,7 +334,7 @@ def test_pg_round_trips_new_fallback_modes(
     pg_store.save_query(_query(fallback=mode))
     trace = _trace(fallback_mode=mode, latency_ms=11, token_counts={"prompt": 3})
     pg_store.save_answer_trace(trace)
-    fetched = pg_store.get_answer_trace_for_query("q1")
+    fetched = pg_store.get_answer_trace_for_query("q1", community_id="fam-A")
     assert fetched is not None
     assert fetched.fallback_mode is mode
 
@@ -367,3 +368,64 @@ def test_pg_rejects_unknown_answer_trace_fallback_mode(
                 _now(),
             ),
         )
+
+
+# ---------------------------------------------------------------------------
+# Read-access enforcement (Slice 8.1.1 / D-088)
+#
+# answer_traces carries no community_id column (D-087 adds none), so
+# get_answer_trace_for_query scopes via the query_id -> queries.community_id
+# join. These tests run across every backend from one parametrized fixture so
+# the fail-closed behavior cannot drift by backend (mock / sqlite / postgres).
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(params=["mock", "sqlite"] + (["postgres"] if PG_DSN else []))
+def scoped_store(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[DomainRepository]:
+    """A store with the source/note/chunk FK targets seeded for trace writes."""
+    if request.param == "mock":
+        store: DomainRepository = MockDomainStore()
+    elif request.param == "sqlite":
+        store = SqliteDomainStore(str(tmp_path / "scoped.db"))
+    else:
+        assert PG_DSN is not None
+        _truncate(PG_DSN)
+        pg = PostgresDomainStore(PG_DSN)
+        pg.save_source_message(_source())
+        pg.save_note(_note())
+        pg.save_event_chunks([_chunk("c1", idx=0)])
+        try:
+            yield pg
+        finally:
+            pg.close()
+        return
+    store.save_source_message(_source())
+    store.save_note(_note())
+    store.save_event_chunks([_chunk("c1", idx=0)])
+    yield store
+
+
+def test_get_answer_trace_rejects_empty_community_id(
+    scoped_store: DomainRepository,
+) -> None:
+    scoped_store.save_query(_query())
+    scoped_store.save_answer_trace(_trace())
+    with pytest.raises(ValueError, match="community_id is required"):
+        scoped_store.get_answer_trace_for_query("q1", community_id="")
+
+
+def test_get_answer_trace_cross_community_reads_as_none(
+    scoped_store: DomainRepository,
+) -> None:
+    scoped_store.save_query(_query())  # community_id="fam-A"
+    scoped_store.save_answer_trace(_trace())
+    assert scoped_store.get_answer_trace_for_query("q1", community_id="fam-A") is not None
+    # Same query_id, different community: the queries join filters it out.
+    assert scoped_store.get_answer_trace_for_query("q1", community_id="fam-B") is None
+
+
+def test_get_answer_trace_missing_parent_query_reads_as_none(
+    scoped_store: DomainRepository,
+) -> None:
+    """Fail-closed when no parent query row exists for the id (shared across backends)."""
+    assert scoped_store.get_answer_trace_for_query("no-such-q", community_id="fam-A") is None

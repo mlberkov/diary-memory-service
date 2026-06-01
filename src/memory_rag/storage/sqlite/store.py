@@ -387,15 +387,17 @@ class SqliteDomainStore:
             return 0
         return int(row[0])
 
-    def get_event_chunk(self, chunk_id: str) -> EventChunk | None:
+    def get_event_chunk(self, chunk_id: str, *, community_id: str) -> EventChunk | None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT chunk_id, note_id, source_message_id, community_id, "
                 "       author_user_id, note_date, event_index, chunk_text, "
                 "       created_at, embedding_status "
                 "  FROM event_chunks "
-                " WHERE chunk_id = ?",
-                (chunk_id,),
+                " WHERE chunk_id = ? AND community_id = ?",
+                (chunk_id, community_id),
             ).fetchone()
         if row is None:
             return None
@@ -540,14 +542,16 @@ class SqliteDomainStore:
             )
             conn.commit()
 
-    def get_query(self, query_id: str) -> Query | None:
+    def get_query(self, query_id: str, *, community_id: str) -> Query | None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT query_id, community_id, query_text, model_name, fallback, "
                 "       created_at "
                 "  FROM queries "
-                " WHERE query_id = ?",
-                (query_id,),
+                " WHERE query_id = ? AND community_id = ?",
+                (query_id, community_id),
             ).fetchone()
         if row is None:
             return None
@@ -560,15 +564,22 @@ class SqliteDomainStore:
             created_at=datetime.fromisoformat(row["created_at"]),
         )
 
-    def get_retrieval_hits_for_query(self, query_id: str) -> list[RetrievalHit]:
+    def get_retrieval_hits_for_query(
+        self, query_id: str, *, community_id: str
+    ) -> list[RetrievalHit]:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        # Scope via the parent queries.community_id (query_id -> queries join):
+        # a retrieval_hits row carries no community_id of its own.
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT retrieval_hit_id, query_id, chunk_id, leg, rank, score, "
-                "       model_name, created_at "
-                "  FROM retrieval_hits "
-                " WHERE query_id = ? "
-                " ORDER BY leg ASC, rank ASC",
-                (query_id,),
+                "SELECT rh.retrieval_hit_id, rh.query_id, rh.chunk_id, rh.leg, "
+                "       rh.rank, rh.score, rh.model_name, rh.created_at "
+                "  FROM retrieval_hits rh "
+                "  JOIN queries q ON q.query_id = rh.query_id "
+                " WHERE rh.query_id = ? AND q.community_id = ? "
+                " ORDER BY rh.leg ASC, rh.rank ASC",
+                (query_id, community_id),
             ).fetchall()
         return [
             RetrievalHit(
@@ -607,15 +618,20 @@ class SqliteDomainStore:
             )
             conn.commit()
 
-    def get_answer_trace_for_query(self, query_id: str) -> AnswerTrace | None:
+    def get_answer_trace_for_query(self, query_id: str, *, community_id: str) -> AnswerTrace | None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        # Scope via the parent queries.community_id (query_id -> queries join):
+        # answer_traces carries no community_id column (D-087 adds none).
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT answer_trace_id, query_id, prompt_version, context_chunk_ids, "
-                "       answer_text, fallback_mode, model_name, token_counts, "
-                "       latency_ms, created_at "
-                "  FROM answer_traces "
-                " WHERE query_id = ?",
-                (query_id,),
+                "SELECT at.answer_trace_id, at.query_id, at.prompt_version, "
+                "       at.context_chunk_ids, at.answer_text, at.fallback_mode, "
+                "       at.model_name, at.token_counts, at.latency_ms, at.created_at "
+                "  FROM answer_traces at "
+                "  JOIN queries q ON q.query_id = at.query_id "
+                " WHERE at.query_id = ? AND q.community_id = ?",
+                (query_id, community_id),
             ).fetchone()
         if row is None:
             return None

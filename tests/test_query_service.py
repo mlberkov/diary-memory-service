@@ -189,7 +189,9 @@ def test_successful_retrieval_persists_query_and_hits() -> None:
     assert persisted.fallback is FallbackMode.NONE
     assert persisted.model_name == MockEmbeddingClient().model_name
 
-    hits = store.get_retrieval_hits_for_query(persisted.query_id)
+    hits = store.get_retrieval_hits_for_query(
+        persisted.query_id, community_id=persisted.community_id
+    )
     legs = {h.leg for h in hits}
     assert RetrievalLeg.SPARSE in legs  # sparse matched "book"
     assert RetrievalLeg.MERGED in legs  # merged carries the surviving evidence
@@ -213,7 +215,10 @@ def test_no_evidence_persists_query_with_zero_hits() -> None:
     persisted = next(iter(store._queries.values()))
     assert persisted.fallback is FallbackMode.NO_EVIDENCE
     assert persisted.query_text == "snowstorm"
-    assert store.get_retrieval_hits_for_query(persisted.query_id) == []
+    assert (
+        store.get_retrieval_hits_for_query(persisted.query_id, community_id=persisted.community_id)
+        == []
+    )
     assert store.len_retrieval_hits() == 0
 
 
@@ -300,7 +305,9 @@ def test_successful_answer_persists_answer_trace_with_chat_output() -> None:
     assert result.fallback is FallbackMode.NONE
     assert store.len_answer_traces() == 1
     persisted_query = next(iter(store._queries.values()))
-    trace = store.get_answer_trace_for_query(persisted_query.query_id)
+    trace = store.get_answer_trace_for_query(
+        persisted_query.query_id, community_id=persisted_query.community_id
+    )
     assert trace is not None
     assert trace.fallback_mode is FallbackMode.NONE
     assert trace.prompt_version == "v1"
@@ -328,7 +335,9 @@ def test_no_evidence_persists_answer_trace_with_empty_context() -> None:
     assert result.answer_text is None
     assert store.len_answer_traces() == 1
     persisted_query = next(iter(store._queries.values()))
-    trace = store.get_answer_trace_for_query(persisted_query.query_id)
+    trace = store.get_answer_trace_for_query(
+        persisted_query.query_id, community_id=persisted_query.community_id
+    )
     assert trace is not None
     assert trace.fallback_mode is FallbackMode.NO_EVIDENCE
     assert trace.context_chunk_ids == ()
@@ -349,7 +358,9 @@ def test_empty_query_persists_answer_trace_with_empty_context() -> None:
     assert result.answer_text is None
     assert store.len_answer_traces() == 1
     persisted_query = next(iter(store._queries.values()))
-    trace = store.get_answer_trace_for_query(persisted_query.query_id)
+    trace = store.get_answer_trace_for_query(
+        persisted_query.query_id, community_id=persisted_query.community_id
+    )
     assert trace is not None
     assert trace.fallback_mode is FallbackMode.NO_EVIDENCE
     assert trace.context_chunk_ids == ()
@@ -484,7 +495,9 @@ def test_weak_evidence_marker_grades_query_and_trace(
 
     persisted = next(iter(store._queries.values()))
     assert persisted.fallback is FallbackMode.WEAK_EVIDENCE
-    trace = store.get_answer_trace_for_query(persisted.query_id)
+    trace = store.get_answer_trace_for_query(
+        persisted.query_id, community_id=persisted.community_id
+    )
     assert trace is not None
     assert trace.fallback_mode is FallbackMode.WEAK_EVIDENCE
     assert trace.answer_text == "stub answer"
@@ -508,7 +521,9 @@ def test_ambiguous_marker_grades_query_and_trace() -> None:
 
     persisted = next(iter(store._queries.values()))
     assert persisted.fallback is FallbackMode.AMBIGUOUS
-    trace = store.get_answer_trace_for_query(persisted.query_id)
+    trace = store.get_answer_trace_for_query(
+        persisted.query_id, community_id=persisted.community_id
+    )
     assert trace is not None
     assert trace.fallback_mode is FallbackMode.AMBIGUOUS
     assert trace.answer_text == "stub answer"
@@ -539,7 +554,9 @@ def test_llm_no_evidence_marker_preserves_llm_text_and_context_ids() -> None:
 
     persisted = next(iter(store._queries.values()))
     assert persisted.fallback is FallbackMode.NO_EVIDENCE
-    trace = store.get_answer_trace_for_query(persisted.query_id)
+    trace = store.get_answer_trace_for_query(
+        persisted.query_id, community_id=persisted.community_id
+    )
     assert trace is not None
     assert trace.fallback_mode is FallbackMode.NO_EVIDENCE
     assert trace.answer_text == "not evidence"
@@ -561,7 +578,9 @@ def test_provider_unavailable_grades_query_and_trace() -> None:
 
     persisted = next(iter(store._queries.values()))
     assert persisted.fallback is FallbackMode.PROVIDER_UNAVAILABLE
-    trace = store.get_answer_trace_for_query(persisted.query_id)
+    trace = store.get_answer_trace_for_query(
+        persisted.query_id, community_id=persisted.community_id
+    )
     assert trace is not None
     assert trace.fallback_mode is FallbackMode.PROVIDER_UNAVAILABLE
     assert trace.answer_text == ""
@@ -585,7 +604,9 @@ def test_parse_failure_grades_query_and_trace_with_raw_text() -> None:
 
     persisted = next(iter(store._queries.values()))
     assert persisted.fallback is FallbackMode.PARSE_FAILURE
-    trace = store.get_answer_trace_for_query(persisted.query_id)
+    trace = store.get_answer_trace_for_query(
+        persisted.query_id, community_id=persisted.community_id
+    )
     assert trace is not None
     assert trace.fallback_mode is FallbackMode.PARSE_FAILURE
     assert trace.answer_text == "this is not JSON {"

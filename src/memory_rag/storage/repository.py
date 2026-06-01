@@ -97,12 +97,16 @@ class DomainRepository(Protocol):
     def count_event_chunks_for_source(self, source_message_id: str) -> int:
         """Count event chunks persisted for a given source."""
 
-    def get_event_chunk(self, chunk_id: str) -> EventChunk | None:
-        """Fetch a single chunk by id, or ``None`` if it does not exist.
+    def get_event_chunk(self, chunk_id: str, *, community_id: str) -> EventChunk | None:
+        """Fetch a single chunk by id within a community, or ``None`` (D-025).
 
         Used by the ingest path's status reconciliation and by tests
         that need to inspect a chunk's ``embedding_status`` without
-        going through retrieval (D-025).
+        going through retrieval. Community scoping is mandatory and
+        fail-closed (I-7, R-3; Slice 8.1.1): a null/empty ``community_id``
+        raises; a chunk owned by a different community reads as ``None``.
+        ``community_id`` is keyword-only to prevent a silent positional
+        swap between two ``str`` identifiers (D-088).
         """
 
     def save_embedding_records(self, records: list[EmbeddingRecord]) -> None:
@@ -147,13 +151,30 @@ class DomainRepository(Protocol):
     def save_retrieval_hits(self, hits: list[RetrievalHit]) -> None:
         """Persist zero-or-more ``RetrievalHit`` rows for a query (Slice 3.5)."""
 
-    def get_query(self, query_id: str) -> Query | None:
-        """Fetch a single ``Query`` by id, or ``None`` (Slice 3.5)."""
+    def get_query(self, query_id: str, *, community_id: str) -> Query | None:
+        """Fetch a single ``Query`` by id within a community, or ``None`` (Slice 3.5).
 
-    def get_retrieval_hits_for_query(self, query_id: str) -> list[RetrievalHit]:
-        """Return all ``RetrievalHit`` rows for a query (Slice 3.5).
+        Community scoping is mandatory and fail-closed (I-7, R-3;
+        Slice 8.1.1): a null/empty ``community_id`` raises; a query owned
+        by a different community reads as ``None``. ``community_id`` is
+        keyword-only to prevent a silent positional swap between two
+        ``str`` identifiers (D-088).
+        """
+
+    def get_retrieval_hits_for_query(
+        self, query_id: str, *, community_id: str
+    ) -> list[RetrievalHit]:
+        """Return all ``RetrievalHit`` rows for a query in a community (Slice 3.5).
 
         Ordering is stable for inspection: ``(leg ASC, rank ASC)``.
+        Community scoping is mandatory and fail-closed (I-7, R-3;
+        Slice 8.1.1): a null/empty ``community_id`` raises; hits are
+        scoped via the parent ``queries.community_id`` (the
+        ``query_id -> queries`` join) since a ``RetrievalHit`` carries no
+        ``community_id`` of its own, so a query owned by a different
+        community reads as ``[]``. ``community_id`` is keyword-only to
+        prevent a silent positional swap between two ``str`` identifiers
+        (D-088).
         """
 
     def save_answer_trace(self, trace: AnswerTrace) -> None:
@@ -165,8 +186,18 @@ class DomainRepository(Protocol):
         the success and no-evidence/empty-query contours.
         """
 
-    def get_answer_trace_for_query(self, query_id: str) -> AnswerTrace | None:
-        """Fetch the ``AnswerTrace`` for a query, or ``None`` (Slice 4.3a)."""
+    def get_answer_trace_for_query(self, query_id: str, *, community_id: str) -> AnswerTrace | None:
+        """Fetch the ``AnswerTrace`` for a query in a community, or ``None`` (Slice 4.3a).
+
+        Community scoping is mandatory and fail-closed (I-7, R-3;
+        Slice 8.1.1): a null/empty ``community_id`` raises; the trace is
+        scoped via the parent ``queries.community_id`` (the
+        ``query_id -> queries`` join), since ``answer_traces`` carries no
+        ``community_id`` column (D-087 adds none), so a query owned by a
+        different community reads as ``None``. ``community_id`` is
+        keyword-only to prevent a silent positional swap between two
+        ``str`` identifiers (D-088).
+        """
 
     def save_indexing_dead_letter(self, record: IndexingDeadLetter) -> None:
         """Persist one dead-letter row for a failed indexing job (Slice 6.2).

@@ -7,11 +7,14 @@ decomposes execution-map **Slice 8.1 — community-scoped read-access enforcemen
 (cross-community leakage prevention)** into an ordered set of bounded packets and
 carries the as-built audit of the read surface against **I-7 / R-3 / R-8**.
 
-**Status: Packet 8.1.0 landed (D-087) — audit + decomposition (docs-only).**
-The hot `/ask` read path is already community-scoped and tested; the remaining
-packets (8.1.1 / 8.1.2 / 8.1.3) harden the latent by-id/trace read seams so the
-no-cross-community-leakage property holds by construction rather than by current
-call-graph accident.
+**Status: Packets 8.1.0 (D-087, docs) and 8.1.1 (D-088, code) landed.**
+The hot `/ask` read path is already community-scoped and tested; 8.1.1 has now
+closed the four unused by-id/trace read seams (`get_query`,
+`get_retrieval_hits_for_query`, `get_answer_trace_for_query`, `get_event_chunk`)
+with a mandatory keyword-only `community_id`. The remaining packets (8.1.2 /
+8.1.3) harden the live `get_source_message` / `/sources` seam and run the closure
+sweep, so the no-cross-community-leakage property holds by construction rather
+than by current call-graph accident.
 
 This mirrors the D-060 / `docs/SELF-HOSTED-DEPLOYMENT-ROADMAP.md` and D-044 /
 `docs/OPERATIONALIZATION-ROADMAP.md` precedent: the decision entry (**D-087**)
@@ -55,10 +58,10 @@ code moves. "Scoped today?" = takes a mandatory `community_id` and filters by it
 | `list_source_messages` | **Yes** | all backends filter `community_id` + null-guard | `/export` (operator) | enforced |
 | `list_recent_drafts` | **Yes** | all backends filter `community_id` + null-guard | live `/drafts` | enforced |
 | `list_failed_event_chunks` | **Yes** | all backends filter `community_id` + null-guard | reconciliation CLI (operator) | enforced |
-| `get_query` | **No** | keyed by `query_id` only, no community filter | **unused** (tests only) | latent gap → **8.1.1** |
-| `get_retrieval_hits_for_query` | **No** | keyed by `query_id` only, no community filter | **unused** (tests only) | latent gap → **8.1.1** |
-| `get_answer_trace_for_query` | **No** | keyed by `query_id` only, no community filter (row has no `community_id`) | **unused** (tests only) | latent gap → **8.1.1** (scope via `queries` join) |
-| `get_event_chunk` | **No** | keyed by `chunk_id` only, no community filter | **unused** (tests only) | latent gap → **8.1.1** |
+| `get_query` | **Yes** (8.1.1, D-088) | own-column filter: `WHERE … AND community_id = …` (mock compares the stored row) + null-guard | **unused** (tests only) | enforced (8.1.1, D-088) |
+| `get_retrieval_hits_for_query` | **Yes** (8.1.1, D-088) | `query_id → queries.community_id` join + null-guard; parent-missing → `[]` | **unused** (tests only) | enforced (8.1.1, D-088) |
+| `get_answer_trace_for_query` | **Yes** (8.1.1, D-088) | `query_id → queries.community_id` join + null-guard (row has no `community_id`); parent-missing → `None` | **unused** (tests only) | enforced (8.1.1, D-088) |
+| `get_event_chunk` | **Yes** (8.1.1, D-088) | own-column filter: `WHERE … AND community_id = …` (mock compares the stored row) + null-guard | **unused** (tests only) | enforced (8.1.1, D-088) |
 | `get_source_message` | **No** | keyed by `source_message_id` only, no community filter | **live path**: `/sources` author resolution (`author_display.resolve_chunk_author_display`), over an already-scoped chunk | live-path seam → **8.1.2** |
 | `_latest_sources` cache (`services/dispatcher.py`) | safe by construction | keyed by `community_id` | live `/sources` | characterization test → **8.1.2** |
 | prompt assembly (`build_answer_prompt`) | **Yes** | asserts single `community_id`, raises `CrossCommunityContextError` | live `/ask` | enforced (R-8) |
@@ -88,6 +91,9 @@ Cannot change without a new decision packet:
   adds no column / DDL / migration.
 - **`get_source_message` is a live-path seam.** It is sequenced into 8.1.2, not
   8.1.1 — completing 8.1.1 does **not** close all latent/read seams.
+- **Keyword-only `community_id` (added by 8.1.1, D-088).** On these reads
+  `community_id` is keyword-only to prevent a silent positional swap between two
+  `str` identifiers; see D-087 for the underlying contract.
 
 ---
 
@@ -100,7 +106,7 @@ contract.
 | Packet | Surfaces it touches | Status |
 | --- | --- | --- |
 | **8.1.0 — audit + decomposition** | `docs/decision-log.md` (D-087); this roadmap doc (new); `docs/execution-map.md`; `docs/todo.md`. Docs-only — no `src/` / `tests/` / schema change. | **Landed (D-087).** |
-| **8.1.1 — defensive scoping of unused by-id/trace reads** | Add a mandatory `community_id` + null-guard + owning-community filter to `get_query`, `get_retrieval_hits_for_query`, `get_answer_trace_for_query`, `get_event_chunk` across the `DomainRepository` Protocol + mock / sqlite / postgres backends (`get_answer_trace_for_query` / `get_retrieval_hits_for_query` scope via the `queries` join; `get_event_chunk` filters its own `community_id`); update the test-only call sites; add guard + cross-community isolation tests. No live `/ask` behavior change, no schema change. **Does not close `get_source_message` / `/sources` — see 8.1.2.** | **Pending.** |
+| **8.1.1 — defensive scoping of unused by-id/trace reads** | Add a mandatory **keyword-only** `community_id` + null-guard + owning-community filter to `get_query`, `get_retrieval_hits_for_query`, `get_answer_trace_for_query`, `get_event_chunk` across the `DomainRepository` Protocol + mock / sqlite / postgres backends (`get_answer_trace_for_query` / `get_retrieval_hits_for_query` scope via the `queries` join; `get_query` / `get_event_chunk` filter their own `community_id`); update the test-only call sites; add guard + cross-community isolation tests, including one shared parametrized parent-missing assertion per trace method. No live `/ask` behavior change, no schema change. **Does not close `get_source_message` / `/sources` — see 8.1.2.** | **Landed (D-088).** |
 | **8.1.2 — `get_source_message` scoping + `/sources` isolation** | Thread `community_id` through `get_source_message` (Protocol + all backends) and through the live `/sources` author-resolution path (`adapters/telegram/author_display.py`); add cross-community characterization tests for `/sources` block rendering and the `community_id`-keyed `_latest_sources` cache. No schema change. | **Pending.** |
 | **8.1.3 — milestone closure / verification** | Consolidated cross-community isolation test sweep across every scoped read; a `docs/RUNBOOK.md` operator note on read-access scoping; execution-map + todo closure; DoD evidence that "cross-community leakage is prevented" / "access behavior is explicit". | **Pending.** |
 

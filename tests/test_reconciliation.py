@@ -141,7 +141,7 @@ def test_discover_is_read_only() -> None:
     ReconciliationService(store).discover_failed_chunks("fam-A")
     statuses = {}
     for cid in ("c-old", "c-new", "c-ready"):
-        chunk = store.get_event_chunk(cid)
+        chunk = store.get_event_chunk(cid, community_id="fam-A")
         assert chunk is not None
         statuses[cid] = chunk.embedding_status
     assert statuses["c-old"] is EmbeddingStatus.FAILED
@@ -287,7 +287,7 @@ def test_retry_success_persists_records_and_flips_status() -> None:
     assert report.failed_chunks == 0
     assert report.groups_succeeded == 1
     for cid in ("c-old", "c-new"):
-        chunk = store.get_event_chunk(cid)
+        chunk = store.get_event_chunk(cid, community_id="fam-A")
         assert chunk is not None
         assert chunk.embedding_status is EmbeddingStatus.READY
     assert store.len_embeddings() == 2
@@ -309,7 +309,7 @@ def test_retry_exhausted_failure_leaves_chunks_failed() -> None:
     assert report.groups[0].succeeded is False
     assert report.groups[0].error_class == "RuntimeError"
     for cid in ("c-old", "c-new"):
-        chunk = store.get_event_chunk(cid)
+        chunk = store.get_event_chunk(cid, community_id="fam-A")
         assert chunk is not None
         assert chunk.embedding_status is EmbeddingStatus.FAILED
     assert store.len_embeddings() == 0
@@ -344,8 +344,8 @@ def test_retry_mixed_group_outcomes() -> None:
     assert by_sid["s1"].succeeded is True
     assert by_sid["s2"].succeeded is False
     assert by_sid["s2"].error_class == "RuntimeError"
-    s1_chunk = store.get_event_chunk("c-s1")
-    s2_chunk = store.get_event_chunk("c-s2")
+    s1_chunk = store.get_event_chunk("c-s1", community_id="fam-A")
+    s2_chunk = store.get_event_chunk("c-s2", community_id="fam-A")
     assert s1_chunk is not None and s1_chunk.embedding_status is EmbeddingStatus.READY
     assert s2_chunk is not None and s2_chunk.embedding_status is EmbeddingStatus.FAILED
     assert store.len_embeddings() == 1
@@ -370,8 +370,8 @@ def test_retry_respects_limit() -> None:
     assert report.attempted_chunks == 1
     # Oldest failure first: c-old is retried, c-new is left untouched.
     assert report.groups[0].chunk_ids == ("c-old",)
-    old = store.get_event_chunk("c-old")
-    new = store.get_event_chunk("c-new")
+    old = store.get_event_chunk("c-old", community_id="fam-A")
+    new = store.get_event_chunk("c-new", community_id="fam-A")
     assert old is not None and old.embedding_status is EmbeddingStatus.READY
     assert new is not None and new.embedding_status is EmbeddingStatus.FAILED
 
@@ -388,7 +388,7 @@ def test_retry_records_before_status_ordering() -> None:
     assert report.groups[0].succeeded is False
     assert report.groups[0].error_class == "KeyError"
     assert store.len_embeddings() == 1
-    chunk = store.get_event_chunk("c-old")
+    chunk = store.get_event_chunk("c-old", community_id="fam-A")
     assert chunk is not None
     assert chunk.embedding_status is EmbeddingStatus.FAILED
 
@@ -418,7 +418,7 @@ def test_retry_unique_collision_reports_group_failed() -> None:
 
     assert report.groups[0].succeeded is False
     assert report.groups[0].error_class == "ValueError"
-    chunk = store.get_event_chunk("c-old")
+    chunk = store.get_event_chunk("c-old", community_id="fam-A")
     assert chunk is not None
     assert chunk.embedding_status is EmbeddingStatus.FAILED
     assert store.len_embeddings() == 1
@@ -483,7 +483,7 @@ def test_retry_dead_letter_write_failure_is_swallowed() -> None:
     assert group.dead_letter_id is None
     assert store.len_indexing_dead_letters() == 0
     # No state regression: the chunk stays failed.
-    chunk = store.get_event_chunk("c-old")
+    chunk = store.get_event_chunk("c-old", community_id="fam-A")
     assert chunk is not None
     assert chunk.embedding_status is EmbeddingStatus.FAILED
 
@@ -603,7 +603,7 @@ def test_main_retry_mode_wires_offline(
     assert exit_code == 0
     out = capsys.readouterr().out
     assert "community_id=fam-A retried_chunks=1 succeeded=1 failed=0" in out
-    chunk = store.get_event_chunk("c-old")
+    chunk = store.get_event_chunk("c-old", community_id="fam-A")
     assert chunk is not None
     assert chunk.embedding_status is EmbeddingStatus.READY
 
@@ -679,7 +679,7 @@ def test_pg_retry_failed_chunks(pg_store: PostgresDomainStore) -> None:
     assert report.succeeded_chunks == 2
     assert report.failed_chunks == 0
     for cid in ("c-old", "c-new"):
-        chunk = pg_store.get_event_chunk(cid)
+        chunk = pg_store.get_event_chunk(cid, community_id="fam-A")
         assert chunk is not None
         assert chunk.embedding_status is EmbeddingStatus.READY
     assert pg_store.count_embedding_records_for_source("s1") == 2
@@ -705,6 +705,6 @@ def test_pg_retry_exhausted_writes_dead_letter(pg_store: PostgresDomainStore) ->
     assert set(rows[0].chunk_ids) == {"c-old"}
     assert rows[0].error_class == "RuntimeError"
     # No state regression: the chunk stays failed.
-    chunk = pg_store.get_event_chunk("c-old")
+    chunk = pg_store.get_event_chunk("c-old", community_id="fam-A")
     assert chunk is not None
     assert chunk.embedding_status is EmbeddingStatus.FAILED

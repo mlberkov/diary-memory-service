@@ -125,7 +125,9 @@ def test_note_then_ask_returns_grounded_reply_with_date() -> None:
     # Slice 4.3a: successful /ask also persists one AnswerTrace.
     assert store.len_answer_traces() == 1
     persisted_query = next(iter(store._queries.values()))
-    trace = store.get_answer_trace_for_query(persisted_query.query_id)
+    trace = store.get_answer_trace_for_query(
+        persisted_query.query_id, community_id=persisted_query.community_id
+    )
     assert trace is not None
     assert trace.fallback_mode is FallbackMode.NONE
     assert trace.answer_text  # mock chat produced a grounded answer
@@ -148,7 +150,9 @@ def test_ask_with_no_match_returns_no_evidence_fallback() -> None:
     # Slice 4.3a: NO_EVIDENCE still persists one AnswerTrace, with no LLM call.
     assert store.len_answer_traces() == 1
     persisted_query = next(iter(store._queries.values()))
-    trace = store.get_answer_trace_for_query(persisted_query.query_id)
+    trace = store.get_answer_trace_for_query(
+        persisted_query.query_id, community_id=persisted_query.community_id
+    )
     assert trace is not None
     assert trace.fallback_mode is FallbackMode.NO_EVIDENCE
     assert trace.context_chunk_ids == ()
@@ -441,7 +445,9 @@ def test_weak_evidence_marker_surfaces_trailer_and_persists_trace(
     # Persisted Query.fallback matches AnswerTrace.fallback_mode (D-035).
     persisted_query = next(iter(store._queries.values()))
     assert persisted_query.fallback is FallbackMode.WEAK_EVIDENCE
-    trace = store.get_answer_trace_for_query(persisted_query.query_id)
+    trace = store.get_answer_trace_for_query(
+        persisted_query.query_id, community_id=persisted_query.community_id
+    )
     assert trace is not None
     assert trace.fallback_mode is FallbackMode.WEAK_EVIDENCE
     assert trace.answer_text == "Could be the book or the routine."
