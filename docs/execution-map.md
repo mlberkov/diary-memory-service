@@ -126,9 +126,22 @@ criteria, and are **not** decomposed by D-044.
 | Slice | Files / artifacts |
 | --- | --- |
 | 8.0 raw-data durability & backup | daily backup window (`03:00–05:00` target) + a stronger-than-nightly recovery primitive — nightly base backup + continuous WAL archiving → PITR — for raw `SourceMessage` (D-027, D-053; A-40 resolved) — **Stage 2**, OP-4 |
-| 8.1 community-scoped access | enforced at every read (I-7, R-3) — Stage 3 |
+| 8.1 community-scoped access | enforced at every read (I-7, R-3) — Stage 3; decomposed in `docs/READ-ACCESS-ENFORCEMENT-ROADMAP.md` (D-087); packets 8.1.0..8.1.3 below |
 | 8.2 visibility model | per-note scopes (assumption A-15) — Stage 3 |
 | 8.3 export/delete flow | tombstones + audit log + retention policy — Stage 3 |
+
+### Read-access enforcement (Slice 8.1)
+Slice 8.1 is decomposed docs-first in `docs/READ-ACCESS-ENFORCEMENT-ROADMAP.md`
+(D-087); that doc carries the as-built read-path audit and the refinable packet
+sequence, mirroring the OP-/DEPLOY- roadmap precedent. The hot `/ask` read path
+is already community-scoped and tested (R-3 / R-8); the remaining packets harden
+the latent by-id/trace read seams.
+| Slice | Files / artifacts |
+| --- | --- |
+| 8.1.0 audit + decomposition | docs-only (D-087): new `docs/decision-log.md` D-087 entry, new `docs/READ-ACCESS-ENFORCEMENT-ROADMAP.md`, this map row + note block, `docs/todo.md`. Records the I-7 / R-3 / R-8 framing, the as-built audit (enforced hot path vs. latent unscoped by-id/trace reads), the defensive-scoping decision, and the 8.1.1/8.1.2/8.1.3 ladder. No `src/` / `tests/` / schema change. → 8.1.0 (D-087). |
+| 8.1.1 defensive scoping of unused by-id/trace reads | mandatory `community_id` + null-guard + owning-community filter on `get_query`, `get_retrieval_hits_for_query`, `get_answer_trace_for_query`, `get_event_chunk` across the `DomainRepository` Protocol + mock / sqlite / postgres (trace reads scope via the `query_id → queries.community_id` join; `get_event_chunk` filters its own column); test-only call sites updated; guard + isolation tests. No live `/ask` behavior change, no schema change. **Does not close `get_source_message` / `/sources` (8.1.2).** Pending. |
+| 8.1.2 `get_source_message` scoping + `/sources` isolation | thread `community_id` through `get_source_message` (Protocol + all backends) and the live `/sources` author-resolution path (`adapters/telegram/author_display.py`); cross-community characterization tests for `/sources` rendering + the `community_id`-keyed `_latest_sources` cache. No schema change. Pending. |
+| 8.1.3 milestone closure / verification | consolidated cross-community isolation sweep, `docs/RUNBOOK.md` read-access scoping note, execution-map + todo closure, DoD evidence ("cross-community leakage is prevented" / "access behavior is explicit"). Pending. |
 
 ## OP-4 — Raw-data durability & backup *(Stage 2 — Operationalization; complete)*
 Stage 2 — runs after Stage 1 and before any Stage-3 slice (D-043). Packet group
