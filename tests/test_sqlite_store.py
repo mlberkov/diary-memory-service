@@ -85,12 +85,12 @@ def test_round_trip_source_message(tmp_path: Path) -> None:
 
     store.save_source_message(src)
 
-    assert store.get_source_message("s1") == src
+    assert store.get_source_message("s1", community_id="fam-A") == src
 
 
 def test_get_source_message_missing_returns_none(tmp_path: Path) -> None:
     store = SqliteDomainStore(str(tmp_path / "diary.db"))
-    assert store.get_source_message("nope") is None
+    assert store.get_source_message("nope", community_id="fam-A") is None
 
 
 def test_hybrid_retrieval_unsupported_on_sqlite(tmp_path: Path) -> None:
@@ -114,11 +114,11 @@ def test_restart_survival(tmp_path: Path) -> None:
     del first
 
     second = SqliteDomainStore(str(db_path))
-    fetched = second.get_source_message("s1")
+    fetched = second.get_source_message("s1", community_id="fam-A")
     assert fetched is not None
     assert fetched.source_message_id == "s1"
 
-    chunk = second.get_event_chunk("c1")
+    chunk = second.get_event_chunk("c1", community_id="fam-A")
     assert chunk is not None
     assert chunk.chunk_text == "Walked the dog"
 
@@ -131,7 +131,7 @@ def test_get_or_create_source_message_returns_false_on_first_insert(tmp_path: Pa
 
     assert replayed is False
     assert persisted == src
-    assert store.get_source_message("s1") == src
+    assert store.get_source_message("s1", community_id="fam-A") == src
 
 
 def test_get_or_create_source_message_returns_true_on_replay(tmp_path: Path) -> None:
@@ -157,8 +157,8 @@ def test_get_or_create_source_message_distinguishes_edit_seq(tmp_path: Path) -> 
 
     assert replayed_a is False
     assert replayed_b is False
-    assert store.get_source_message("s1") is not None
-    assert store.get_source_message("s2") is not None
+    assert store.get_source_message("s1", community_id="fam-A") is not None
+    assert store.get_source_message("s2", community_id="fam-A") is not None
 
 
 def test_save_source_message_raises_on_duplicate_triple(tmp_path: Path) -> None:

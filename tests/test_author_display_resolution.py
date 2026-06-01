@@ -84,7 +84,13 @@ class _FakeStore:
         self._snapshot = snapshot
         self.snapshot_keys: list[tuple[str, str, int]] = []
 
-    def get_source_message(self, source_message_id: str) -> SourceMessage | None:
+    def get_source_message(
+        self, source_message_id: str, *, community_id: str
+    ) -> SourceMessage | None:
+        # Community-scoped read (Slice 8.1.2 / D-089): a source owned by another
+        # community reads as None, mirroring the real backends' own-column filter.
+        if self._source is None or self._source.community_id != community_id:
+            return None
         return self._source
 
     def get_author_display_input(
@@ -111,26 +117,50 @@ def _source(source_message_id: str = "src-1") -> SourceMessage:
 
 def test_bridge_resolves_via_source_then_snapshot() -> None:
     store = _FakeStore(source=_source(), snapshot=("alice", "Alice A"))
-    assert resolve_chunk_author_display(_chunk(), store) == "@alice"  # type: ignore[arg-type]
+    assert (
+        resolve_chunk_author_display(_chunk(), store, community_id="42") == "@alice"  # type: ignore[arg-type]
+    )
     # The bridge keys the snapshot read by the source row's external tuple.
     assert store.snapshot_keys == [("42", "101", 3)]
 
 
 def test_bridge_floor_when_source_row_missing() -> None:
     store = _FakeStore(source=None, snapshot=None)
-    assert resolve_chunk_author_display(_chunk(), store) == "user-abcdef12"  # type: ignore[arg-type]
+    assert (
+        resolve_chunk_author_display(_chunk(), store, community_id="42")  # type: ignore[arg-type]
+        == "user-abcdef12"
+    )
     # No source row → no snapshot lookup attempted.
+    assert store.snapshot_keys == []
+
+
+def test_bridge_floor_when_community_mismatch() -> None:
+    # Requester-scoped community ("99") differs from the source's owning
+    # community ("42"): the community-scoped read returns None, so author
+    # resolution fails closed to the opaque floor and never reads a snapshot —
+    # the /sources author lookup cannot cross a community boundary (Slice 8.1.2).
+    store = _FakeStore(source=_source(), snapshot=("alice", "Alice A"))
+    assert (
+        resolve_chunk_author_display(_chunk(), store, community_id="99")  # type: ignore[arg-type]
+        == "user-abcdef12"
+    )
     assert store.snapshot_keys == []
 
 
 def test_bridge_floor_when_snapshot_missing() -> None:
     store = _FakeStore(source=_source(), snapshot=None)
-    assert resolve_chunk_author_display(_chunk(), store) == "user-abcdef12"  # type: ignore[arg-type]
+    assert (
+        resolve_chunk_author_display(_chunk(), store, community_id="42")  # type: ignore[arg-type]
+        == "user-abcdef12"
+    )
 
 
 def test_bridge_floor_when_snapshot_both_null() -> None:
     store = _FakeStore(source=_source(), snapshot=(None, None))
-    assert resolve_chunk_author_display(_chunk(), store) == "user-abcdef12"  # type: ignore[arg-type]
+    assert (
+        resolve_chunk_author_display(_chunk(), store, community_id="42")  # type: ignore[arg-type]
+        == "user-abcdef12"
+    )
 
 
 # ---- rendered block format (byte-stable, sibling-guarded) -------------------
@@ -138,12 +168,12 @@ def test_bridge_floor_when_snapshot_both_null() -> None:
 
 def test_render_source_block_format_is_byte_stable() -> None:
     store = _FakeStore(source=_source(), snapshot=("alice", None))
-    block = render_source_block(_chunk(), index=1, total=3, store=store)  # type: ignore[arg-type]
+    block = render_source_block(_chunk(), index=1, total=3, store=store, community_id="42")  # type: ignore[arg-type]
     # Header line unchanged; author on its own attribution line; verbatim text.
     assert block == "[2026-05-09] (1/3)\n— @alice\n\nWalked the dog"
 
 
 def test_render_source_block_floor_tier_format() -> None:
     store = _FakeStore(source=None, snapshot=None)
-    block = render_source_block(_chunk(), index=2, total=2, store=store)  # type: ignore[arg-type]
+    block = render_source_block(_chunk(), index=2, total=2, store=store, community_id="42")  # type: ignore[arg-type]
     assert block == "[2026-05-09] (2/2)\n— user-abcdef12\n\nWalked the dog"

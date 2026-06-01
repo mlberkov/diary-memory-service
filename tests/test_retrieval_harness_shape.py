@@ -332,7 +332,7 @@ def test_ingest_fixture_corpus_resolves_handles() -> None:
     handles = ingest_fixture_corpus(store, chunks_for_source, embedding_client, corpus)
     assert set(handles.keys()) == {"t-1#0", "t-1#1"}
     for chunk_id in handles.values():
-        assert store.get_event_chunk(chunk_id) is not None
+        assert store.get_event_chunk(chunk_id, community_id="fam-x") is not None
 
 
 @pytest.mark.parametrize("corpus_path", CORPUS_PATHS)

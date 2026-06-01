@@ -2692,3 +2692,139 @@ Mirroring the `/drafts` return-domain-objects pattern means the architecture is 
 - Any change to core `DomainRepository`, `SourceMessage`, `EventChunk`, `InboundMessage`, or `get_or_create_source_message`; any schema / migration / DDL change.
 - Group-use, multi-diary, subject-dimension, visibility (A-15), or identity-directory work.
 - Batching the per-chunk snapshot reads; unrelated retrieval / answer-path / deployment work.
+
+## D-087 — Read-access enforcement: Slice 8.1 audit + milestone decomposition (docs-first)
+
+### Context
+
+Execution-map Slice 8.1 ("community-scoped access enforced at every read — I-7, R-3 — Stage 3") is listed but has never been decomposed: no decision entry, no roadmap doc, no packet breakdown. D-044 explicitly left every Stage-3 Phase-8 slice undecomposed. The Stage-2 → Stage-3 operationalization gate is open (OP-1..OP-5 complete), so the milestone is unblocked. This packet opens it docs-first, mirroring the DEPLOY-1.1 (D-060) / OP-1 roadmap precedent: the decision entry carries the stable contract; a new roadmap doc carries the refinable sequence.
+
+An as-built audit of the read surface (recorded in full in the new roadmap doc) found:
+
+- **Already enforced (R-3 / R-8).** The hot `/ask` read path rejects a null/empty `community_id` (`ValueError`) at `QueryService.answer` and at both `SearchRepository` legs, filters by community in SQL/Python (`WHERE ec.community_id = …` on the Postgres dense + sparse legs; equivalent skip in the mock store), and asserts single-community prompt assembly in `build_answer_prompt` (`CrossCommunityContextError`). `list_source_messages`, `list_recent_drafts`, and `list_failed_event_chunks` are likewise mandatory-`community_id` and filtered. Isolation tests already exist (`test_cross_chat_isolation`, the `test_*_scope_isolates` pair, `test_missing_community_id_raises`, `test_raises_on_cross_community_chunks`).
+- **Latent gaps.** `get_query`, `get_retrieval_hits_for_query`, `get_answer_trace_for_query`, and `get_event_chunk` take no `community_id` and apply no community filter — but have **no production callers** (tests only). `get_source_message` takes no `community_id` and is reached on a **live path** (`adapters/telegram/author_display.resolve_chunk_author_display`, for `/sources` author attribution), though today only over an already-community-scoped chunk drawn from the `community_id`-keyed `_latest_sources` cache. `answer_traces` rows carry no `community_id` column (community is recoverable via `query_id → queries.community_id`).
+
+### Decision
+
+- **Frame the milestone under I-7 / R-3 / R-8** and treat "cross-community leakage is prevented" + "access behavior is explicit" (Phase-8 DoD, `BuildPlan.md`) as the milestone exit criterion. The hot `/ask` path already satisfies it; the milestone hardens the remaining read seams so the property holds by construction rather than by current call-graph accident.
+- **Defensively scope the unscoped by-id/trace reads now** (owner-confirmed), before any of them gains a production caller. Each will take a mandatory `community_id`, reject null/empty with the standard `ValueError` guard used elsewhere, and **filter by the owning community via the appropriate predicate or join for that record's storage shape** (a record that carries `community_id` directly filters on its own column; a trace record whose community lives on the parent `queries` row filters via a `query_id → queries.community_id` join). The exact per-method predicate vs. join is an implementation choice for the code packet, deliberately left contract-level here so the roadmap does not over-specify storage.
+- **No `answer_traces` schema change** (owner-confirmed). Community stays recoverable through the existing `query_id → queries.community_id` join; the milestone remains a pure read-path concern and adds no column, DDL, or migration.
+- **`get_source_message` is a live-path seam, sequenced separately into Packet 8.1.2.** It is *not* part of the unused-reads packet (8.1.1); threading `community_id` through it touches the live `/sources` author-resolution path and earns its own packet with cross-community characterization tests. Readers must not mistake 8.1.1's completion for closure of all latent/read seams — `get_source_message` and the `/sources`/`_latest_sources` characterization coverage close in 8.1.2, and the consolidated verification sweep in 8.1.3.
+- **Record the packet ladder** (refinable when each is planned): **8.1.0** (this docs packet, D-087); **8.1.1** defensive scoping of the four unused by-id/trace reads; **8.1.2** `get_source_message` scoping + `/sources` author-resolution wiring + `/sources`/`_latest_sources` isolation characterization tests; **8.1.3** milestone closure/verification sweep + RUNBOOK operator note + DoD evidence. Slice 8.2 (visibility, A-15) and Slice 8.3 (export/delete/audit/retention) stay out of this milestone.
+- **New roadmap doc** `docs/READ-ACCESS-ENFORCEMENT-ROADMAP.md` carries the as-built audit table and the refinable sequence; this entry stays authoritative for the contract.
+
+### Why
+
+Opening the milestone docs-first matches the established convention (DEPLOY-1.1 / D-060; OP-1 roadmap / D-044): pin the contract and the audit before touching `src/`, so the later code packets execute against a recorded decision rather than improvising scope. Scoping the unused reads now is defense-in-depth — the leakage is latent (no caller) today, but an operator inspection endpoint or future surface could expose `get_query` / `get_answer_trace_for_query` and silently cross communities; closing them while they are callerless is the cheapest point to do so and directly serves the "access behavior is explicit" DoD line. Recovering trace-read community via the existing `queries` join (rather than denormalizing `community_id` onto `answer_traces`) keeps the milestone read-only and avoids a schema/migration that the join already makes unnecessary. The functional invariants are unaffected: I-7 (every record outside `SourceMessage` carries `community_id`), R-3 (every *retrieval* call carries non-null `community_id`; the retriever rejects calls without it), and R-8 (no cross-community chunks in a prompt) all remain accurate as written — by-id reads are not "retrieval", so this packet neither weakens nor restates them.
+
+### Consequence
+
+- **Added:** `docs/READ-ACCESS-ENFORCEMENT-ROADMAP.md` — the milestone roadmap doc: §1 Scope (+ explicitly-out-of-scope), §2 the as-built read-path audit table, §3 the enforcement contract (D-087), §4 the refinable packet sequence, §5 dependencies & ordering, §6 exit criterion, §7 See also.
+- **Changed:** `docs/execution-map.md` — the Phase-8 Slice 8.1 row points at the new roadmap doc + D-087; a "Read-access enforcement (Slice 8.1)" note block records the sub-packet pointers (8.1.0..8.1.3), mirroring the OP-/DEPLOY- annotation style.
+- **Changed:** `docs/todo.md` — a new top-of-list "Slice 8.1 — Community-scoped read-access enforcement (cross-community leakage prevention)" milestone section: Packet 8.1.0 marked **done (D-087)**; 8.1.1 / 8.1.2 / 8.1.3 listed as the ordered next picks.
+- **No `src/` or `tests/` change.** No method signature change, no new guard in code, no schema / migration / DDL change, no `config.py` / `.env.example` change. This is a documentation packet only; `make check` is non-impacted.
+- `docs/INVARIANTS.md` / `docs/RUNTIME-INVARIANTS.md` / `docs/assumptions.md` / `docs/assumption-audit.md` deliberately **not** touched — I-7 / R-3 / R-8 stay accurate as written (they govern retrieval, not by-id reads), and no A-14 (per-chat community assignment) / A-15 (visibility, deferred to Slice 8.2) row becomes more truthful; A-14 and A-15 both stay **open**.
+
+### Out of scope (per packet boundaries)
+
+- Any `src/` or `tests/` change; any method-signature change or new code guard (all scheduled into 8.1.1 / 8.1.2 / 8.1.3).
+- Adding a `community_id` column to `answer_traces` — explicitly omitted; community stays recoverable via the `query_id → queries.community_id` join.
+- The visibility model / per-note scopes — Slice 8.2, blocked on A-15.
+- Export / delete / audit / retention — Slice 8.3.
+- Community-bootstrap reassignment — the per-chat `external_chat_id → community_id` mapping (A-14) stays as-is.
+- Schema / DDL / migration / D-026–D-042 rename work.
+
+## D-088 — Read-access enforcement, Packet 8.1.1: defensive scoping of the four unused by-id/trace reads
+
+### Context
+
+D-087 opened Slice 8.1 docs-first and recorded the as-built audit: four read methods — `get_query`, `get_retrieval_hits_for_query`, `get_answer_trace_for_query`, `get_event_chunk` — take only a record id and apply **no** community filter. The audit confirmed (and this packet re-confirmed by grep) that all four have **no production caller** under `src/memory_rag/{services,adapters,app}`; every call site is in `tests/`. They are the pure defense-in-depth seam D-087 sequenced first (8.1.1), ahead of the live `get_source_message` / `/sources` seam (8.1.2). This packet implements the 8.1.1 contract.
+
+### Decision
+
+- **All four reads now require a mandatory, keyword-only `community_id`** across the `DomainRepository` Protocol and all three backends (mock / sqlite / postgres), with full parity. Each rejects a null/empty `community_id` fail-closed with the standard guard already used by the enforced reads — `raise ValueError("community_id is required (Runtime invariant R-3)")` — before any lookup.
+- **`community_id` is keyword-only** on these reads (e.g. `get_query(query_id, *, community_id)`) to prevent a silent positional swap between two `str` identifiers — the exact cross-community-leak class this milestone exists to prevent. (This is the only contract addition beyond D-087's; it does not restate I-7 / R-3 / R-8, which D-087 already framed.)
+- **Scoping mechanism follows each record's storage shape**, exactly as D-087's contract allows: `get_query` and `get_event_chunk` filter their own `community_id` column (`WHERE … AND community_id = …`; the mock compares the stored row's `community_id`); `get_retrieval_hits_for_query` and `get_answer_trace_for_query` scope via the `query_id → queries.community_id` join (`JOIN queries q ON q.query_id = …`; the mock consults the parent `Query` in `_queries`), since neither trace record carries a `community_id` of its own and `answer_traces` gets no new column.
+- **All three backends behave identically when the parent `Query` is absent or owned by another community: `[]` (hits) / `None` (trace), never an exception.** This fail-closed equivalence is pinned by one shared parametrized assertion per trace method (`test_get_retrieval_hits_missing_parent_query_reads_as_empty`, `test_get_answer_trace_missing_parent_query_reads_as_none`) so behavior cannot drift by backend.
+
+### Why
+
+Closing these reads while they are still callerless is the cheapest possible point — there is no live behavior to regress, and a future operator/inspection surface that reaches for `get_query` or `get_answer_trace_for_query` then inherits scoping by construction rather than having to remember it. Keyword-only is a structural guard, not a style choice: both arguments are `str`, so a positional call could transpose id and community and read the wrong community's row with no type error; forcing `community_id=` at every call site makes that mistake impossible and makes the scope explicit in the diff (the "access behavior is explicit" DoD line). Scoping the trace reads via the existing `queries` join keeps the milestone read-only and honors D-087's "no `answer_traces` schema change". I-7 / R-3 / R-8 are unaffected and not restated — by-id reads are not "retrieval".
+
+### Consequence
+
+- **Changed (`src/`):** `storage/repository.py` (the four Protocol signatures + docstrings), `storage/mock/store.py`, `storage/sqlite/store.py`, `storage/postgres/store.py` — each of the four reads gains the keyword-only `community_id`, the fail-closed guard, and the own-column filter or `queries` join.
+- **Changed (`tests/`):** every existing call site (58, across `test_reconciliation.py`, `test_indexing_pipeline.py`, `test_sqlite_store.py`, `test_postgres_store.py`, `test_retrieval_harness_shape.py`, `test_query_service.py`, `test_end_to_end_smoke.py`, `test_storage_query_traces.py`, `test_storage_answer_traces.py`) now passes `community_id=` explicitly. New guard + cross-community isolation + parent-missing tests added to `test_storage_query_traces.py` and `test_storage_answer_traces.py`, each from one parametrized `scoped_store` fixture over mock / sqlite / (PG-gated) postgres.
+- **No schema / DDL / migration change.** `get_source_message`, `/sources`, the `_latest_sources` cache, and `author_display.py` are byte-unchanged — they close in Packet 8.1.2. No `config.py` / `.env.example` change. `make check` green (628 passed, 65 PG-gated skipped, mypy clean, ruff clean).
+- `docs/INVARIANTS.md` / `docs/RUNTIME-INVARIANTS.md` / `docs/assumptions.md` / `docs/assumption-audit.md` deliberately **not** touched — I-7 / R-3 / R-8 stay accurate as written; A-14 / A-15 stay open. The keyword-only enforcement and the fail-closed parent-missing equivalence are packet-level contract decisions recorded here. `[[feedback_full_gate_and_doc_truthfulness]]`, `[[feedback_decision_log_citation]]`, `[[feedback_sibling_wording_guard_tests]]`.
+
+### Out of scope (per packet boundaries)
+
+- `get_source_message` scoping, the `/sources` author-resolution path, and `_latest_sources` cache isolation — Packet 8.1.2.
+- The consolidated isolation sweep + RUNBOOK read-access note + DoD evidence — Packet 8.1.3.
+- Any `answer_traces` `community_id` column / schema / DDL / migration.
+- Visibility model (Slice 8.2 / A-15); export/delete/audit/retention (Slice 8.3); A-14 community assignment; D-026–D-042 renames.
+
+## D-089 — Read-access enforcement, Packet 8.1.2: scope `get_source_message` + thread requester-scoped `community_id` through `/sources` author resolution
+
+### Context
+
+D-088 (Packet 8.1.1) closed the four unused by-id/trace reads. The **only remaining live read seam** in Slice 8.1 was `get_source_message`: the `/sources` command renders each cached chunk into a block whose author is resolved by `adapters/telegram/author_display.resolve_chunk_author_display` → `store.get_source_message(chunk.source_message_id)`. That read took no `community_id` and applied no community filter, so it could fetch any community's source row by id. This packet closes it on the live path, the last step before the 8.1.3 closure sweep.
+
+### Decision
+
+- **`get_source_message` is now community-scoped** across the `DomainRepository` Protocol and all three backends (mock / sqlite / postgres) with parity: a mandatory **keyword-only** `community_id` (same rationale as D-088 — prevent a silent `str`/`str` positional swap), a fail-closed null/empty guard (`raise ValueError("community_id is required (Runtime invariant R-3)")`), and an **own-column filter** on `source_messages.community_id` (`WHERE source_message_id = … AND community_id = …`; the mock compares the stored row). The `source_messages` table already carries `community_id` — no schema change, the exact analog of D-088's `get_event_chunk`.
+- **The live `/sources` path threads the requester-scoped `community_id`.** The webhook resolves the requester's community at the adapter edge from the inbound chat via the current identity mapping (A-14) into a local `community_id`, then passes it through `render_source_block(..., community_id=…)` → `resolve_chunk_author_display(..., community_id=…)` → `get_source_message(..., community_id=…)`. Storage and helper seams stay on the channel-neutral `community_id` vocabulary — the Telegram `external_chat_id` identifier is converted at the edge and does not leak into the helper signatures (D-026 / D-041). Threading the requester id (rather than trusting `chunk.community_id`) makes the author lookup actively requester-scoped: defense in depth over the already-community-keyed cache.
+- **`_latest_sources` and the dispatcher are unchanged and relied upon as already-community-keyed.** This packet scopes `get_source_message` and threads the requester-scoped `community_id` through `/sources` author resolution; it does **not** redesign the dispatcher/cache layer. `_latest_sources` is keyed by `external_chat_id` (D-036), `_update_latest_sources` / `_dispatch_sources` are untouched, and the existing `test_two_family_caches_are_independent` already pins that cache isolation.
+- **Fail-closed by fall-through, never a raise.** A source owned by another community reads as `None`, and `resolve_chunk_author_display` already falls through a missing source to the opaque short-ID author floor (`user-<last8>`). So a (today impossible) cross-community chunk resolves to the floor rather than leaking another community's author — no new branch, no raise, rendered-block format byte-unchanged.
+
+### Why
+
+Closing the read while threading the requester community gives the "access behavior is explicit" DoD line a structural guarantee: `/sources` author resolution cannot cross a community boundary even if the cache invariant were ever violated, because the storage read itself now filters by the requester's community. Keeping the read on `community_id` vocabulary (converting `external_chat_id` at the edge) preserves the D-026 adapter seam — the storage layer never learns a Telegram identifier. In production `community_id == external_chat_id` (A-14 identity) and retrieval already scopes chunks to the requester (R-3 / R-8), so the correct-community author resolves exactly as before; the change is invisible except on a cross-community attempt, which now fails closed. I-7 / R-3 / R-8 are unaffected and not restated.
+
+### Consequence
+
+- **Changed (`src/`):** `storage/repository.py`, `storage/mock/store.py`, `storage/sqlite/store.py`, `storage/postgres/store.py` — `get_source_message` gains the keyword-only `community_id`, the guard, and the own-column filter. `adapters/telegram/author_display.py` — `resolve_chunk_author_display` and `render_source_block` gain a keyword-only `community_id` and forward it. `adapters/telegram/webhook.py` — the SOURCES branch resolves a requester-scoped `community_id` local and passes it into `render_source_block`.
+- **Changed (`tests/`):** all `get_source_message` call sites pass `community_id=` (`test_sqlite_store.py`, `test_postgres_store.py`). New `tests/test_storage_source_messages.py` — one parametrized `scoped_store` fixture (mock / sqlite / PG-gated postgres) with guard + cross-community isolation + missing-id tests. `tests/test_author_display_resolution.py` — `_FakeStore.get_source_message` is now community-aware (mirrors the real own-column filter), all call sites thread `community_id="42"`, and a new seam-focused `test_bridge_floor_when_community_mismatch` proves a mismatched requester-scoped `community_id` falls to the opaque floor and reads no snapshot (controlled-input fake, not an impossible end-to-end path). `tests/test_telegram_sources.py` is unchanged and stays green — the threaded id resolves authors end-to-end (chat / chunk / source all `"42"`).
+- **No schema / DDL / migration change.** `_latest_sources` / dispatcher untouched. `make check` green (635 passed, 65 PG-gated skipped, mypy clean, ruff clean).
+- `docs/INVARIANTS.md` / `docs/RUNTIME-INVARIANTS.md` / `docs/assumptions.md` / `docs/assumption-audit.md` deliberately **not** touched — I-7 / R-3 / R-8 stay accurate; A-14 / A-15 stay open. The keyword-only enforcement, the requester-scoped threading, and the fail-closed fall-through are packet-level contract decisions recorded here. `[[feedback_full_gate_and_doc_truthfulness]]`, `[[feedback_decision_log_citation]]`, `[[feedback_sibling_wording_guard_tests]]`.
+
+### Out of scope (per packet boundaries)
+
+- The consolidated cross-community isolation sweep + `docs/RUNBOOK.md` read-access operator note + Phase-8 DoD evidence — Packet 8.1.3.
+- Any `/ask` retrieval-behavior change beyond `/sources` scoping; redesign of the dispatcher / `_latest_sources` cache.
+- Schema / DDL / migration (no new columns); `answer_traces` `community_id` column.
+- Visibility model (Slice 8.2 / A-15); export/delete/audit/retention (Slice 8.3); A-14 community assignment / per-note overrides; D-026–D-042 renames.
+
+## D-090 — Read-access enforcement, Packet 8.1.3: Slice 8.1 milestone closure (consolidated isolation sweep + operator note)
+
+### Context
+
+D-087 (audit + decomposition), D-088 (Packet 8.1.1, the four unused by-id/trace reads), and D-089 (Packet 8.1.2, `get_source_message` + requester-scoped `/sources`) landed the Slice 8.1 enforcement. The milestone's own exit criterion (`docs/READ-ACCESS-ENFORCEMENT-ROADMAP.md` §6) was still open: no consolidated cross-community isolation proof, no operator-facing `docs/RUNBOOK.md` read-access note, and the Phase-8 DoD lines "cross-community leakage is prevented" / "access behavior is explicit" not yet recorded as one closure artifact. A read-only audit during planning also surfaced a truthfulness gap: of the five scoped by-id/trace/source reads, `get_event_chunk` (scoped by D-088) was the **only** one with no null-`community_id` guard test and no cross-community isolation test of its own — its four siblings each had both. D-088 added the `get_event_chunk` filter + guard to all backends but shipped no isolation test for them.
+
+### Decision
+
+- **One consolidated milestone-level proof.** New `tests/test_read_access_isolation.py` is the single reviewable sweep. From one parametrized `scoped_store` fixture (mock / sqlite / PG-gated postgres) it pins two contracts across all five scoped reads — `get_query`, `get_retrieval_hits_for_query`, `get_answer_trace_for_query`, `get_event_chunk`, `get_source_message`: (1) a null/empty `community_id` raises `ValueError` (R-3 guard sweep); (2) a record owned by `fam-A` reads the fail-closed sentinel (`None`, or `[]` for `get_retrieval_hits_for_query`) for `fam-B`, never another community's row (cross-community sweep). The file's module docstring indexes the remaining milestone evidence that stays in place (hot-path retrieval scope, prompt-assembly `CrossCommunityContextError`, the `/sources` author-resolution seam, the already-community-keyed `_latest_sources` cache) so it reads as the navigable closure index rather than a re-implementation.
+- **`get_event_chunk`'s isolation/guard is newly pinned by this sweep.** It runs green against current code — D-088's filter + guard were correct; only the test was missing. No `src/` change was required.
+- **Operator note.** A new `### Read-access scoping (Slice 8.1 / D-087, D-088, D-089, D-090)` subsection in `docs/RUNBOOK.md` records what 8.1 enforces: every community-owned read is scoped or a documented safe-by-construction seam; fail-closed on a bad/missing `community_id`; own-column filter vs. `query_id → queries.community_id` join; keyword-only `community_id`; the no-`answer_traces`-column / recover-via-join decision; and the `MEMORY_RAG_PG_TEST_DSN`-gated Postgres-leg caveat.
+- **Milestone closed.** `docs/READ-ACCESS-ENFORCEMENT-ROADMAP.md` (§0 status, §4 packet table, §6 exit criterion), `docs/execution-map.md` (Slice 8.1 + 8.1.3 rows), and `docs/todo.md` (Slice 8.1 section) flip 8.1.3 / Slice 8.1 to done.
+
+### Why
+
+The consolidated sweep makes the no-cross-community-leakage property hold by construction across the whole scoped-read surface rather than by current call-graph accident, and it closes the one read (`get_event_chunk`) whose enforcement was previously asserted in the roadmap audit but unproven in tests. Recording the contract in the RUNBOOK gives operators the "access behavior is explicit" guarantee in prose alongside the executable proof. Keeping the milestone read-only (no schema, no `answer_traces` column) preserves the D-087 contract that community is recoverable via the `queries` join.
+
+### Consequence
+
+- **Changed (`tests/`):** new `tests/test_read_access_isolation.py` — the parametrized guard + cross-community sweep over the five scoped reads (mock + sqlite unconditionally; postgres when `MEMORY_RAG_PG_TEST_DSN` is set). No other test file changed; the per-packet isolation tests stay as-is.
+- **Changed (`docs/`):** `docs/RUNBOOK.md` (new read-access scoping subsection), `docs/decision-log.md` (this D-090 entry), `docs/READ-ACCESS-ENFORCEMENT-ROADMAP.md`, `docs/execution-map.md`, `docs/todo.md` (closure flips).
+- **No `src/` change. No schema / DDL / migration change.** `get_event_chunk` ran green under the new sweep, so no D-088 correction was needed.
+- `docs/INVARIANTS.md` / `docs/RUNTIME-INVARIANTS.md` / `docs/assumptions.md` / `docs/assumption-audit.md` deliberately **not** touched — I-7 / R-3 / R-8 stay accurate and are not restated; A-14 / A-15 stay open. The consolidated-sweep shape and the deliberate overlap with the per-packet tests are packet-level decisions recorded here. `[[feedback_full_gate_and_doc_truthfulness]]`, `[[feedback_decision_log_citation]]`, `[[feedback_sibling_wording_guard_tests]]`.
+
+### Out of scope (per packet boundaries)
+
+- Visibility model / per-note scopes — Slice 8.2 (blocked on A-15).
+- Export / delete / audit / retention — Slice 8.3.
+- A-14 community-assignment redesign; the per-chat `external_chat_id → community_id` mapping.
+- Any schema / DDL / migration (incl. an `answer_traces.community_id` column).
+- Any `/ask` / `/sources` / retrieval / storage / dispatcher runtime behavior change.
+- D-026–D-042 rename work.

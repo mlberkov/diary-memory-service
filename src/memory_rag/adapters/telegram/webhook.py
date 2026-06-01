@@ -288,8 +288,19 @@ def register_telegram_webhook(app: FastAPI) -> None:
             return {}
         if result.source_chunks is not None:
             chunk_count = len(result.source_chunks)
+            # Requester-scoped community for the /sources author lookup. The
+            # inbound chat maps to a community id via the current identity
+            # mapping (A-14); the community-scoped read keeps author resolution
+            # from ever crossing a community boundary (Slice 8.1.2 / D-089).
+            community_id = inbound.external_chat_id
             source_blocks = [
-                render_source_block(chunk, index=i + 1, total=chunk_count, store=backend_store)
+                render_source_block(
+                    chunk,
+                    index=i + 1,
+                    total=chunk_count,
+                    store=backend_store,
+                    community_id=community_id,
+                )
                 for i, chunk in enumerate(result.source_chunks)
             ]
             messages = pack_drafts_into_messages(result.reply_text, source_blocks)

@@ -107,8 +107,15 @@ class MockDomainStore:
         for chunk in chunks:
             self._chunks[chunk.chunk_id] = chunk
 
-    def get_source_message(self, source_message_id: str) -> SourceMessage | None:
-        return self._sources.get(source_message_id)
+    def get_source_message(
+        self, source_message_id: str, *, community_id: str
+    ) -> SourceMessage | None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        source = self._sources.get(source_message_id)
+        if source is None or source.community_id != community_id:
+            return None
+        return source
 
     def list_source_messages(
         self, community_id: str, *, limit: int | None = None
@@ -147,8 +154,13 @@ class MockDomainStore:
             1 for chunk in self._chunks.values() if chunk.source_message_id == source_message_id
         )
 
-    def get_event_chunk(self, chunk_id: str) -> EventChunk | None:
-        return self._chunks.get(chunk_id)
+    def get_event_chunk(self, chunk_id: str, *, community_id: str) -> EventChunk | None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        chunk = self._chunks.get(chunk_id)
+        if chunk is None or chunk.community_id != community_id:
+            return None
+        return chunk
 
     def dense_candidates(
         self,
@@ -270,10 +282,25 @@ class MockDomainStore:
                 raise ValueError(f"duplicate retrieval_hit_id={hit.retrieval_hit_id}")
             self._retrieval_hits[hit.retrieval_hit_id] = hit
 
-    def get_query(self, query_id: str) -> Query | None:
-        return self._queries.get(query_id)
+    def get_query(self, query_id: str, *, community_id: str) -> Query | None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        query = self._queries.get(query_id)
+        if query is None or query.community_id != community_id:
+            return None
+        return query
 
-    def get_retrieval_hits_for_query(self, query_id: str) -> list[RetrievalHit]:
+    def get_retrieval_hits_for_query(
+        self, query_id: str, *, community_id: str
+    ) -> list[RetrievalHit]:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        # Scope via the parent query's community (the query_id -> queries join):
+        # a RetrievalHit carries no community_id of its own. Fail closed when the
+        # parent query is absent or owned by another community.
+        parent = self._queries.get(query_id)
+        if parent is None or parent.community_id != community_id:
+            return []
         rows = [h for h in self._retrieval_hits.values() if h.query_id == query_id]
         rows.sort(key=lambda h: (h.leg.value, h.rank))
         return rows
@@ -283,7 +310,15 @@ class MockDomainStore:
             raise ValueError(f"duplicate answer_trace for query_id={trace.query_id}")
         self._answer_traces[trace.query_id] = trace
 
-    def get_answer_trace_for_query(self, query_id: str) -> AnswerTrace | None:
+    def get_answer_trace_for_query(self, query_id: str, *, community_id: str) -> AnswerTrace | None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        # Scope via the parent query's community (the query_id -> queries join):
+        # answer_traces carries no community_id column. Fail closed when the
+        # parent query is absent or owned by another community.
+        parent = self._queries.get(query_id)
+        if parent is None or parent.community_id != community_id:
+            return None
         return self._answer_traces.get(query_id)
 
     def save_indexing_dead_letter(self, record: IndexingDeadLetter) -> None:

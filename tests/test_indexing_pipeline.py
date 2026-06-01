@@ -131,7 +131,7 @@ def test_set_chunk_embedding_status_ready(store: DomainRepository) -> None:
     _seed_chunk(store)
     store.set_chunk_embedding_status("c1", EmbeddingStatus.READY)
 
-    chunk = store.get_event_chunk("c1")
+    chunk = store.get_event_chunk("c1", community_id="fam-A")
     assert chunk is not None
     assert chunk.embedding_status is EmbeddingStatus.READY
 
@@ -140,7 +140,7 @@ def test_set_chunk_embedding_status_failed(store: DomainRepository) -> None:
     _seed_chunk(store)
     store.set_chunk_embedding_status("c1", EmbeddingStatus.FAILED)
 
-    chunk = store.get_event_chunk("c1")
+    chunk = store.get_event_chunk("c1", community_id="fam-A")
     assert chunk is not None
     assert chunk.embedding_status is EmbeddingStatus.FAILED
 
@@ -152,13 +152,13 @@ def test_set_chunk_embedding_status_unknown_chunk_raises(store: DomainRepository
 
 def test_freshly_saved_chunk_is_pending(store: DomainRepository) -> None:
     _seed_chunk(store)
-    chunk = store.get_event_chunk("c1")
+    chunk = store.get_event_chunk("c1", community_id="fam-A")
     assert chunk is not None
     assert chunk.embedding_status is EmbeddingStatus.PENDING
 
 
 def test_get_event_chunk_missing_returns_none(store: DomainRepository) -> None:
-    assert store.get_event_chunk("nope") is None
+    assert store.get_event_chunk("nope", community_id="fam-A") is None
 
 
 def test_duplicate_embedding_for_same_chunk_and_model_raises(store: DomainRepository) -> None:
