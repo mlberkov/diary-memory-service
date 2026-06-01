@@ -146,21 +146,6 @@ _REPLY_NO_MATCHES_TEMPLATE = (
 _REPLY_SOURCES_NONE = "No selected chunks available — ask a question with /ask first."
 
 
-def _render_source_block(chunk: EventChunk, *, index: int, total: int) -> str:
-    """Render one selected chunk for ``/sources`` (D-036).
-
-    "Selected" = post-RRF top-k chunk fed into the prompt. Rendered
-    "as-is": full ``chunk_text`` with the note date and a 1-based
-    ``(i/N)`` index as a header. The index is ephemeral — it numbers
-    the chunks within the current ``/ask``'s cached list only, in
-    post-RRF order, and is not a stable cross-``/ask`` identifier.
-    Not a citation, not fine-grained attribution. The underlying
-    ``chunk_id`` is not surfaced to the user; ``AnswerTrace.context_chunk_ids``
-    keeps it for operator forensics via SQL.
-    """
-    return f"[{chunk.note_date.isoformat()}] ({index}/{total})\n\n{chunk.chunk_text}"
-
-
 def _format_answer_reply(result: AnswerResult) -> str:
     """Render the answer reply per :class:`FallbackMode` (D-035, D-036).
 
@@ -458,9 +443,12 @@ class Dispatcher:
     def _dispatch_sources(self, message: InboundMessage) -> DispatchResult:
         """Serve ``/sources`` by reading the latest-sources cache (D-036).
 
-        Returns the selected chunks as-is for the chat's most recent
-        ``/ask`` turn — the post-RRF top-k chunks the prompt builder fed
-        to the LLM, rendered with their full ``chunk_text``. Not
+        Returns the selected chunks for the chat's most recent ``/ask``
+        turn — the post-RRF top-k chunks the prompt builder fed to the
+        LLM — as opaque ``EventChunk`` objects on ``source_chunks``. The
+        adapter renders each block (full ``chunk_text``) and resolves the
+        author display name (adapter-only; D-081 / D-086); the
+        channel-neutral dispatcher never composes a display name. Not
         citations, not fine-grained attribution.
         """
         community_id = message.external_chat_id
@@ -476,10 +464,6 @@ class Dispatcher:
                 },
             )
         header = f"Selected chunks for your last /ask ({len(chunks)} chunk(s)):"
-        total = len(chunks)
-        source_blocks = [
-            _render_source_block(c, index=i + 1, total=total) for i, c in enumerate(chunks)
-        ]
         return DispatchResult(
             reply_text=header,
             route=RouteKind.SOURCES,
@@ -488,5 +472,5 @@ class Dispatcher:
                 "route_source": message.route_source,
                 "returned": str(len(chunks)),
             },
-            source_blocks=source_blocks,
+            source_chunks=chunks,
         )

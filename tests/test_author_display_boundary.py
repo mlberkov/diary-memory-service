@@ -10,9 +10,11 @@ from __future__ import annotations
 import inspect
 from dataclasses import fields
 
+from memory_rag.adapters.telegram import author_display
 from memory_rag.adapters.telegram.author_display import AuthorDisplayInputStore
 from memory_rag.core.domain.models import SourceMessage
-from memory_rag.core.routing import InboundMessage
+from memory_rag.core.routing import DispatchResult, InboundMessage
+from memory_rag.services import dispatcher as dispatcher_module
 from memory_rag.storage.repository import DomainRepository
 
 _PORT_METHODS = ("save_author_display_input", "get_author_display_input")
@@ -48,3 +50,28 @@ def test_core_types_carry_no_display_fields() -> None:
 def test_get_or_create_source_message_signature_unchanged() -> None:
     params = list(inspect.signature(DomainRepository.get_or_create_source_message).parameters)
     assert params == ["self", "source"]
+
+
+# ---- D-086: author display resolution stays adapter-only --------------------
+
+
+def test_dispatch_result_carries_opaque_chunks_not_rendered_authors() -> None:
+    # The channel-neutral DispatchResult hands the adapter opaque chunks for
+    # /sources; it carries no pre-rendered (author-bearing) string blocks, so a
+    # display name can only be composed downstream at the adapter seam (D-086).
+    names = {f.name for f in fields(DispatchResult)}
+    assert "source_chunks" in names
+    assert "source_blocks" not in names
+
+
+def test_dispatcher_does_not_resolve_or_render_author_display() -> None:
+    # Resolution / rendering helpers live in the adapter module, never in the
+    # channel-neutral dispatcher (D-081 adapter-only resolution; D-086).
+    assert not hasattr(dispatcher_module, "_render_source_block")
+    for symbol in (
+        "resolve_author_display_name",
+        "resolve_chunk_author_display",
+        "render_source_block",
+    ):
+        assert not hasattr(dispatcher_module, symbol)
+        assert hasattr(author_display, symbol)

@@ -13,7 +13,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from memory_rag.core.domain.models import SourceMessage
+    from memory_rag.core.domain.models import EventChunk, SourceMessage
     from memory_rag.core.export.models import ExportPayload
 
 RouteSource = Literal["command", "heuristic"]
@@ -80,12 +80,15 @@ class DispatchResult:
     ``sendDocument``). ``drafts`` carries a list of source messages that
     the adapter should render as a combined ordered response (one
     transport message by default; multi-message split only when forced
-    by the transport size cap). ``source_blocks`` carries pre-rendered
-    string blocks for ``/sources`` (D-036) — the chunks retrieval
-    selected for the chat's most recent ``/ask`` turn, rendered as-is.
-    The adapter packs them with the same combined-message semantics
-    used for ``drafts``. When all three are ``None`` the adapter
-    delivers ``reply_text`` only.
+    by the transport size cap). ``source_chunks`` carries the opaque
+    chunks retrieval selected for the chat's most recent ``/ask`` turn
+    (``/sources``, D-036); the adapter renders each block as-is and
+    resolves the (adapter-only, D-081 / D-086) author display name,
+    packing the blocks with the same combined-message semantics used for
+    ``drafts``. The dispatcher returns chunks rather than pre-rendered
+    strings so display resolution never happens in the channel-neutral
+    core. When all three are ``None`` the adapter delivers ``reply_text``
+    only.
     """
 
     reply_text: str
@@ -93,4 +96,4 @@ class DispatchResult:
     metadata: Mapping[str, str] = field(default_factory=dict)
     document: ExportPayload | None = None
     drafts: list[SourceMessage] | None = None
-    source_blocks: list[str] | None = None
+    source_chunks: tuple[EventChunk, ...] | None = None

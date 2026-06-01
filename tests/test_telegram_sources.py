@@ -1,8 +1,10 @@
 """Telegram-adapter tests for ``/sources`` outbound delivery (Slice 4.4, D-036).
 
-Asserts the webhook's outbound branch for ``DispatchResult.source_blocks``:
+Asserts the webhook's outbound branch for ``DispatchResult.source_chunks``:
 
 - Default delivery is one combined ``send_message`` (header + all blocks).
+- Each block carries an adapter-resolved ``— <author>`` attribution line
+  (D-086): ``@username → first_name → user-<last8>`` fallback chain.
 - Multi-message split activates when the combined payload exceeds the
   4096-char cap; splits land on whole-block boundaries.
 - The fail-closed reply path returns inline ``sendMessage`` with no
@@ -18,13 +20,17 @@ from fastapi.testclient import TestClient
 
 from memory_rag.adapters.answers import MockChatClient
 from memory_rag.adapters.embeddings import MockEmbeddingClient
-from memory_rag.adapters.telegram.webhook import get_dispatcher, get_telegram_client
+from memory_rag.adapters.telegram.webhook import (
+    get_backend_store,
+    get_dispatcher,
+    get_telegram_client,
+)
 from memory_rag.app import create_app
 from memory_rag.config import Settings
 from memory_rag.core.domain import AnswerResult, Evidence, FallbackMode
-from memory_rag.core.domain.models import AnswerContext, EventChunk
+from memory_rag.core.domain.models import AnswerContext, EventChunk, SourceMessage
 from memory_rag.core.embeddings import EmbeddingStatus
-from memory_rag.core.routing import InboundMessage
+from memory_rag.core.routing import InboundMessage, RouteKind
 from memory_rag.services import Dispatcher, DomainService, ExportService, QueryService
 from memory_rag.storage.mock import MockDomainStore
 
@@ -107,9 +113,11 @@ class _FixedAnswerQueryService:
 
 def _build_client(
     chunks: tuple[EventChunk, ...] | None = None,
+    *,
+    store: MockDomainStore | None = None,
 ) -> tuple[TestClient, _RecordingTelegramClient]:
     settings = _settings()
-    store = MockDomainStore()
+    store = store if store is not None else MockDomainStore()
     embed = MockEmbeddingClient()
     chat = MockChatClient()
     if chunks is None:
@@ -126,6 +134,9 @@ def _build_client(
     app = create_app(settings)
     app.dependency_overrides[get_dispatcher] = lambda: dispatcher
     app.dependency_overrides[get_telegram_client] = lambda: telegram_client
+    # /sources author resolution reads through the backend store; point it at
+    # the same store the dispatcher uses so lookups are deterministic (D-086).
+    app.dependency_overrides[get_backend_store] = lambda: store
     return TestClient(app), telegram_client
 
 
@@ -144,10 +155,92 @@ def test_sources_after_ask_delivers_one_combined_outbound_message() -> None:
     assert len(tg.message_calls) == 1
     body = tg.message_calls[0]["text"]
     assert body.startswith("Selected chunks for your last /ask (2 chunk(s)):")
-    assert "[2026-05-09] (1/2)\n\nTried a new book" in body
-    assert "[2026-05-09] (2/2)\n\nHad a calm morning" in body
+    # No source row / snapshot persisted for these chunks → author falls to the
+    # opaque short-ID floor `user-<last8>` (author_user_id="7").
+    assert "[2026-05-09] (1/2)\n— user-7\n\nTried a new book" in body
+    assert "[2026-05-09] (2/2)\n— user-7\n\nHad a calm morning" in body
     # As-is rendering: chunk text appears verbatim (no excerpt, no truncation).
     assert body.index("Tried a new book") < body.index("Had a calm morning")
+
+
+def _save_source_and_snapshot(
+    store: MockDomainStore,
+    *,
+    chunk: EventChunk,
+    external_chat_id: str,
+    external_message_id: str,
+    edit_seq: int,
+    username: str | None,
+    first_name: str | None,
+) -> None:
+    """Persist a source row keyed to ``chunk`` plus its display-input snapshot."""
+    store.save_source_message(
+        SourceMessage(
+            source_message_id=chunk.source_message_id,
+            community_id=chunk.community_id,
+            author_user_id=chunk.author_user_id,
+            external_chat_id=external_chat_id,
+            external_user_id=chunk.author_user_id,
+            external_message_id=external_message_id,
+            edit_seq=edit_seq,
+            raw_text=chunk.chunk_text,
+            detected_route=RouteKind.NOTE,
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    store.save_author_display_input(
+        external_chat_id=external_chat_id,
+        external_message_id=external_message_id,
+        edit_seq=edit_seq,
+        username=username,
+        first_name=first_name,
+    )
+
+
+def test_sources_renders_resolved_author_tiers_from_snapshot() -> None:
+    # Three chunks, one per fallback tier: @username, first_name, short-ID floor.
+    c_user = _chunk("c-user", "Walked the dog")
+    c_first = _chunk("c-first", "Read a book")
+    c_floor = _chunk("c-floor", "Cooked dinner")
+    store = MockDomainStore()
+    _save_source_and_snapshot(
+        store,
+        chunk=c_user,
+        external_chat_id="42",
+        external_message_id="101",
+        edit_seq=0,
+        username="alice",
+        first_name="Alice A",
+    )
+    _save_source_and_snapshot(
+        store,
+        chunk=c_first,
+        external_chat_id="42",
+        external_message_id="102",
+        edit_seq=0,
+        username=None,
+        first_name="Bob",
+    )
+    _save_source_and_snapshot(
+        store,
+        chunk=c_floor,
+        external_chat_id="42",
+        external_message_id="103",
+        edit_seq=0,
+        username=None,
+        first_name=None,
+    )
+    client, tg = _build_client(chunks=(c_user, c_first, c_floor), store=store)
+
+    _post(client, _update("/ask anything", update_id=1, message_id=1))
+    _post(client, _update("/sources", update_id=2, message_id=2))
+
+    body = tg.message_calls[0]["text"]
+    # username present → @username; first_name only → plain; both-null → floor
+    # (author_user_id="7" → `user-7`).
+    assert "[2026-05-09] (1/3)\n— @alice\n\nWalked the dog" in body
+    assert "[2026-05-09] (2/3)\n— Bob\n\nRead a book" in body
+    assert "[2026-05-09] (3/3)\n— user-7\n\nCooked dinner" in body
 
 
 def test_sources_without_prior_ask_returns_inline_fail_closed_reply() -> None:
