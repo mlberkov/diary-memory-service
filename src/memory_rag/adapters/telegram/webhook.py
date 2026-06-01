@@ -25,6 +25,7 @@ from memory_rag.adapters.embeddings import build_embedding_client
 from memory_rag.adapters.telegram.author_display import (
     AuthorDisplayInputStore,
     TelegramBackendStore,
+    render_source_block,
 )
 from memory_rag.adapters.telegram.client import HttpxTelegramClient, TelegramClient
 from memory_rag.adapters.telegram.commands import parse_command
@@ -112,7 +113,20 @@ def get_author_display_input_store() -> AuthorDisplayInputStore:
     """Adapter-owned author display-input port (D-084).
 
     Returns the same per-process store the dispatcher uses, typed as the
-    adapter-owned port distinct from the core ``DomainRepository``.
+    adapter-owned port distinct from the core ``DomainRepository``. Used by the
+    capture path only — least privilege: capture sees the port, not the full
+    backend seam.
+    """
+    return _get_store(get_settings())
+
+
+def get_backend_store() -> TelegramBackendStore:
+    """Combined adapter-side store seam for ``/sources`` author rendering (D-086).
+
+    The same per-process singleton, typed as the combined ``TelegramBackendStore``
+    so the ``/sources`` renderer can both look the source message up
+    (``get_source_message``) and read the display-input snapshot
+    (``get_author_display_input``) to resolve the author display name.
     """
     return _get_store(get_settings())
 
@@ -151,6 +165,7 @@ def register_telegram_webhook(app: FastAPI) -> None:
         dispatcher: Annotated[Dispatcher, Depends(get_dispatcher)],
         telegram_client: Annotated[TelegramClient, Depends(get_telegram_client)],
         display_store: Annotated[AuthorDisplayInputStore, Depends(get_author_display_input_store)],
+        backend_store: Annotated[TelegramBackendStore, Depends(get_backend_store)],
         x_telegram_bot_api_secret_token: Annotated[str | None, Header()] = None,
     ) -> dict[str, Any]:
         _verify_secret(settings.telegram_webhook_secret, x_telegram_bot_api_secret_token)
@@ -271,8 +286,13 @@ def register_telegram_webhook(app: FastAPI) -> None:
                 sent,
             )
             return {}
-        if result.source_blocks is not None:
-            messages = pack_drafts_into_messages(result.reply_text, result.source_blocks)
+        if result.source_chunks is not None:
+            chunk_count = len(result.source_chunks)
+            source_blocks = [
+                render_source_block(chunk, index=i + 1, total=chunk_count, store=backend_store)
+                for i, chunk in enumerate(result.source_chunks)
+            ]
+            messages = pack_drafts_into_messages(result.reply_text, source_blocks)
             total = len(messages)
             sent = 0
             for body in messages:
@@ -298,7 +318,7 @@ def register_telegram_webhook(app: FastAPI) -> None:
             log.info(
                 "sources.delivered chat_id=%s chunk_count=%d messages_sent=%d",
                 inbound.external_chat_id,
-                len(result.source_blocks),
+                chunk_count,
                 sent,
             )
             return {}

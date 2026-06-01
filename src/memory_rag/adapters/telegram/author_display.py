@@ -18,9 +18,13 @@ mutation); an edit (a new ``edit_seq``) lands a new row. ``username`` /
 and a both-null snapshot is still recorded (the point-in-time "withheld" state).
 
 ``get_author_display_input`` is a raw storage read: it returns the stored
-``(username, first_name)`` scalars and contains no display-resolution logic —
-the ``username → first_name → opaque short-ID`` fallback chain stays deferred
-(A-44 / D-081).
+``(username, first_name)`` scalars and contains no display-resolution logic.
+The ``username → first_name → opaque short-ID`` fallback chain (A-44 / D-081)
+is applied by the adapter-side resolver in this module — :func:`resolve_author_display_name`
+and the :func:`resolve_chunk_author_display` bridge — and rendered into the
+``/sources`` block by :func:`render_source_block` (D-086). Resolution stays
+adapter-only: the channel-neutral dispatcher returns opaque chunks and never
+composes a display name.
 
 The owner-fixed topology (D-083) co-locates the port on the existing per-backend
 store object: the mock / sqlite / postgres stores each implement these methods
@@ -33,6 +37,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from memory_rag.core.domain.models import EventChunk
 from memory_rag.storage.search_repository import HybridDomainStore
 
 
@@ -85,3 +90,97 @@ class TelegramBackendStore(HybridDomainStore, AuthorDisplayInputStore, Protocol)
     Protocol lives in the adapter layer so the storage layer never imports the
     adapter-owned port.
     """
+
+
+def _present(value: str | None) -> str | None:
+    """Return a non-blank ``value`` or ``None`` (withheld fields strip away)."""
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def resolve_author_display_name(
+    username: str | None,
+    first_name: str | None,
+    author_user_id: str,
+) -> str:
+    """Resolve a host-supplied snapshot to a display name (D-081 / A-44, D-086).
+
+    Adapter-only fallback chain ``username → first_name → opaque short-ID``:
+
+    * ``username`` present → ``@<username>`` (Telegram convention);
+    * else ``first_name`` present → ``<first_name>`` (plain);
+    * else → ``user-<last 8 of author_user_id>`` — the opaque floor, derived
+      from the core identifier the chunk always carries, so a both-null /
+      withheld snapshot (or a missing one) still yields a stable handle.
+
+    A value counts as present only when it is not ``None`` and not blank after
+    ``.strip()``. Resolved names are **non-authoritative** presentation — never
+    a substitute for ``author_user_id`` in storage, retrieval, or provenance.
+    """
+    chosen = _present(username)
+    if chosen is not None:
+        return f"@{chosen}"
+    chosen = _present(first_name)
+    if chosen is not None:
+        return chosen
+    return f"user-{author_user_id[-8:]}"
+
+
+def resolve_chunk_author_display(chunk: EventChunk, store: TelegramBackendStore) -> str:
+    """Resolve a chunk's author display name from the durable snapshot (D-086).
+
+    Bridges the opaque core boundary: ``EventChunk`` carries only
+    ``author_user_id`` + ``source_message_id``, not the external message tuple
+    that keys ``author_display_inputs``. So this looks the source message up
+    (``get_source_message``) to recover ``(external_chat_id,
+    external_message_id, edit_seq)``, reads the snapshot
+    (``get_author_display_input``), and applies
+    :func:`resolve_author_display_name`. A missing source row or missing
+    snapshot falls through to the opaque short-ID floor — never blank, never a
+    raise.
+    """
+    username: str | None = None
+    first_name: str | None = None
+    source = store.get_source_message(chunk.source_message_id)
+    if source is not None:
+        snapshot = store.get_author_display_input(
+            external_chat_id=source.external_chat_id,
+            external_message_id=source.external_message_id,
+            edit_seq=source.edit_seq,
+        )
+        if snapshot is not None:
+            username, first_name = snapshot
+    return resolve_author_display_name(username, first_name, chunk.author_user_id)
+
+
+def render_source_block(
+    chunk: EventChunk,
+    *,
+    index: int,
+    total: int,
+    store: TelegramBackendStore,
+) -> str:
+    """Render one ``/sources`` block with an adapter-resolved author (D-086).
+
+    Layout: the unchanged date/index header, a ``— <author>`` attribution
+    line, then the verbatim ``chunk_text``::
+
+        [2026-05-09] (1/3)
+        — @alice
+
+        Walked the dog
+
+    Block layout moved here from the channel-neutral dispatcher so author
+    resolution stays adapter-only (D-081), mirroring how ``/drafts`` blocks are
+    rendered adapter-side. The ``(i/N)`` index is per-last-``/ask`` ephemeral
+    ordering, not a stable identifier; the underlying ``chunk_id`` is not
+    surfaced (D-069).
+    """
+    author = resolve_chunk_author_display(chunk, store)
+    return (
+        f"[{chunk.note_date.isoformat()}] ({index}/{total})\n"
+        f"— {author}\n\n"
+        f"{chunk.chunk_text}"
+    )

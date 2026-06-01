@@ -2653,3 +2653,42 @@ D-078 retired the heuristic plain-text auto-route and explicitly carved out the 
 - Byte-original raw-text capture (persisting the verbatim user input alongside the normalized payload).
 - A clock-seam / injectable-`today` constructor argument on `Dispatcher` — deliberately avoided in favor of the existing `received_at` field.
 - Author-name display, group-use, multi-diary / subject-dimension widening; retrieval / answer-path / schema / migration changes; D-072 rescue-branch work.
+
+## D-086 — Author display-name resolution + `/sources` author rendering (closes the A-44 milestone surface)
+
+### Context
+
+D-081→D-084 built the author-display milestone in order: D-081 pinned the resolution contract (`author_user_id` is the canonical opaque core identifier; a human-readable display name is resolved **only at the Telegram adapter seam** via `username → first_name → opaque short-ID`, host-supplied and non-authoritative; `/sources` (D-036) is the sole sanctioned surface; `/ask`-reply attribution deferred — A-44). D-082/D-083 pinned the snapshot shape and the adapter-owned landing seam; **D-084 made the snapshot land durably** in the Telegram-adapter-owned `author_display_inputs` side table via the co-located `AuthorDisplayInputStore` port. What remained — the single explicitly **Pending** row of the milestone — is the *resolution helper + `/sources` rendering* half of A-44. This is that packet.
+
+The seam problem this packet settles: the `/sources` block was rendered inside the channel-neutral `services/dispatcher.py` (`_render_source_block`), and an `EventChunk` carries only opaque `author_user_id` + `source_message_id` — **not** the `(external_chat_id, external_message_id, edit_seq)` tuple that keys `author_display_inputs`. Since resolution must stay adapter-only (D-081), the display name cannot be composed in the dispatcher, and the keying tuple must be recovered without teaching core types to carry display data.
+
+### Decision
+
+- **Relocate `/sources` block rendering to the Telegram adapter**, mirroring the established `/drafts` pattern (`DispatchResult.drafts: list[SourceMessage]` already returns domain objects that the adapter renders, including author, via `_render_draft_block`). `DispatchResult.source_blocks: list[str]` is replaced by `source_chunks: tuple[EventChunk, ...]`. `_dispatch_sources` returns the cached opaque chunks; the dispatcher keeps owning the channel-neutral header wording (`"Selected chunks for your last /ask (N chunk(s)):"`), so I-1 is preserved. The dispatcher's `_render_source_block` is removed.
+- **Adapter-side resolver** in `adapters/telegram/author_display.py`: a pure `resolve_author_display_name(username, first_name, author_user_id)` implementing the fallback chain — a non-blank `username` → `@<username>`, else a non-blank `first_name` → plain, else the opaque floor `user-<last 8 of author_user_id>`. A value counts as present only when non-`None` and non-blank after `.strip()`.
+- **Opaque-boundary bridge** `resolve_chunk_author_display(chunk, store)`: looks the source message up (`get_source_message(chunk.source_message_id)`) to recover the external tuple, reads the snapshot (`get_author_display_input(...)`), then resolves. A missing source row or missing snapshot (e.g. a chunk that predates D-084 capture) falls through to the short-ID floor — derived from `chunk.author_user_id`, which is always present — so the line is never blank and never raises.
+- **Render format** (confirmed with owner): the author appears on a separate attribution line beneath the byte-unchanged date/index header — `[YYYY-MM-DD] (i/N)\n— <author>\n\n<chunk_text>`. Block-to-block packing is unchanged (`pack_drafts_into_messages`).
+- **Store seam:** a new `get_backend_store()` dependency returns the same per-process singleton typed as the combined `TelegramBackendStore` for the renderer (it needs both `get_source_message` and `get_author_display_input`); the capture path keeps its narrow `AuthorDisplayInputStore` dependency (least privilege).
+
+The core `DomainRepository`, `SourceMessage`, `EventChunk`, `InboundMessage`, and `get_or_create_source_message` are unchanged; no schema / migration / DDL change. Resolved names stay **non-authoritative** presentation; the core still carries authorship only as the opaque `author_user_id` (I-1, I-6). **A-44 is resolved by this packet** (its open condition was resolution + `/sources` rendering); `/ask`-reply (answer-reply) author attribution remains a **separate** deferred placeholder, not a gate on A-44.
+
+### Why
+
+Mirroring the `/drafts` return-domain-objects pattern means the architecture is chosen by precedent, not invented in the diff: display resolution lands adapter-side per D-081 while the channel-neutral dispatcher keeps only the header wording (I-1). Recovering the keying tuple via `get_source_message` (a read, not a signature change) bridges the opaque boundary without teaching core types to carry display data. The short-ID floor guarantees a value for every chunk, including pre-D-084 ones, so the surface degrades gracefully rather than blanking or raising.
+
+### Consequence
+
+- **Changed:** `src/memory_rag/adapters/telegram/author_display.py` — added `resolve_author_display_name`, `resolve_chunk_author_display`, `render_source_block` (+ `_present` helper); imports `EventChunk`.
+- **Changed:** `src/memory_rag/core/routing/models.py` — `DispatchResult.source_blocks: list[str]` → `source_chunks: tuple[EventChunk, ...]`; docstring updated; `EventChunk` added to the `TYPE_CHECKING` import.
+- **Changed:** `src/memory_rag/services/dispatcher.py` — `_render_source_block` removed; `_dispatch_sources` returns `source_chunks`; docstring updated.
+- **Changed:** `src/memory_rag/adapters/telegram/webhook.py` — new `get_backend_store()` dependency; handler injects `backend_store`; the `/sources` branch renders blocks via `render_source_block`; `sources.delivered` log uses the chunk count.
+- **Added:** `tests/test_author_display_resolution.py` (pure resolver fallback ordering, blank/whitespace handling, short-ID; bridge happy-path + missing-source/missing-snapshot/both-null floors; byte-stable block format). **Changed:** `tests/test_telegram_sources.py` (new format assertions + a populated-store three-tier rendering test), `tests/test_dispatcher_sources.py` (`source_blocks` literals → `source_chunks` identity), `tests/test_author_display_boundary.py` (guards: `DispatchResult` carries chunks not rendered authors; the dispatcher exposes no resolver/renderer symbol — resolution stays adapter-only).
+- **Changed:** `docs/RUNBOOK.md` (`/sources` rendering + author-attribution paragraphs), `docs/assumptions.md` + `docs/assumption-audit.md` (A-44 → **resolved by D-086**; `/ask`-reply attribution remains a separate deferred item), `docs/execution-map.md` + `docs/todo.md` (the resolution/rendering row flipped to **Done (D-086)**).
+- A-15 unchanged.
+
+### Out of scope (per packet boundaries)
+
+- Answer-reply (`/ask` reply) author attribution — remains the deferred named placeholder from D-081.
+- Any change to core `DomainRepository`, `SourceMessage`, `EventChunk`, `InboundMessage`, or `get_or_create_source_message`; any schema / migration / DDL change.
+- Group-use, multi-diary, subject-dimension, visibility (A-15), or identity-directory work.
+- Batching the per-chunk snapshot reads; unrelated retrieval / answer-path / deployment work.

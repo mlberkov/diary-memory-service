@@ -148,7 +148,7 @@ def test_sources_without_prior_ask_fails_closed() -> None:
 
     assert result.route is RouteKind.SOURCES
     assert result.reply_text == "No selected chunks available — ask a question with /ask first."
-    assert result.source_blocks is None
+    assert result.source_chunks is None
     assert result.metadata["returned"] == "0"
 
 
@@ -175,11 +175,9 @@ def test_ask_success_then_sources_returns_selected_chunks() -> None:
     assert ask_result.route is RouteKind.ASK
     assert sources_result.route is RouteKind.SOURCES
     assert sources_result.reply_text == "Selected chunks for your last /ask (2 chunk(s)):"
-    assert sources_result.source_blocks is not None
-    assert sources_result.source_blocks == [
-        "[2026-05-09] (1/2)\n\nTried a new book",
-        "[2026-05-09] (2/2)\n\nHad a calm morning",
-    ]
+    # The dispatcher returns the opaque chunks (post-RRF order, identity
+    # preserved); the adapter renders blocks + resolves the author (D-086).
+    assert sources_result.source_chunks == (c1, c2)
     assert sources_result.metadata["returned"] == "2"
 
 
@@ -200,7 +198,7 @@ def test_two_successful_asks_sources_returns_only_latest() -> None:
     dispatcher.dispatch(_ask("dog"))
     sources_result = dispatcher.dispatch(_sources())
 
-    assert sources_result.source_blocks == ["[2026-05-09] (1/1)\n\nWalked the dog"]
+    assert sources_result.source_chunks == t2_chunks
     assert sources_result.metadata["returned"] == "1"
 
 
@@ -222,7 +220,7 @@ def test_empty_retrieval_ask_clears_prior_cache() -> None:
 
     expected = "No selected chunks available — ask a question with /ask first."
     assert sources_result.reply_text == expected
-    assert sources_result.source_blocks is None
+    assert sources_result.source_chunks is None
 
 
 # ---- empty-query /ask clears the cache --------------------------------------
@@ -268,7 +266,7 @@ def test_provider_unavailable_ask_overwrites_cache_with_retrieved_chunks() -> No
 
     # PROVIDER_UNAVAILABLE retrieval still surfaced chunks, so /sources
     # returns the second turn's chunks (cache lifecycle: update on every /ask).
-    assert sources_result.source_blocks == ["[2026-05-09] (1/1)\n\nWalked the dog"]
+    assert sources_result.source_chunks == t2_chunks
 
 
 def test_parse_failure_ask_overwrites_cache_with_retrieved_chunks() -> None:
@@ -289,7 +287,7 @@ def test_parse_failure_ask_overwrites_cache_with_retrieved_chunks() -> None:
     dispatcher.dispatch(_ask("dog"))
     sources_result = dispatcher.dispatch(_sources())
 
-    assert sources_result.source_blocks == ["[2026-05-09] (1/1)\n\nWalked the dog"]
+    assert sources_result.source_chunks == t2_chunks
 
 
 # ---- two-family isolation ---------------------------------------------------
@@ -311,8 +309,8 @@ def test_two_family_caches_are_independent() -> None:
     a_sources = dispatcher.dispatch(_sources(chat_id="fam-A"))
     b_sources = dispatcher.dispatch(_sources(chat_id="fam-B"))
 
-    assert a_sources.source_blocks == ["[2026-05-09] (1/1)\n\nFamily A note"]
-    assert b_sources.source_blocks == ["[2026-05-09] (1/1)\n\nFamily B note"]
+    assert a_sources.source_chunks == a_chunks
+    assert b_sources.source_chunks == b_chunks
 
 
 # ---- /sources is read-only --------------------------------------------------
@@ -326,5 +324,5 @@ def test_repeated_sources_does_not_clear_cache() -> None:
     first = dispatcher.dispatch(_sources())
     second = dispatcher.dispatch(_sources())
 
-    assert first.source_blocks == second.source_blocks
-    assert second.source_blocks == ["[2026-05-09] (1/1)\n\nTried a new book"]
+    assert first.source_chunks == second.source_chunks
+    assert second.source_chunks == (c1,)
