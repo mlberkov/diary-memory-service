@@ -108,11 +108,11 @@ def _chunk(
 def test_round_trip_source_message(store: PostgresDomainStore) -> None:
     src = _source()
     store.save_source_message(src)
-    assert store.get_source_message("s1") == src
+    assert store.get_source_message("s1", community_id="fam-A") == src
 
 
 def test_get_source_message_missing_returns_none(store: PostgresDomainStore) -> None:
-    assert store.get_source_message("nope") is None
+    assert store.get_source_message("nope", community_id="fam-A") is None
 
 
 def test_restart_survival() -> None:
@@ -132,7 +132,7 @@ def test_restart_survival() -> None:
 
     second = PostgresDomainStore(PG_DSN)
     try:
-        fetched = second.get_source_message("s1")
+        fetched = second.get_source_message("s1", community_id="fam-A")
         assert fetched is not None
         assert fetched.source_message_id == "s1"
 
@@ -152,7 +152,7 @@ def test_get_or_create_source_message_returns_false_on_first_insert(
 
     assert replayed is False
     assert persisted == src
-    assert store.get_source_message("s1") == src
+    assert store.get_source_message("s1", community_id="fam-A") == src
 
 
 def test_get_or_create_source_message_returns_true_on_replay(
@@ -180,8 +180,8 @@ def test_get_or_create_source_message_distinguishes_edit_seq(
 
     assert replayed_a is False
     assert replayed_b is False
-    assert store.get_source_message("s1") is not None
-    assert store.get_source_message("s2") is not None
+    assert store.get_source_message("s1", community_id="fam-A") is not None
+    assert store.get_source_message("s2", community_id="fam-A") is not None
 
 
 def test_save_source_message_raises_on_duplicate_triple(store: PostgresDomainStore) -> None:
@@ -239,7 +239,7 @@ def test_save_source_message_accepts_draft_route(store: PostgresDomainStore) -> 
 
     store.save_source_message(draft)
 
-    fetched = store.get_source_message("d1")
+    fetched = store.get_source_message("d1", community_id="fam-A")
     assert fetched is not None
     assert fetched.detected_route is RouteKind.DRAFT
 

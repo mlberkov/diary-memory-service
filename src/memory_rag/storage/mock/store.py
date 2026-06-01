@@ -107,8 +107,15 @@ class MockDomainStore:
         for chunk in chunks:
             self._chunks[chunk.chunk_id] = chunk
 
-    def get_source_message(self, source_message_id: str) -> SourceMessage | None:
-        return self._sources.get(source_message_id)
+    def get_source_message(
+        self, source_message_id: str, *, community_id: str
+    ) -> SourceMessage | None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        source = self._sources.get(source_message_id)
+        if source is None or source.community_id != community_id:
+            return None
+        return source
 
     def list_source_messages(
         self, community_id: str, *, limit: int | None = None

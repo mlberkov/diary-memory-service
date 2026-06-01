@@ -2764,3 +2764,34 @@ Closing these reads while they are still callerless is the cheapest possible poi
 - The consolidated isolation sweep + RUNBOOK read-access note + DoD evidence — Packet 8.1.3.
 - Any `answer_traces` `community_id` column / schema / DDL / migration.
 - Visibility model (Slice 8.2 / A-15); export/delete/audit/retention (Slice 8.3); A-14 community assignment; D-026–D-042 renames.
+
+## D-089 — Read-access enforcement, Packet 8.1.2: scope `get_source_message` + thread requester-scoped `community_id` through `/sources` author resolution
+
+### Context
+
+D-088 (Packet 8.1.1) closed the four unused by-id/trace reads. The **only remaining live read seam** in Slice 8.1 was `get_source_message`: the `/sources` command renders each cached chunk into a block whose author is resolved by `adapters/telegram/author_display.resolve_chunk_author_display` → `store.get_source_message(chunk.source_message_id)`. That read took no `community_id` and applied no community filter, so it could fetch any community's source row by id. This packet closes it on the live path, the last step before the 8.1.3 closure sweep.
+
+### Decision
+
+- **`get_source_message` is now community-scoped** across the `DomainRepository` Protocol and all three backends (mock / sqlite / postgres) with parity: a mandatory **keyword-only** `community_id` (same rationale as D-088 — prevent a silent `str`/`str` positional swap), a fail-closed null/empty guard (`raise ValueError("community_id is required (Runtime invariant R-3)")`), and an **own-column filter** on `source_messages.community_id` (`WHERE source_message_id = … AND community_id = …`; the mock compares the stored row). The `source_messages` table already carries `community_id` — no schema change, the exact analog of D-088's `get_event_chunk`.
+- **The live `/sources` path threads the requester-scoped `community_id`.** The webhook resolves the requester's community at the adapter edge from the inbound chat via the current identity mapping (A-14) into a local `community_id`, then passes it through `render_source_block(..., community_id=…)` → `resolve_chunk_author_display(..., community_id=…)` → `get_source_message(..., community_id=…)`. Storage and helper seams stay on the channel-neutral `community_id` vocabulary — the Telegram `external_chat_id` identifier is converted at the edge and does not leak into the helper signatures (D-026 / D-041). Threading the requester id (rather than trusting `chunk.community_id`) makes the author lookup actively requester-scoped: defense in depth over the already-community-keyed cache.
+- **`_latest_sources` and the dispatcher are unchanged and relied upon as already-community-keyed.** This packet scopes `get_source_message` and threads the requester-scoped `community_id` through `/sources` author resolution; it does **not** redesign the dispatcher/cache layer. `_latest_sources` is keyed by `external_chat_id` (D-036), `_update_latest_sources` / `_dispatch_sources` are untouched, and the existing `test_two_family_caches_are_independent` already pins that cache isolation.
+- **Fail-closed by fall-through, never a raise.** A source owned by another community reads as `None`, and `resolve_chunk_author_display` already falls through a missing source to the opaque short-ID author floor (`user-<last8>`). So a (today impossible) cross-community chunk resolves to the floor rather than leaking another community's author — no new branch, no raise, rendered-block format byte-unchanged.
+
+### Why
+
+Closing the read while threading the requester community gives the "access behavior is explicit" DoD line a structural guarantee: `/sources` author resolution cannot cross a community boundary even if the cache invariant were ever violated, because the storage read itself now filters by the requester's community. Keeping the read on `community_id` vocabulary (converting `external_chat_id` at the edge) preserves the D-026 adapter seam — the storage layer never learns a Telegram identifier. In production `community_id == external_chat_id` (A-14 identity) and retrieval already scopes chunks to the requester (R-3 / R-8), so the correct-community author resolves exactly as before; the change is invisible except on a cross-community attempt, which now fails closed. I-7 / R-3 / R-8 are unaffected and not restated.
+
+### Consequence
+
+- **Changed (`src/`):** `storage/repository.py`, `storage/mock/store.py`, `storage/sqlite/store.py`, `storage/postgres/store.py` — `get_source_message` gains the keyword-only `community_id`, the guard, and the own-column filter. `adapters/telegram/author_display.py` — `resolve_chunk_author_display` and `render_source_block` gain a keyword-only `community_id` and forward it. `adapters/telegram/webhook.py` — the SOURCES branch resolves a requester-scoped `community_id` local and passes it into `render_source_block`.
+- **Changed (`tests/`):** all `get_source_message` call sites pass `community_id=` (`test_sqlite_store.py`, `test_postgres_store.py`). New `tests/test_storage_source_messages.py` — one parametrized `scoped_store` fixture (mock / sqlite / PG-gated postgres) with guard + cross-community isolation + missing-id tests. `tests/test_author_display_resolution.py` — `_FakeStore.get_source_message` is now community-aware (mirrors the real own-column filter), all call sites thread `community_id="42"`, and a new seam-focused `test_bridge_floor_when_community_mismatch` proves a mismatched requester-scoped `community_id` falls to the opaque floor and reads no snapshot (controlled-input fake, not an impossible end-to-end path). `tests/test_telegram_sources.py` is unchanged and stays green — the threaded id resolves authors end-to-end (chat / chunk / source all `"42"`).
+- **No schema / DDL / migration change.** `_latest_sources` / dispatcher untouched. `make check` green (635 passed, 65 PG-gated skipped, mypy clean, ruff clean).
+- `docs/INVARIANTS.md` / `docs/RUNTIME-INVARIANTS.md` / `docs/assumptions.md` / `docs/assumption-audit.md` deliberately **not** touched — I-7 / R-3 / R-8 stay accurate; A-14 / A-15 stay open. The keyword-only enforcement, the requester-scoped threading, and the fail-closed fall-through are packet-level contract decisions recorded here. `[[feedback_full_gate_and_doc_truthfulness]]`, `[[feedback_decision_log_citation]]`, `[[feedback_sibling_wording_guard_tests]]`.
+
+### Out of scope (per packet boundaries)
+
+- The consolidated cross-community isolation sweep + `docs/RUNBOOK.md` read-access operator note + Phase-8 DoD evidence — Packet 8.1.3.
+- Any `/ask` retrieval-behavior change beyond `/sources` scoping; redesign of the dispatcher / `_latest_sources` cache.
+- Schema / DDL / migration (no new columns); `answer_traces` `community_id` column.
+- Visibility model (Slice 8.2 / A-15); export/delete/audit/retention (Slice 8.3); A-14 community assignment / per-note overrides; D-026–D-042 renames.

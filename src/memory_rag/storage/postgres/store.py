@@ -226,15 +226,19 @@ class PostgresDomainStore:
             )
             conn.commit()
 
-    def get_source_message(self, source_message_id: str) -> SourceMessage | None:
+    def get_source_message(
+        self, source_message_id: str, *, community_id: str
+    ) -> SourceMessage | None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT source_message_id, community_id, author_user_id, "
                 "       external_chat_id, external_user_id, external_message_id, "
                 "       edit_seq, raw_text, detected_route, created_at "
                 "  FROM source_messages "
-                " WHERE source_message_id = %s",
-                (source_message_id,),
+                " WHERE source_message_id = %s AND community_id = %s",
+                (source_message_id, community_id),
             )
             row = cur.fetchone()
         if row is None:

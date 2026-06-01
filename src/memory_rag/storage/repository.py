@@ -53,7 +53,20 @@ class DomainRepository(Protocol):
 
     def save_event_chunks(self, chunks: list[EventChunk]) -> None: ...
 
-    def get_source_message(self, source_message_id: str) -> SourceMessage | None: ...
+    def get_source_message(
+        self, source_message_id: str, *, community_id: str
+    ) -> SourceMessage | None:
+        """Fetch a single source message by id within a community, or ``None``.
+
+        Community scoping is mandatory and fail-closed (I-7, R-3;
+        Slice 8.1.2): a null/empty ``community_id`` raises; a source owned
+        by a different community reads as ``None`` (own-column filter).
+        ``community_id`` is keyword-only to prevent a silent positional
+        swap between two ``str`` identifiers (D-088, D-089). The sole live
+        caller is the ``/sources`` author-resolution bridge
+        (`adapters/telegram/author_display.resolve_chunk_author_display`),
+        which passes the requester-scoped community.
+        """
 
     def list_source_messages(
         self, community_id: str, *, limit: int | None = None

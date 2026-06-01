@@ -128,7 +128,9 @@ def resolve_author_display_name(
     return f"user-{author_user_id[-8:]}"
 
 
-def resolve_chunk_author_display(chunk: EventChunk, store: TelegramBackendStore) -> str:
+def resolve_chunk_author_display(
+    chunk: EventChunk, store: TelegramBackendStore, *, community_id: str
+) -> str:
     """Resolve a chunk's author display name from the durable snapshot (D-086).
 
     Bridges the opaque core boundary: ``EventChunk`` carries only
@@ -140,10 +142,16 @@ def resolve_chunk_author_display(chunk: EventChunk, store: TelegramBackendStore)
     :func:`resolve_author_display_name`. A missing source row or missing
     snapshot falls through to the opaque short-ID floor — never blank, never a
     raise.
+
+    ``community_id`` is the requester-scoped community of the ``/sources`` caller
+    (resolved at the adapter edge from the inbound chat via the current identity
+    mapping). The source lookup is community-scoped (Slice 8.1.2 / D-089): a
+    source owned by another community reads as ``None`` and so resolves to the
+    opaque floor — the read can never cross a community boundary (I-7, R-3).
     """
     username: str | None = None
     first_name: str | None = None
-    source = store.get_source_message(chunk.source_message_id)
+    source = store.get_source_message(chunk.source_message_id, community_id=community_id)
     if source is not None:
         snapshot = store.get_author_display_input(
             external_chat_id=source.external_chat_id,
@@ -161,6 +169,7 @@ def render_source_block(
     index: int,
     total: int,
     store: TelegramBackendStore,
+    community_id: str,
 ) -> str:
     """Render one ``/sources`` block with an adapter-resolved author (D-086).
 
@@ -176,9 +185,10 @@ def render_source_block(
     resolution stays adapter-only (D-081), mirroring how ``/drafts`` blocks are
     rendered adapter-side. The ``(i/N)`` index is per-last-``/ask`` ephemeral
     ordering, not a stable identifier; the underlying ``chunk_id`` is not
-    surfaced (D-069).
+    surfaced (D-069). ``community_id`` is the requester-scoped community,
+    forwarded to the community-scoped author lookup (Slice 8.1.2 / D-089).
     """
-    author = resolve_chunk_author_display(chunk, store)
+    author = resolve_chunk_author_display(chunk, store, community_id=community_id)
     return (
         f"[{chunk.note_date.isoformat()}] ({index}/{total})\n"
         f"— {author}\n\n"
