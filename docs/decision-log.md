@@ -2828,3 +2828,73 @@ The consolidated sweep makes the no-cross-community-leakage property hold by con
 - Any schema / DDL / migration (incl. an `answer_traces.community_id` column).
 - Any `/ask` / `/sources` / retrieval / storage / dispatcher runtime behavior change.
 - D-026–D-042 rename work.
+
+## D-091 — Answer-reply (`/ask` reply) contributor-attribution contract + adapter seam (docs-only; code deferred to the follow-up packet)
+
+### Context
+
+D-081→D-086 built the author-display milestone: D-081 pinned the resolution contract (`author_user_id` is the canonical opaque core identifier; a human-readable display name is resolved **only at the Telegram adapter seam** via `username → first_name → opaque short-ID`, host-supplied and non-authoritative); D-082/D-083/D-084 pinned and landed the durable snapshot in the adapter-owned `author_display_inputs` side table; **D-086 implemented resolution + `/sources` rendering and resolved A-44.** Throughout, "answer-reply (`/ask` reply) attribution" was carried as an explicit **separate deferred placeholder** — named in `docs/execution-map.md` and `docs/todo.md`, never a gate on A-44.
+
+This is the first packet of the `feat/ask-reply-contributor-attribution` milestone, whose intent is to surface **which contributors grounded an `/ask` answer** in the grounded reply itself — framed as *contributor attribution* (the set of contributors whose notes grounded the answer), **not** single-author attribution for the whole answer. The supporting infrastructure already exists and is reusable: the adapter-only resolver `resolve_chunk_author_display(chunk, store, *, community_id)` (D-086, community-scoped per D-089), the durable D-084 snapshot, and the answer's grounding-chunk set already exposed as `AnswerResult.context.ordered_chunks` (= `AnswerTrace.context_chunk_ids`, the same chunks `/sources` recalls). What is missing is a **recorded contract**: what the contributor set is, how it is deduplicated and ordered, how it renders, and which seam carries it. D-081 set the precedent of pinning such a display contract in docs before code (and D-078→D-079 set the precedent of a contract packet preceding the code packet); this docs-only packet does the same. **No `src/` / tests / schema / migration / runtime change** — the contract is recorded here and enforced in code by the follow-up packet.
+
+### Decision
+
+- **Contributor set.** The contributors surfaced for an `/ask` reply are the **distinct authors of the answer's grounding chunks** — `AnswerResult.context.ordered_chunks` (= `AnswerTrace.context_chunk_ids`). This is "the contributors whose notes grounded this answer", explicitly **not** a single author attributed to the whole answer and **not** per-claim / per-sentence attribution.
+- **Deduplication.** Distinct on the canonical opaque **`author_user_id`** (deduped *before* display resolution), preserving authorship truth (I-6). Two distinct `author_user_id`s that resolve to the same display string (e.g. a shared `first_name`, or two opaque floors) intentionally appear as two separate list entries — the code packet must **not** collapse them on the display string.
+- **Order.** First appearance in the grounding-chunk sequence (the `ordered_chunks` / RRF order). No re-sorting (no alphabetical).
+- **Render shape.** A single **labeled footer line** beneath `answer_text`, separated by a blank line: `Contributors: <name1>, <name2>, …` (comma-space separated, in the deduped first-appearance order). A single contributor renders as `Contributors: @alice`. Each name is produced by the existing adapter-only `resolve_author_display_name` / `resolve_chunk_author_display` fallback chain (`@username → first_name → user-<last8>` floor), reusing one representative grounding chunk per distinct `author_user_id`.
+- **Render condition.** The footer is rendered **iff the answer's grounding-chunk set is non-empty** — i.e. on grounded replies (including WEAK_EVIDENCE / AMBIGUOUS, which still carry grounding chunks). Contours with no grounding chunks (NO_EVIDENCE / empty-query / PROVIDER_UNAVAILABLE) carry **no** contributor line.
+- **Seam.** The ASK `DispatchResult` will carry the opaque grounding chunks (mirroring the existing `DispatchResult.source_chunks` introduced by D-086 for `/sources`); the **Telegram adapter** resolves the distinct contributors and appends the footer to the reply. The channel-neutral dispatcher never composes a display name (it owns only `answer_text` and the opaque chunks), keeping resolution adapter-only (D-081 / D-086, I-1, I-6). Resolution uses the **requester-scoped** `community_id` already threaded for `/sources` author resolution (D-089), so the read can never cross a community boundary (I-7, R-3).
+
+The core `DomainRepository`, `SourceMessage`, `EventChunk`, `InboundMessage`, `QueryService`, and `AnswerResult` are unchanged by the contract; no schema / migration / DDL. Resolved names stay **non-authoritative** presentation; the core still carries authorship only as opaque `author_user_id` (I-1, I-6). A-44 stays **resolved by D-086** — this contract does not reopen it; it pins the separately-deferred `/ask`-reply surface it named.
+
+### Why
+
+Pinning the contract first keeps the milestone's opening move a single reviewable decision (mirroring D-081 for `/sources` and the D-078→D-079 contract-then-code split), and locks the choices a code packet would otherwise settle silently: the contributor-set source of truth, dedup-by-`author_user_id` (authorship truth over display tidiness, I-6), first-appearance order, the labeled-footer shape, and the grounded-only render condition. Reusing the existing `source_chunks` `DispatchResult` seam and the D-086 resolver means the code packet adds no new core surface and no new retrieval — it threads the already-available grounding chunks to the adapter and renders. Framing the set as *contributors* (plural, the grounding set) rather than one author keeps the surface honest about shared-diary authorship (I-6) and avoids implying a single author for a synthesized answer.
+
+### Consequence
+
+- **Changed (`docs/`):** `docs/decision-log.md` (this D-091 entry); `docs/execution-map.md` (the deferred line-228 row in the "Author display-name contract (D-081)" block decomposed into a docs-only contract row → **Done (D-091)** and a Pending code row); `docs/todo.md` (the placeholder turned into an active milestone section with an ordered Packet 1 / Packet 2 ladder); `docs/assumptions.md` + `docs/assumption-audit.md` (A-44 forward cross-reference noting D-091 pins the `/ask`-reply contributor-attribution contract — **A-44 stays resolved/closed, not reopened; no new assumption number**); `docs/RUNBOOK.md` (forward note after the `/sources` author-attribution paragraph); `docs/INVARIANTS.md` (I-6 cross-reference clause — no new invariant, no semantic change).
+- **No `src/` / `tests/` / schema / DDL / migration / config change.** Live `/ask` and `/sources` behavior is byte-unchanged; the contract is recorded but **not surfaced** until the follow-up code packet.
+- I-1 / I-6 / I-7 / R-3 unchanged; A-14 / A-15 stay open and out of scope. The contributor-set / dedup / order / render-shape / render-condition / seam decisions are packet-level contract decisions recorded here. `[[feedback_decision_log_citation]]`, `[[feedback_cause_neutral_user_wording]]`, `[[feedback_full_gate_and_doc_truthfulness]]`.
+
+### Out of scope (per packet boundaries)
+
+- Any `src/` / tests / schema / migration change, and any change to live `/ask` or `/sources` runtime behavior — the rendering lands in the follow-up code packet.
+- Per-claim / per-sentence **citation** attribution and rendering the LLM-emitted `StructuredAnswer.cited_chunk_ids` — the word "citation" stays reserved (D-036); this is contributor attribution over the grounding set, not citation.
+- Visibility / per-note scopes — A-15 / Slice 8.2.
+- Multi-diary / community-bootstrap reassignment — A-14.
+- Any change to the existing `author_display` resolver/seam shape or to `/sources` rendering; durability / expiry of the latest-sources cache; group-use / identity-directory work.
+
+## D-092 — Answer-reply (`/ask` reply) contributor-attribution rendering (code packet for D-091)
+
+### Context
+
+D-091 pinned, docs-only, the `/ask`-reply contributor-attribution contract and explicitly deferred behavior to a named follow-up code packet (Packet 2 of the `feat/ask-reply-contributor-attribution` milestone). Until now the `/ask` reply was `answer_text` alone (D-069); the contract was recorded but not surfaced. This packet implements the rendering within D-091's exact boundaries — no contract is reopened. The reusable infrastructure D-091 named is unchanged: the adapter-only resolver `resolve_chunk_author_display(chunk, store, *, community_id)` (D-086, requester-`community_id`-scoped per D-089), the durable D-084 snapshot, and the grounding-chunk set already exposed as `AnswerResult.context.ordered_chunks`.
+
+### Decision
+
+- **Seam (core).** A new opaque field `DispatchResult.grounding_chunks: tuple[EventChunk, ...] | None` carries the answer's grounding chunks to the adapter. It is a **separate field parallel to `source_chunks`**, not a reuse — the webhook keys its `/sources` render branch on `source_chunks`, so a shared field would misroute the `/ask` reply into `/sources` rendering. Like `source_chunks` it carries opaque chunks, never a pre-rendered display name.
+- **Render condition (encoded in the dispatcher).** The ASK handler sets `grounding_chunks` to `answer.context.ordered_chunks` **iff** that set is non-empty (the same guard as `_update_latest_sources`), else `None`. This makes the contract's grounded-only render condition a single source-side guard: grounded replies — including `WEAK_EVIDENCE` / `AMBIGUOUS`, which carry grounding chunks — surface the footer; `NO_EVIDENCE` / empty-query / `PROVIDER_UNAVAILABLE` contours carry `None` and are byte-unchanged.
+- **Rendering (adapter-only).** A new `render_contributors_footer(chunks, store, *, community_id)` in `adapters/telegram/author_display.py` deduplicates on the opaque `author_user_id` **before** display resolution, preserves first-appearance order over `chunks`, resolves one representative chunk per distinct `author_user_id` through the existing `resolve_chunk_author_display` fallback chain (`@username → first_name → opaque short-ID`), and returns the single labeled line `Contributors: <name1>, <name2>, …`. Two distinct `author_user_id`s that resolve to the same display string stay two separate entries (dedup on authorship truth, never the display string — I-6). The webhook appends `\n\n<footer>` beneath `reply_text` when `grounding_chunks` is non-empty, using the requester-scoped `community_id` (`inbound.external_chat_id`) already used for `/sources` author resolution (D-089), so the read can never cross a community boundary (I-7, R-3).
+- **Channel-neutrality.** The dispatcher composes no display name; it owns only `answer_text` and the opaque chunks. Resolution stays adapter-only (D-081 / D-086, I-1).
+
+The core `DomainRepository`, `SourceMessage`, `EventChunk`, `InboundMessage`, `QueryService`, and `AnswerResult` are unchanged; no schema / DDL / migration. `/sources` rendering is unchanged. Resolved names stay **non-authoritative** presentation; the core still carries authorship only as the opaque `author_user_id` (I-1, I-6).
+
+### Why
+
+This is the minimal enforcement of D-091: one new opaque field on an existing channel-neutral type plus an adapter-side render helper, reusing the D-086 resolver and D-089 scoping with no new core surface and no new retrieval. A separate `grounding_chunks` field (rather than overloading `source_chunks`) keeps the `/ask` and `/sources` render paths disjoint and each branch's intent obvious. Putting the non-empty guard in the dispatcher makes the grounded-only render condition a single, testable decision point rather than a check duplicated at the render edge.
+
+### Consequence
+
+- **Changed (`src/`):** `core/routing/models.py` (the `grounding_chunks` field + docstring); `services/dispatcher.py` (ASK handler threads the chunks); `adapters/telegram/author_display.py` (`render_contributors_footer`); `adapters/telegram/webhook.py` (ASK render branch appends the footer).
+- **Changed (`tests/`):** `tests/test_author_display_resolution.py` (footer dedup / order / same-display-string / floor / community-mismatch units); `tests/test_telegram_ask_contributors.py` (new — webhook render path: grounded footer, dedup + order, `WEAK_EVIDENCE` keeps footer beneath trailer, `NO_EVIDENCE` no footer, cross-community floor); `tests/test_dispatcher_retrieval_fallback.py` (dispatcher seam threads / withholds `grounding_chunks`).
+- **Changed (`docs/`):** this D-092 entry; `docs/RUNBOOK.md`, `docs/execution-map.md`, `docs/todo.md` flipped from "by contract / not surfaced" to "surfaced (D-092)".
+- **No schema / DDL / migration / config change.** `/sources` behavior byte-unchanged. I-1 / I-6 / I-7 / R-3 unchanged; A-14 / A-15 stay open and out of scope. A-44 stays resolved (D-086). `[[feedback_decision_log_citation]]`, `[[feedback_sibling_wording_guard_tests]]`, `[[feedback_full_gate_and_doc_truthfulness]]`.
+
+### Out of scope (per packet boundaries)
+
+- A-15 visibility / per-note scopes (Slice 8.2).
+- A-14 multi-diary / community-bootstrap reassignment.
+- Per-claim / per-sentence **citation** attribution and rendering `StructuredAnswer.cited_chunk_ids` — "citation" stays reserved (D-036).
+- Any change to the `author_display` resolver/seam shape beyond reusing it here, or to `/sources` rendering; latest-sources cache durability / expiry.
