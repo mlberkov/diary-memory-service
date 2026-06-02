@@ -105,7 +105,7 @@ The safety floor for ambiguous input is **preserve as draft**, not **clarify and
 - `IndexingDeadLetter`
 - `FeedbackEvent`
 
-> `Family` and `Child` are the first-use-case entity names for the canonical core concepts `community` and `subject` (D-041; see `docs/GLOSSARY.md`). The realized scope identifier in code and schema is `community_id`; child scoping is not yet in code and, when the D-040 child-filter packet introduces it, is born directly as `subject_id`.
+> `Family` and `Child` are the first-use-case entity names for the canonical core concepts `community` and `subject` (D-041; see `docs/GLOSSARY.md`). The realized scope identifier in code and schema is `community_id`; child scoping is not yet in code and, when the D-040 child-filter packet introduces it, is born directly as `subject_id`. Community bootstrap is **implicit-on-first-message** and the chat→community mapping is the tenant/auth adapter axis (default Telegram: 1:1 from `external_chat_id`), ratified by D-093 (see `docs/GROUPED-MULTI-DIARY-ROADMAP.md`); membership is inherited from host-chat membership and many communities may coexist on one instance. Subject/child bootstrap is carved out to A-45 (the D-040 lineage). No `Family` / `Child` / `Community` / `Participant` table exists yet.
 
 ### SourceMessage
 Fields:

@@ -2898,3 +2898,45 @@ This is the minimal enforcement of D-091: one new opaque field on an existing ch
 - A-14 multi-diary / community-bootstrap reassignment.
 - Per-claim / per-sentence **citation** attribution and rendering `StructuredAnswer.cited_chunk_ids` — "citation" stays reserved (D-036).
 - Any change to the `author_display` resolver/seam shape beyond reusing it here, or to `/sources` rendering; latest-sources cache durability / expiry.
+
+## D-093 — A-14 resolution: community bootstrap, chat→community mapping, and grouped-diary membership (docs-first)
+
+### Context
+
+The owner prioritized advancing **grouped-diary support + multi-diary on one instance**. The data plane for this already exists and is hardened: every durable record is `community_id`-keyed (`0001.baseline-schema.sql`), reads are community-scoped and fail-closed (Slice 8.1 / D-088, D-089, D-090), and authorship is preserved per opaque `author_user_id` (I-6). The control plane is unratified: `community_id` is derived per-chat as `external_chat_id` (`services/domain_service.py` `_community_id_for`, commented "Per-chat surrogate until explicit community bootstrap exists (A-14)"; mirrored inline in `adapters/telegram/webhook.py` on the `/ask` and `/sources` author-resolution paths). No `Community` / `Participant` / `Subject` entity, registry, membership table, or `/setup` command exists. A Telegram **group** chat already produces one shared `community_id` with distinct per-sender `author_user_id`, and distinct chats already produce isolated communities on one instance — grouped and multi-diary "work mechanically" but were never pinned as a contract.
+
+This is the docs-first opener of the grouped/multi-diary milestone (Packet 1 / G-0). It resolves the **community-bootstrap half of A-14** and sequences the follow-on work in `docs/GROUPED-MULTI-DIARY-ROADMAP.md`. It changes no `src/`, schema, or runtime behavior — the live mapping is **ratified, not modified**. It mirrors the D-087 / D-044 / D-060 precedent: this entry carries the stable contract; the roadmap doc carries the refinable sequence.
+
+### Decision
+
+- **Bootstrap mode (ratified).** Community bootstrap is **implicit-on-first-message**: a new inbound chat initializes its community scope on the first inbound message. This names existing behavior — the first message already persists a `SourceMessage` and derives its `community_id` — so it adds no mechanism and is consistent with the no-silent-loss floor (I-14 / R-13). An explicit `/setup` command is **deferred, not rejected**: an optional later refinement for naming / configuration / admin UX. No follow-on packet may depend on `/setup` existing first.
+
+- **Chat→community mapping (ratified, adapter-axis).** `community_id` is derived from host-chat identity by the **tenant/auth-mapping adapter axis** (D-026 axis 5: "The mapping function is adapter; the scoped query is core" — `docs/ARCHITECTURE.md`). The default Telegram mapping is one community per chat, derived 1:1 from `external_chat_id`. This is the sanctioned mapping, **no longer a "surrogate."** The core continues to receive an **opaque** `community_id`; the mapping yields an opaque scope id that the default Telegram resolver happens to derive from `external_chat_id` — it is never described as "the Telegram chat id" past the edge (the D-089 edge-conversion framing).
+  - **As-built note (recorded, not fixed here).** The mapping is currently expressed at three sites — the core-side `_community_id_for` (`services/domain_service.py`) and two inline copies on the `/ask` and `/sources` paths (`adapters/telegram/webhook.py`). This entry ratifies the *mapping rule*; it does **not** claim a single resolver seam already exists. Consolidating the three sites into one adapter-owned resolver (so the core receives the already-resolved opaque `community_id`) is sequenced as the first **code** packet (G-1) in the roadmap.
+
+- **Membership (inherited, no core ACL).** Community membership is **inherited from host-chat membership**: anyone the host (Telegram) admits to the chat is a participant for community-level read/query access and may query the whole community corpus. Read access is community scoping (Slice 8.1, already enforced); authorship stays preserved per opaque `author_user_id` (I-6). This milestone introduces **no core participant / membership / ACL table**. A core participant registry is deferred until access must diverge from host-chat membership (e.g. a participant keeping notes others in the chat cannot query) — that divergence is the province of the visibility model (A-15 / Slice 8.2), sequenced after the first grouped slice.
+
+- **Multi-diary on one instance (ratified).** Distinct chats mapping to distinct communities on a single instance is a core + adapter capability **today** — every record is `community_id`-keyed and every read is scoped, so N communities coexist on one instance without leakage (I-7 / R-3 / R-8; Slice 8.1). DEPLOY-1's "single-community / single-tenant default for the first pilot" (A-42) is a **deployment-posture default, non-binding on the core**; `docs/ARCHITECTURE.md` already forbids the core from assuming single-tenant.
+
+- **Subject/child bootstrap (split out, deferred).** A-14's headline conflated two questions: community bootstrap (resolved here) and subject/child bootstrap. The latter is **carved out**: `subject_id` is born in the D-040 child-filter lineage (`docs/GLOSSARY.md`, TechSpec §5), not in this milestone. A-14 is **closed → D-093** for the community half; a new **A-45 (subject/child bootstrap)** is opened, pointing one-directionally at the D-040 lineage.
+
+- **Visibility (A-15) relationship.** A-15 stays **open** and is **sequenced after** the first grouped pilot. Community-level scoping (every chat member sees the community corpus) is the access model for the first grouped slice — mirroring the Slice 8.1-without-A-15 / Slice 8.2-blocked-on-A-15 split. This entry decides only A-15's *sequencing*; it does not enumerate `visibility_scope` values.
+
+### Why
+
+The grouped/multi-diary mechanics already exist and are tested; what blocked the path was an unratified contract, not missing code. Ratifying implicit-on-first-message and the 1:1 chat→community mapping names what the system already does, so no behavior moves and the smallest-viable-slice rule holds. Inheriting host-chat membership matches how a shared family chat already behaves and keeps the core channel-neutral and opaque-id-based (no Telegram membership type enters the core, I-1); a core ACL would be speculative architecture the product does not yet need. Splitting A-14 lets the unblocked community half close now while the subject/child half stays with its natural D-040 home, rather than blocking one on the other. Deferring A-15 keeps the first grouped slice at community granularity — the same granularity Slice 8.1 already enforces — so the milestone does not widen into the visibility model.
+
+### Consequence
+
+- **Docs (this packet):** this D-093 entry; new `docs/GROUPED-MULTI-DIARY-ROADMAP.md` (refinable G-0..G-4 packet ladder); `docs/assumptions.md` + `docs/assumption-audit.md` (close A-14 → D-093, open A-45); `docs/execution-map.md` (milestone row + note block); `docs/todo.md` (milestone section, G-0 done). Cross-reference-only touches to `docs/INVARIANTS.md` (I-6 / I-7), `docs/RUNTIME-INVARIANTS.md` (R-3 / R-8 / R-14), `docs/RUNBOOK.md`, `docs/product/TechSpec.md` §5, `docs/ARCHITECTURE.md` — no enforcement-wording change, no new I-/R- number.
+- **No `src/` / `tests/` / schema / DDL / migration / config change.** The live `community_id = external_chat_id` mapping is unchanged. I-1 / I-6 / I-7 / R-3 / R-8 / R-14 unchanged. A-15 stays open and sequenced. `[[feedback_decision_log_citation]]`, `[[feedback_full_gate_and_doc_truthfulness]]`.
+- **Sequenced code work (not in this packet):** G-1 consolidate the chat→community mapping into one adapter-owned resolver (the milestone's only real `src/` packet); G-2 grouped + multi-diary regression tests; G-3 operator/product docs. A-45 subject bootstrap and A-15 / Slice 8.2 visibility remain future.
+
+### Out of scope (per packet boundaries)
+
+- Any `src/`, schema, migration, or runtime-behavior change — including the G-1 resolver consolidation.
+- A core `Community` / `Participant` / `Subject` entity, membership/ACL table, or registry.
+- An explicit `/setup` command (deferred-optional, not built, not depended on).
+- Enumerating A-15 `visibility_scope` values (only its sequencing is decided).
+- Subject/child bootstrap mechanics (carved out to A-45 / the D-040 lineage).
+- DEPLOY-2 managed-cloud multi-tenant deployment shape (own roadmap).
