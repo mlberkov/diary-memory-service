@@ -2965,3 +2965,28 @@ The mapping is an adapter-axis function (D-026 axis 5); resolving it once at the
 - **`tests/`:** `community_id` added to 8 test `InboundMessage` factories/call sites (set equal to the existing `external_chat_id` so assertions hold); `test_query_service.py::test_missing_community_id_raises` now drives `community_id=""` and matches `"community_id"`; new `tests/test_telegram_community_resolver.py` pins the default 1:1 seam.
 - **No schema / DDL / migration / config change.** `SourceMessage.community_id` was already persisted; only how the value is produced upstream changed. I-1 (strengthened) / I-6 / I-7 / R-3 / R-8 / R-14 preserved. Full gate green (ruff + mypy + 672 passed / 65 PG-skipped). `[[feedback_decision_log_citation]]`, `[[feedback_full_gate_and_doc_truthfulness]]`.
 - **Out of scope:** any non-default (non-1:1) mapping implementation; G-2 regression suite; G-3 operator/product docs; G-4 / A-15 visibility; A-45 subject/child bootstrap; `/setup`; core participant/ACL model; schema/migration; renames beyond the seam.
+
+## D-095 — G-2: grouped + multi-diary characterization suite (tests)
+
+### Context
+
+D-094 / G-1 made the chat→community mapping a single adapter-owned seam (`resolve_community_id`) carried on `InboundMessage.community_id`. The grouped + multi-diary milestone (D-093; `docs/GROUPED-MULTI-DIARY-ROADMAP.md`) exits only when that behavior is pinned by a regression suite (G-2) and the operator/product docs are reconciled (G-3). This is G-2, sequenced after G-1 so the suite characterizes one named seam (roadmap §5). It pins *already-true* behavior; it is **not** a behavior change.
+
+### Decision
+
+- **One consolidated characterization file** `tests/test_grouped_multi_diary.py` (mirroring the Slice 8.1.3 precedent of one consolidated `tests/test_read_access_isolation.py`). Every `InboundMessage` is built with `community_id=resolve_community_id(chat)`, so the suite exercises the G-1 seam rather than hard-coding the identity mapping.
+- **Group A — grouped diary (one chat, N senders, full ingest→ask):** one group chat is one `community_id` with distinct per-sender `author_user_id` (extends the single-author `test_domain_service` coverage to the multi-sender case); a grouped `/ask` preserves ≥2 distinct contributors through retrieval into `AnswerResult.context.ordered_chunks` (I-6), driven by full ingest rather than pre-built chunks; the ASK dispatch seam carries multi-author `DispatchResult.grounding_chunks` (D-091).
+- **Group B — multi-diary on one instance (N chats → N communities):** distinct chats are isolated communities and `/ask` never crosses over (composes with `test_query_service::test_cross_chat_isolation` at grouped granularity); a thin seam pin ties the factories to `resolve_community_id` (grouped senders → one community; distinct chats → distinct communities).
+- **Group C — cross-community read isolation at grouped granularity:** a grouped `/ask` cache in one community is invisible to another (composes with `test_read_access_isolation.py` and `test_dispatcher_sources::test_two_family_caches_are_independent`).
+
+### Why
+
+Characterizing the consolidated seam at grouped granularity is the milestone's hardening step: it locks the I-6 / I-7 / R-3 / R-8 behavior so a future reshape of `resolve_community_id` or the scoping path is caught. The suite composes with — rather than re-implements — the existing per-leg, by-id/trace, and cache isolation coverage, keeping the new file focused on the one genuine gap (a group chat with N distinct senders driven through the full ingest→ask flow).
+
+### Consequence
+
+- **`tests/`:** new `tests/test_grouped_multi_diary.py` (6 tests, mock-mode). **No `src/` change** — the suite passes against current production code, validating the "characterization, no behavior change" classification.
+- **Harness boundary:** mock-mode only (`MockEmbeddingClient` / `MockChatClient`; sqlite retrieval raises `NotImplementedError`). The new file provides no PG/sqlite parity for the end-to-end grouped ingest→ask flow; storage-read and per-leg PG parity remain the responsibility of the existing PG-gated suites (`test_read_access_isolation.py`, `test_search_repository_postgres.py`), which stay part of full-gate validation. A module docstring states this boundary and indexes that coverage.
+- **No schema / DDL / migration / config change.** I-1 / I-6 / I-7 / R-3 / R-8 preserved. Full gate green (ruff + mypy + 678 passed / 65 PG-skipped). `[[feedback_decision_log_citation]]`, `[[feedback_full_gate_and_doc_truthfulness]]`.
+- **Milestone status:** G-2 landed; **G-3 (operator/product docs) still pending** — the grouped/multi-diary milestone is **not** closed by this packet (roadmap §6 exit criterion still names G-3).
+- **Out of scope:** G-3 operator/product docs; adapter-side `Contributors:` footer rendering (already pinned in `test_telegram_ask_contributors.py`); G-4 / A-15 visibility; A-45 subject/child bootstrap; `/setup`; any `src/` / schema / migration change.

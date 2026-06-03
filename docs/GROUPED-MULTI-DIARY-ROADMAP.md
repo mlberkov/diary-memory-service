@@ -9,7 +9,7 @@ community-bootstrap / chat→community-mapping / membership surface against
 **D-026 (adapter axes)**, **D-041 (community / subject vocabulary)**, and
 **I-1 / I-6 / I-7 / R-3 / R-8**.
 
-**Status: in progress — Packet G-0 (D-093, docs) + G-1 (D-094, resolver consolidation) landed; G-2..G-3 pending; G-4 deferred.**
+**Status: in progress — Packet G-0 (D-093, docs) + G-1 (D-094, resolver consolidation) + G-2 (D-095, characterization suite) landed; G-3 pending; G-4 deferred.**
 Grouped and multi-diary already work *mechanically* (a Telegram group chat
 yields one `community_id` with distinct per-sender `author_user_id`; distinct
 chats yield isolated communities on one instance; reads are community-scoped and
@@ -64,8 +64,8 @@ code moves.
 | Surface | As-built today | Verdict |
 | --- | --- | --- |
 | Chat→community mapping | **G-1 (D-094): consolidated** into one adapter-owned resolver `adapters/telegram/community.py` `resolve_community_id`; the resolved opaque `community_id` is carried on `InboundMessage.community_id` and the core never re-derives scope from `external_chat_id`. *(As-built before G-1 was broader than the original audit's "three sites": 6 core/services derivations + 2 adapter copies — see D-094.)* | ratified rule (D-093); **consolidated (D-094)** |
-| Group chat | one shared `community_id`, distinct `author_user_id` per sender; authorship preserved (I-6) | works; pin with G-2 regression tests |
-| Multi-diary on one instance | distinct chats → isolated communities; every record `community_id`-keyed, every read scoped (I-7 / R-3 / R-8; Slice 8.1) | works; pin with G-2 regression tests |
+| Group chat | one shared `community_id`, distinct `author_user_id` per sender; authorship preserved (I-6) | works; **pinned (G-2 / D-095)** |
+| Multi-diary on one instance | distinct chats → isolated communities; every record `community_id`-keyed, every read scoped (I-7 / R-3 / R-8; Slice 8.1) | works; **pinned (G-2 / D-095)** |
 | Membership | inherited from host-chat membership; community-level read scoping (Slice 8.1); **no core ACL** | ratified (D-093) |
 | Bootstrap | implicit-on-first-message (first message persists a `SourceMessage` + derives `community_id`); no `/setup` | ratified (D-093) |
 | Community / Participant / Subject entity | **absent** (community is an opaque `community_id` scalar) | intentional — no entity this milestone |
@@ -106,7 +106,7 @@ contract. C = core, A = adapter, Cfg = config (D-026 classification).
 | --- | --- | --- | --- |
 | **G-0 — contract + assumption split + roadmap** | `docs/decision-log.md` (D-093); this roadmap doc (new); `docs/assumptions.md` + `docs/assumption-audit.md` (close A-14 → D-093, open A-45); `docs/execution-map.md`; `docs/todo.md`; cross-ref-only touches to INVARIANTS / RUNTIME-INVARIANTS / RUNBOOK / TechSpec §5 / ARCHITECTURE. Docs-only — no `src/` / `tests/` / schema change. | docs-only | **Landed (D-093).** |
 | **G-1 — consolidate the chat→community resolver** | Replaced the open-coded `external_chat_id → community_id` derivations (6 core/services sites + 2 `webhook.py` copies — broader than the audit's "three") with **one adapter-owned resolver** `resolve_community_id`; the resolved opaque `community_id` crosses the boundary on `InboundMessage.community_id`, and the core never re-derives scope from `external_chat_id`. Behavior-preserving (default mapping stays 1:1). The resolver yields an opaque scope id and never leaks a Telegram type into the core (I-1). The named seam is where a future host plugs a different mapping. | **A** (+ core call sites) | **Landed (D-094).** |
-| **G-2 — grouped + multi-diary regression suite** | Characterization tests pinning already-true behavior: one group chat → one `community_id` + distinct `author_user_id` per sender; N distinct chats → N isolated communities on one instance; cross-community read/prompt isolation re-asserted at the grouped granularity (composing with Slice 8.1's `tests/test_read_access_isolation.py`). No `src/` behavior change. | tests | Pending. |
+| **G-2 — grouped + multi-diary regression suite** | New consolidated `tests/test_grouped_multi_diary.py` (6 tests, mock-mode) pinning already-true behavior through the G-1 `resolve_community_id` seam: one group chat → one `community_id` + distinct `author_user_id` per sender; grouped `/ask` preserves ≥2 contributors into the answer context (I-6) + the ASK `grounding_chunks` seam (D-091); N distinct chats → N isolated communities; cross-community `/sources`-cache isolation re-asserted at grouped granularity (composing with Slice 8.1's `tests/test_read_access_isolation.py` and `tests/test_dispatcher_sources.py`). Mock-mode only; PG/sqlite storage-read parity stays with the existing PG-gated suites. No `src/` behavior change. | tests | **Landed (D-095).** |
 | **G-3 — operator + product docs** | `docs/RUNBOOK.md` how-to for the bootstrap/mapping/membership model and running multi-diary on one instance; reconcile `docs/ARCHITECTURE.md` axis-5 prose and `docs/product/TechSpec.md` §5 with the ratified mapping; mark grouped/multi-diary as supported. | docs-only | Pending. |
 | **G-4 — visibility model (A-15 / Slice 8.2)** *(deferred, not built)* | Enumerate `visibility_scope` values and per-note / per-participant read control **after** the first grouped pilot. Explicitly out of scope of this milestone. | future | Deferred (A-15). |
 
