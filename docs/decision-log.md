@@ -2990,3 +2990,33 @@ Characterizing the consolidated seam at grouped granularity is the milestone's h
 - **No schema / DDL / migration / config change.** I-1 / I-6 / I-7 / R-3 / R-8 preserved. Full gate green (ruff + mypy + 678 passed / 65 PG-skipped). `[[feedback_decision_log_citation]]`, `[[feedback_full_gate_and_doc_truthfulness]]`.
 - **Milestone status:** G-2 landed; **G-3 (operator/product docs) still pending** — the grouped/multi-diary milestone is **not** closed by this packet (roadmap §6 exit criterion still names G-3).
 - **Out of scope:** G-3 operator/product docs; adapter-side `Contributors:` footer rendering (already pinned in `test_telegram_ask_contributors.py`); G-4 / A-15 visibility; A-45 subject/child bootstrap; `/setup`; any `src/` / schema / migration change.
+
+## D-096 — G-3: grouped + multi-diary operator/product docs reconciliation + milestone closure (docs-first)
+
+### Context
+
+D-094 / G-1 made the chat→community mapping a single adapter-owned seam (`resolve_community_id`, carried on `InboundMessage.community_id`) and D-095 / G-2 pinned the grouped + multi-diary behavior with `tests/test_grouped_multi_diary.py`. The grouped/multi-diary milestone (D-093; `docs/GROUPED-MULTI-DIARY-ROADMAP.md` §6) exits only when, **in addition** to G-1 and G-2, the operator/product docs record the bootstrap/mapping/membership model and how to run multi-diary on one instance (G-3). This is G-3, the milestone's final docs-only packet. It changes no `src/`, `tests/`, schema, or runtime behavior — it reconciles the canonical docs with the already-ratified, already-shipped mapping and closes the milestone.
+
+### Decision
+
+- **Operator how-to (RUNBOOK).** A new `docs/RUNBOOK.md` section "Grouped & multi-diary on one instance" — placed beside the existing "Read-access scoping (Slice 8.1 …)" section, which already delegates *assignment* to D-093 and governs only *reads* — documents, operator-facing: implicit-on-first-message bootstrap (no `/setup`); the default 1:1 `external_chat_id → community_id` mapping resolved at the webhook edge by the adapter-owned `resolve_community_id` (D-094), with `external_chat_id` retained only as the transport / R-2 idempotency key; host-chat-inherited membership with authorship preserved per opaque `author_user_id` (I-6); and running N isolated communities on one instance, every read community-scoped and fail-closed (I-7 / R-3 / R-8; Slice 8.1). Per-note visibility is forward-pointed to A-15 / Slice 8.2 (deferred).
+- **Axis-5 reconciliation (ARCHITECTURE).** The Axis-5 prose names the single adapter-owned `resolve_community_id` seam (D-094) as the realization of the mapping; it already framed the mapping as adapter-owned and the core scope as the opaque `community_id` (no "surrogate" framing remained to remove).
+- **Product reconciliation (TechSpec §5).** The §5 entity note states grouped + multi-diary-on-one-instance as **supported** (G-1/G-2; D-094/D-095) rather than only cross-referencing the D-093 contract.
+- **Milestone closure.** With G-3 landing, the §6 exit criterion is met: G-1 (single seam) + G-2 (regression suite) + G-3 (docs) all landed. The roadmap `Status:` line, the G-3 packet-ladder row, §6, and the execution-map / todo milestone rows flip to closed — **conditional on this packet landing** (the milestone closes because G-3 lands, not retroactively). The deferred items (A-15 visibility / Slice 8.2 / G-4; A-45 subject/child bootstrap; `/setup`; DEPLOY-2) stay explicitly outside the closed milestone.
+
+### Why
+
+The milestone's mechanics and contract were already shipped (D-093/D-094/D-095); the only gap the exit criterion named was reconciling the operator/product docs so they neither outrun nor lag the code (Documentation Rule). The reconciliation is deliberately light and additive: the canonical docs were already cross-referenced to D-093, so G-3 adds the consolidated-seam reference and flips the supported/closed wording rather than rewriting aligned prose. Closing the milestone in the same packet keeps the contract→seam→tests→docs unit coherent.
+
+### Consequence
+
+- **Docs (this packet):** this D-096 entry; new `docs/RUNBOOK.md` "Grouped & multi-diary on one instance" section; `docs/ARCHITECTURE.md` (Axis-5 seam reference); `docs/product/TechSpec.md` §5 (supported wording); `docs/GROUPED-MULTI-DIARY-ROADMAP.md` (`Status:` line, §4 G-3 row, §6, See also); `docs/execution-map.md` (G-3 row + note block); `docs/todo.md` (milestone section). No new I-/R- number; `assumptions.md` / `assumption-audit.md` unchanged (A-14 closed → D-093, A-15 deferred, A-45 open — already correct).
+- **No `src/` / `tests/` / schema / DDL / migration / config change.** The `resolve_community_id` seam and `InboundMessage.community_id` shape are referenced, not modified. I-1 / I-6 / I-7 / R-3 / R-8 / R-14 unchanged. `[[feedback_decision_log_citation]]`, `[[feedback_full_gate_and_doc_truthfulness]]`.
+- **Milestone status:** G-3 landed; the grouped/multi-diary milestone (D-093) is **closed** (G-0..G-3 landed; G-4 deferred).
+
+### Out of scope (per packet boundaries)
+
+- Any `src/` / `tests/` / schema / migration / config change, or any change to the `resolve_community_id` seam / `InboundMessage.community_id` shape.
+- Any new invariant in `INVARIANTS.md` / `RUNTIME-INVARIANTS.md` beyond pointer/wording corrections.
+- G-4 / A-15 visibility model (Slice 8.2); A-45 subject/child bootstrap; `/setup`; DEPLOY-2.
+- Reopening or re-deciding the D-093 contract.
