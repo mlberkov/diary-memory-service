@@ -62,11 +62,6 @@ from memory_rag.storage.repository import DomainRepository
 log = get_logger(__name__)
 
 
-def _community_id_for(message: InboundMessage) -> str:
-    """Per-chat surrogate until explicit community bootstrap exists (A-14)."""
-    return message.external_chat_id
-
-
 def _first_line(text: str) -> str:
     return text.splitlines()[0].strip() if text else ""
 
@@ -84,7 +79,9 @@ class DomainService:
 
     def ingest(self, message: InboundMessage) -> IngestResult:
         now = datetime.now(tz=UTC)
-        community_id = _community_id_for(message)
+        # Opaque community scope resolved by the adapter at the edge (D-093 /
+        # G-1); the core never re-derives it from external_chat_id (I-1).
+        community_id = message.community_id
         author_user_id = message.external_user_id
         candidate_id = str(uuid4())
 

@@ -2940,3 +2940,28 @@ The grouped/multi-diary mechanics already exist and are tested; what blocked the
 - Enumerating A-15 `visibility_scope` values (only its sequencing is decided).
 - Subject/child bootstrap mechanics (carved out to A-45 / the D-040 lineage).
 - DEPLOY-2 managed-cloud multi-tenant deployment shape (own roadmap).
+
+## D-094 — G-1: consolidate the chat→community mapping into one adapter-owned resolver (code)
+
+### Context
+
+D-093 / G-0 ratified the chat→community mapping as a **D-026 axis-5** adapter function — "the mapping function is adapter; the scoped query is core" — but explicitly **did not** claim a single resolver seam existed (D-093 §"As-built note"): the live mapping was open-coded across multiple sites, and the core derived community scope by reading `InboundMessage.external_chat_id` directly. This is G-1, the milestone's only real `src/` packet, sequenced first so G-2's regression suite and G-3's docs target one named seam (`docs/GROUPED-MULTI-DIARY-ROADMAP.md` §5). Behavior-preserving: the default mapping stays 1:1, so every resolved `community_id` equals the prior `external_chat_id` value.
+
+**As-built correction.** The D-093 audit named "three sites." A full census found the core derives community scope from `external_chat_id` in **six** core/services places — `services/domain_service.py` `_community_id_for`, `services/query_service.py`, and `services/dispatcher.py` ×4 (`_update_latest_sources`, `_dispatch_drafts`, `_dispatch_export`, `_dispatch_sources`) — plus the **two** adapter copies in `adapters/telegram/webhook.py` (`/ask` footer, `/sources`). The owner ratified the full-surface consolidation; leaving the dispatcher's four derivations would have left the core still deriving scope from `external_chat_id`, violating the D-093 §3 contract.
+
+### Decision
+
+- **One adapter-owned resolver.** New `adapters/telegram/community.py` `resolve_community_id(external_chat_id: str) -> str` is the single site that maps a Telegram chat to a core community scope. Default mapping is identity (1:1). A future host plugs a different mapping here without touching any core call site.
+- **Resolved opaque scope crosses the boundary on `InboundMessage`.** `core/routing/models.py` gains a required `community_id: str` field — the resolved opaque scope, set by the adapter at the webhook edge. The core reads `message.community_id` everywhere it previously read `message.external_chat_id` for scope. `external_chat_id` is **retained** on `InboundMessage` and `SourceMessage` purely as the transport / idempotency identifier (the R-2 / D-023 key `(external_chat_id, external_message_id, edit_seq)`; addressing the reply via `sendMessage(chat_id=…)`; the D-084 author-display capture key). The two fields are equal-valued under the default mapping but are distinct concerns.
+- **Required, no default.** `community_id` has no default — there is no safe default for a resolved scope (fail-closed, consistent with R-3). The `QueryService` R-3 guard now reads `if not community_id: raise … "InboundMessage.community_id is required (R-3)"`.
+
+### Why
+
+The mapping is an adapter-axis function (D-026 axis 5); resolving it once at the edge and carrying the opaque result on the channel-neutral `InboundMessage` is the minimal change that makes the D-093 §3 contract true in code. It **strengthens I-1**: the core now scopes on an opaque `community_id`, never on a field named "chat id." Carrying the value on `InboundMessage` (vs. threading a separate argument through `dispatch`/`ingest`/`answer`) keeps the resolved scope cohesive with the message it scopes and avoids spreading it across many signatures. Behavior is fully preserved (default 1:1), so the smallest-viable-slice and no-behavior-drift rules hold.
+
+### Consequence
+
+- **`src/`:** new `adapters/telegram/community.py`; `core/routing/models.py` (`InboundMessage.community_id` + docstring); `adapters/telegram/webhook.py` (resolve once at edge, `/ask` + `/sources` read `inbound.community_id`, A-14 comments repointed to the resolver); `services/domain_service.py` (deleted `_community_id_for`, reads `message.community_id`); `services/query_service.py` (reads field, R-3 guard reworded); `services/dispatcher.py` (4 scope reads + the `community_id=`-labelled ASK log → `message.community_id`; `chat_id`-labelled transport logs unchanged); `eval/retrieval/harness.py` (2 `InboundMessage` constructions).
+- **`tests/`:** `community_id` added to 8 test `InboundMessage` factories/call sites (set equal to the existing `external_chat_id` so assertions hold); `test_query_service.py::test_missing_community_id_raises` now drives `community_id=""` and matches `"community_id"`; new `tests/test_telegram_community_resolver.py` pins the default 1:1 seam.
+- **No schema / DDL / migration / config change.** `SourceMessage.community_id` was already persisted; only how the value is produced upstream changed. I-1 (strengthened) / I-6 / I-7 / R-3 / R-8 / R-14 preserved. Full gate green (ruff + mypy + 672 passed / 65 PG-skipped). `[[feedback_decision_log_citation]]`, `[[feedback_full_gate_and_doc_truthfulness]]`.
+- **Out of scope:** any non-default (non-1:1) mapping implementation; G-2 regression suite; G-3 operator/product docs; G-4 / A-15 visibility; A-45 subject/child bootstrap; `/setup`; core participant/ACL model; schema/migration; renames beyond the seam.

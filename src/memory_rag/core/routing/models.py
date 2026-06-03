@@ -54,15 +54,24 @@ def lifecycle_for(route: RouteKind) -> Lifecycle:
 class InboundMessage:
     """A channel-neutral inbound message ready for dispatch.
 
+    ``community_id`` is the resolved opaque community scope, set by the
+    event-source adapter via its chat→community resolver (D-093 / G-1;
+    D-026 axis 5). The core scopes on this opaque id and never re-derives
+    scope from ``external_chat_id`` (I-1). ``external_chat_id`` is retained
+    as the transport / idempotency identifier only: together with
+    ``external_message_id`` and ``edit_seq`` it forms the R-2 key (D-023),
+    and the adapter uses it to address the reply. Under the default 1:1
+    Telegram mapping the two carry the same value but are distinct concerns.
+
     ``edit_seq`` carries the Telegram-derived edit-state marker (D-023):
     ``0`` for an original delivery, the ``edit_date`` epoch seconds for an
-    edited state. Together with ``external_chat_id`` and ``external_message_id``
-    it forms the idempotency key for R-2.
+    edited state.
     """
 
     external_message_id: str
     external_chat_id: str
     external_user_id: str
+    community_id: str
     text: str
     route: RouteKind
     received_at: datetime

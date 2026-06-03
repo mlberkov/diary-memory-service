@@ -281,13 +281,13 @@ class Dispatcher:
                 log.warning(
                     "retrieval.unavailable reason=%s community_id=%s",
                     exc,
-                    message.external_chat_id,
+                    message.community_id,
                 )
                 answer = AnswerResult(
                     fallback=FallbackMode.NO_EVIDENCE,
                     query_text=message.payload.strip(),
                 )
-            self._update_latest_sources(message.external_chat_id, answer)
+            self._update_latest_sources(message.community_id, answer)
             reply = _format_answer_reply(answer)
             # Carry the opaque grounding chunks to the adapter for
             # contributor attribution (D-091), mirroring the source_chunks
@@ -365,7 +365,7 @@ class Dispatcher:
 
         max_limit = self._settings.drafts_max_limit
         effective_limit = min(requested, max_limit)
-        community_id = message.external_chat_id
+        community_id = message.community_id
         drafts = self._domain.list_recent_drafts(community_id, limit=effective_limit)
         returned = len(drafts)
 
@@ -419,7 +419,7 @@ class Dispatcher:
                     "route_source": message.route_source,
                 },
             )
-        community_id = message.external_chat_id
+        community_id = message.community_id
         payload = self._export.export(
             community_id=community_id,
             requester_user_id=message.external_user_id,
@@ -464,7 +464,7 @@ class Dispatcher:
         channel-neutral dispatcher never composes a display name. Not
         citations, not fine-grained attribution.
         """
-        community_id = message.external_chat_id
+        community_id = message.community_id
         chunks = self._latest_sources.get(community_id)
         if not chunks:
             return DispatchResult(

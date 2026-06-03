@@ -60,6 +60,7 @@ def _inbound(payload: str = "") -> InboundMessage:
         external_message_id="999",
         external_chat_id="42",
         external_user_id="7",
+        community_id="42",
         text=f"/drafts {payload}".rstrip(),
         route=RouteKind.DRAFTS,
         received_at=datetime(2026, 5, 10, tzinfo=UTC),
