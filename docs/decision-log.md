@@ -2940,3 +2940,83 @@ The grouped/multi-diary mechanics already exist and are tested; what blocked the
 - Enumerating A-15 `visibility_scope` values (only its sequencing is decided).
 - Subject/child bootstrap mechanics (carved out to A-45 / the D-040 lineage).
 - DEPLOY-2 managed-cloud multi-tenant deployment shape (own roadmap).
+
+## D-094 — G-1: consolidate the chat→community mapping into one adapter-owned resolver (code)
+
+### Context
+
+D-093 / G-0 ratified the chat→community mapping as a **D-026 axis-5** adapter function — "the mapping function is adapter; the scoped query is core" — but explicitly **did not** claim a single resolver seam existed (D-093 §"As-built note"): the live mapping was open-coded across multiple sites, and the core derived community scope by reading `InboundMessage.external_chat_id` directly. This is G-1, the milestone's only real `src/` packet, sequenced first so G-2's regression suite and G-3's docs target one named seam (`docs/GROUPED-MULTI-DIARY-ROADMAP.md` §5). Behavior-preserving: the default mapping stays 1:1, so every resolved `community_id` equals the prior `external_chat_id` value.
+
+**As-built correction.** The D-093 audit named "three sites." A full census found the core derives community scope from `external_chat_id` in **six** core/services places — `services/domain_service.py` `_community_id_for`, `services/query_service.py`, and `services/dispatcher.py` ×4 (`_update_latest_sources`, `_dispatch_drafts`, `_dispatch_export`, `_dispatch_sources`) — plus the **two** adapter copies in `adapters/telegram/webhook.py` (`/ask` footer, `/sources`). The owner ratified the full-surface consolidation; leaving the dispatcher's four derivations would have left the core still deriving scope from `external_chat_id`, violating the D-093 §3 contract.
+
+### Decision
+
+- **One adapter-owned resolver.** New `adapters/telegram/community.py` `resolve_community_id(external_chat_id: str) -> str` is the single site that maps a Telegram chat to a core community scope. Default mapping is identity (1:1). A future host plugs a different mapping here without touching any core call site.
+- **Resolved opaque scope crosses the boundary on `InboundMessage`.** `core/routing/models.py` gains a required `community_id: str` field — the resolved opaque scope, set by the adapter at the webhook edge. The core reads `message.community_id` everywhere it previously read `message.external_chat_id` for scope. `external_chat_id` is **retained** on `InboundMessage` and `SourceMessage` purely as the transport / idempotency identifier (the R-2 / D-023 key `(external_chat_id, external_message_id, edit_seq)`; addressing the reply via `sendMessage(chat_id=…)`; the D-084 author-display capture key). The two fields are equal-valued under the default mapping but are distinct concerns.
+- **Required, no default.** `community_id` has no default — there is no safe default for a resolved scope (fail-closed, consistent with R-3). The `QueryService` R-3 guard now reads `if not community_id: raise … "InboundMessage.community_id is required (R-3)"`.
+
+### Why
+
+The mapping is an adapter-axis function (D-026 axis 5); resolving it once at the edge and carrying the opaque result on the channel-neutral `InboundMessage` is the minimal change that makes the D-093 §3 contract true in code. It **strengthens I-1**: the core now scopes on an opaque `community_id`, never on a field named "chat id." Carrying the value on `InboundMessage` (vs. threading a separate argument through `dispatch`/`ingest`/`answer`) keeps the resolved scope cohesive with the message it scopes and avoids spreading it across many signatures. Behavior is fully preserved (default 1:1), so the smallest-viable-slice and no-behavior-drift rules hold.
+
+### Consequence
+
+- **`src/`:** new `adapters/telegram/community.py`; `core/routing/models.py` (`InboundMessage.community_id` + docstring); `adapters/telegram/webhook.py` (resolve once at edge, `/ask` + `/sources` read `inbound.community_id`, A-14 comments repointed to the resolver); `services/domain_service.py` (deleted `_community_id_for`, reads `message.community_id`); `services/query_service.py` (reads field, R-3 guard reworded); `services/dispatcher.py` (4 scope reads + the `community_id=`-labelled ASK log → `message.community_id`; `chat_id`-labelled transport logs unchanged); `eval/retrieval/harness.py` (2 `InboundMessage` constructions).
+- **`tests/`:** `community_id` added to 8 test `InboundMessage` factories/call sites (set equal to the existing `external_chat_id` so assertions hold); `test_query_service.py::test_missing_community_id_raises` now drives `community_id=""` and matches `"community_id"`; new `tests/test_telegram_community_resolver.py` pins the default 1:1 seam.
+- **No schema / DDL / migration / config change.** `SourceMessage.community_id` was already persisted; only how the value is produced upstream changed. I-1 (strengthened) / I-6 / I-7 / R-3 / R-8 / R-14 preserved. Full gate green (ruff + mypy + 672 passed / 65 PG-skipped). `[[feedback_decision_log_citation]]`, `[[feedback_full_gate_and_doc_truthfulness]]`.
+- **Out of scope:** any non-default (non-1:1) mapping implementation; G-2 regression suite; G-3 operator/product docs; G-4 / A-15 visibility; A-45 subject/child bootstrap; `/setup`; core participant/ACL model; schema/migration; renames beyond the seam.
+
+## D-095 — G-2: grouped + multi-diary characterization suite (tests)
+
+### Context
+
+D-094 / G-1 made the chat→community mapping a single adapter-owned seam (`resolve_community_id`) carried on `InboundMessage.community_id`. The grouped + multi-diary milestone (D-093; `docs/GROUPED-MULTI-DIARY-ROADMAP.md`) exits only when that behavior is pinned by a regression suite (G-2) and the operator/product docs are reconciled (G-3). This is G-2, sequenced after G-1 so the suite characterizes one named seam (roadmap §5). It pins *already-true* behavior; it is **not** a behavior change.
+
+### Decision
+
+- **One consolidated characterization file** `tests/test_grouped_multi_diary.py` (mirroring the Slice 8.1.3 precedent of one consolidated `tests/test_read_access_isolation.py`). Every `InboundMessage` is built with `community_id=resolve_community_id(chat)`, so the suite exercises the G-1 seam rather than hard-coding the identity mapping.
+- **Group A — grouped diary (one chat, N senders, full ingest→ask):** one group chat is one `community_id` with distinct per-sender `author_user_id` (extends the single-author `test_domain_service` coverage to the multi-sender case); a grouped `/ask` preserves ≥2 distinct contributors through retrieval into `AnswerResult.context.ordered_chunks` (I-6), driven by full ingest rather than pre-built chunks; the ASK dispatch seam carries multi-author `DispatchResult.grounding_chunks` (D-091).
+- **Group B — multi-diary on one instance (N chats → N communities):** distinct chats are isolated communities and `/ask` never crosses over (composes with `test_query_service::test_cross_chat_isolation` at grouped granularity); a thin seam pin ties the factories to `resolve_community_id` (grouped senders → one community; distinct chats → distinct communities).
+- **Group C — cross-community read isolation at grouped granularity:** a grouped `/ask` cache in one community is invisible to another (composes with `test_read_access_isolation.py` and `test_dispatcher_sources::test_two_family_caches_are_independent`).
+
+### Why
+
+Characterizing the consolidated seam at grouped granularity is the milestone's hardening step: it locks the I-6 / I-7 / R-3 / R-8 behavior so a future reshape of `resolve_community_id` or the scoping path is caught. The suite composes with — rather than re-implements — the existing per-leg, by-id/trace, and cache isolation coverage, keeping the new file focused on the one genuine gap (a group chat with N distinct senders driven through the full ingest→ask flow).
+
+### Consequence
+
+- **`tests/`:** new `tests/test_grouped_multi_diary.py` (6 tests, mock-mode). **No `src/` change** — the suite passes against current production code, validating the "characterization, no behavior change" classification.
+- **Harness boundary:** mock-mode only (`MockEmbeddingClient` / `MockChatClient`; sqlite retrieval raises `NotImplementedError`). The new file provides no PG/sqlite parity for the end-to-end grouped ingest→ask flow; storage-read and per-leg PG parity remain the responsibility of the existing PG-gated suites (`test_read_access_isolation.py`, `test_search_repository_postgres.py`), which stay part of full-gate validation. A module docstring states this boundary and indexes that coverage.
+- **No schema / DDL / migration / config change.** I-1 / I-6 / I-7 / R-3 / R-8 preserved. Full gate green (ruff + mypy + 678 passed / 65 PG-skipped). `[[feedback_decision_log_citation]]`, `[[feedback_full_gate_and_doc_truthfulness]]`.
+- **Milestone status:** G-2 landed; **G-3 (operator/product docs) still pending** — the grouped/multi-diary milestone is **not** closed by this packet (roadmap §6 exit criterion still names G-3).
+- **Out of scope:** G-3 operator/product docs; adapter-side `Contributors:` footer rendering (already pinned in `test_telegram_ask_contributors.py`); G-4 / A-15 visibility; A-45 subject/child bootstrap; `/setup`; any `src/` / schema / migration change.
+
+## D-096 — G-3: grouped + multi-diary operator/product docs reconciliation + milestone closure (docs-first)
+
+### Context
+
+D-094 / G-1 made the chat→community mapping a single adapter-owned seam (`resolve_community_id`, carried on `InboundMessage.community_id`) and D-095 / G-2 pinned the grouped + multi-diary behavior with `tests/test_grouped_multi_diary.py`. The grouped/multi-diary milestone (D-093; `docs/GROUPED-MULTI-DIARY-ROADMAP.md` §6) exits only when, **in addition** to G-1 and G-2, the operator/product docs record the bootstrap/mapping/membership model and how to run multi-diary on one instance (G-3). This is G-3, the milestone's final docs-only packet. It changes no `src/`, `tests/`, schema, or runtime behavior — it reconciles the canonical docs with the already-ratified, already-shipped mapping and closes the milestone.
+
+### Decision
+
+- **Operator how-to (RUNBOOK).** A new `docs/RUNBOOK.md` section "Grouped & multi-diary on one instance" — placed beside the existing "Read-access scoping (Slice 8.1 …)" section, which already delegates *assignment* to D-093 and governs only *reads* — documents, operator-facing: implicit-on-first-message bootstrap (no `/setup`); the default 1:1 `external_chat_id → community_id` mapping resolved at the webhook edge by the adapter-owned `resolve_community_id` (D-094), with `external_chat_id` retained only as the transport / R-2 idempotency key; host-chat-inherited membership with authorship preserved per opaque `author_user_id` (I-6); and running N isolated communities on one instance, every read community-scoped and fail-closed (I-7 / R-3 / R-8; Slice 8.1). Per-note visibility is forward-pointed to A-15 / Slice 8.2 (deferred).
+- **Axis-5 reconciliation (ARCHITECTURE).** The Axis-5 prose names the single adapter-owned `resolve_community_id` seam (D-094) as the realization of the mapping; it already framed the mapping as adapter-owned and the core scope as the opaque `community_id` (no "surrogate" framing remained to remove).
+- **Product reconciliation (TechSpec §5).** The §5 entity note states grouped + multi-diary-on-one-instance as **supported** (G-1/G-2; D-094/D-095) rather than only cross-referencing the D-093 contract.
+- **Milestone closure.** With G-3 landing, the §6 exit criterion is met: G-1 (single seam) + G-2 (regression suite) + G-3 (docs) all landed. The roadmap `Status:` line, the G-3 packet-ladder row, §6, and the execution-map / todo milestone rows flip to closed — **conditional on this packet landing** (the milestone closes because G-3 lands, not retroactively). The deferred items (A-15 visibility / Slice 8.2 / G-4; A-45 subject/child bootstrap; `/setup`; DEPLOY-2) stay explicitly outside the closed milestone.
+
+### Why
+
+The milestone's mechanics and contract were already shipped (D-093/D-094/D-095); the only gap the exit criterion named was reconciling the operator/product docs so they neither outrun nor lag the code (Documentation Rule). The reconciliation is deliberately light and additive: the canonical docs were already cross-referenced to D-093, so G-3 adds the consolidated-seam reference and flips the supported/closed wording rather than rewriting aligned prose. Closing the milestone in the same packet keeps the contract→seam→tests→docs unit coherent.
+
+### Consequence
+
+- **Docs (this packet):** this D-096 entry; new `docs/RUNBOOK.md` "Grouped & multi-diary on one instance" section; `docs/ARCHITECTURE.md` (Axis-5 seam reference); `docs/product/TechSpec.md` §5 (supported wording); `docs/GROUPED-MULTI-DIARY-ROADMAP.md` (`Status:` line, §4 G-3 row, §6, See also); `docs/execution-map.md` (G-3 row + note block); `docs/todo.md` (milestone section). No new I-/R- number; `assumptions.md` / `assumption-audit.md` unchanged (A-14 closed → D-093, A-15 deferred, A-45 open — already correct).
+- **No `src/` / `tests/` / schema / DDL / migration / config change.** The `resolve_community_id` seam and `InboundMessage.community_id` shape are referenced, not modified. I-1 / I-6 / I-7 / R-3 / R-8 / R-14 unchanged. `[[feedback_decision_log_citation]]`, `[[feedback_full_gate_and_doc_truthfulness]]`.
+- **Milestone status:** G-3 landed; the grouped/multi-diary milestone (D-093) is **closed** (G-0..G-3 landed; G-4 deferred).
+
+### Out of scope (per packet boundaries)
+
+- Any `src/` / `tests/` / schema / migration / config change, or any change to the `resolve_community_id` seam / `InboundMessage.community_id` shape.
+- Any new invariant in `INVARIANTS.md` / `RUNTIME-INVARIANTS.md` beyond pointer/wording corrections.
+- G-4 / A-15 visibility model (Slice 8.2); A-45 subject/child bootstrap; `/setup`; DEPLOY-2.
+- Reopening or re-deciding the D-093 contract.

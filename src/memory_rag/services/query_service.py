@@ -145,9 +145,11 @@ class QueryService:
         constraint. There is no inbound date syntax yet — the Telegram
         webhook passes no ``date_range``.
         """
-        community_id = message.external_chat_id
+        # Opaque community scope resolved by the adapter at the edge (D-093 /
+        # G-1); the core never re-derives it from external_chat_id (I-1).
+        community_id = message.community_id
         if not community_id:
-            raise ValueError("InboundMessage.external_chat_id is required (R-3)")
+            raise ValueError("InboundMessage.community_id is required (R-3)")
 
         query_text = _normalize_query(message.payload)
         created_at = datetime.now(tz=UTC)

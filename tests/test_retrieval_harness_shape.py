@@ -417,6 +417,7 @@ def test_domain_service_drives_corpus_ingestion(corpus_path: Path) -> None:
             external_message_id=cm.external_message_id,
             external_chat_id=cm.community_id,
             external_user_id=cm.author_user_id,
+            community_id=cm.community_id,
             text=cm.raw_text,
             payload=cm.raw_text,
             route=RouteKind.NOTE,

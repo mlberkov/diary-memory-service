@@ -28,6 +28,7 @@ def _ask(query: str, *, chat: str = "42", user: str = "7") -> InboundMessage:
         external_message_id="200",
         external_chat_id=chat,
         external_user_id=user,
+        community_id=chat,
         text=f"/ask {query}",
         route=RouteKind.ASK,
         received_at=datetime.now(tz=UTC),
@@ -43,6 +44,7 @@ def _note(
         external_message_id=msg_id,
         external_chat_id=chat,
         external_user_id=user,
+        community_id=chat,
         text=f"/note {payload}",
         route=RouteKind.NOTE,
         received_at=datetime.now(tz=UTC),
@@ -135,12 +137,13 @@ def test_missing_community_id_raises() -> None:
     store = MockDomainStore()
     query = _wire(store)
 
-    with pytest.raises(ValueError, match="external_chat_id"):
+    with pytest.raises(ValueError, match="community_id"):
         query.answer(
             InboundMessage(
                 external_message_id="200",
-                external_chat_id="",
+                external_chat_id="42",
                 external_user_id="7",
+                community_id="",
                 text="/ask book",
                 route=RouteKind.ASK,
                 received_at=datetime.now(tz=UTC),

@@ -30,6 +30,7 @@ from memory_rag.adapters.telegram.author_display import (
 )
 from memory_rag.adapters.telegram.client import HttpxTelegramClient, TelegramClient
 from memory_rag.adapters.telegram.commands import parse_command
+from memory_rag.adapters.telegram.community import resolve_community_id
 from memory_rag.adapters.telegram.drafts_packing import pack_drafts_into_messages
 from memory_rag.adapters.telegram.models import TelegramUpdate
 from memory_rag.adapters.telegram.reply import build_send_message_payload
@@ -178,10 +179,16 @@ def register_telegram_webhook(app: FastAPI) -> None:
 
         route, payload, route_source, confidence = _resolve_route(message.text)
         edit_seq = message.edit_date if message.edit_date is not None else 0
+        external_chat_id = str(message.chat.id)
+        # Adapter-axis chat→community mapping resolved once at the edge
+        # (D-093 / G-1). The core receives the opaque community_id and never
+        # re-derives scope from external_chat_id (I-1).
+        community_id = resolve_community_id(external_chat_id)
         inbound = InboundMessage(
             external_message_id=str(message.message_id),
-            external_chat_id=str(message.chat.id),
+            external_chat_id=external_chat_id,
             external_user_id=str(message.from_.id),
+            community_id=community_id,
             text=message.text or "",
             route=route,
             received_at=datetime.fromtimestamp(message.date, tz=UTC),
@@ -290,10 +297,11 @@ def register_telegram_webhook(app: FastAPI) -> None:
         if result.source_chunks is not None:
             chunk_count = len(result.source_chunks)
             # Requester-scoped community for the /sources author lookup. The
-            # inbound chat maps to a community id via the current identity
-            # mapping (A-14); the community-scoped read keeps author resolution
-            # from ever crossing a community boundary (Slice 8.1.2 / D-089).
-            community_id = inbound.external_chat_id
+            # opaque community_id was resolved at the edge by the adapter-owned
+            # chat→community resolver (D-093 / G-1); the community-scoped read
+            # keeps author resolution from ever crossing a community boundary
+            # (Slice 8.1.2 / D-089).
+            community_id = inbound.community_id
             source_blocks = [
                 render_source_block(
                     chunk,
@@ -336,12 +344,13 @@ def register_telegram_webhook(app: FastAPI) -> None:
             return {}
         if result.grounding_chunks:
             # Grounded /ask reply: append the contributor-attribution footer
-            # (D-091). Requester-scoped community for the author lookup —
-            # the same A-14 mapping / D-089 community-scoped read used for
-            # /sources, so resolution never crosses a community boundary
-            # (I-7, R-3). The dispatcher sets grounding_chunks only when the
-            # grounding set is non-empty, so the footer renders iff grounded.
-            community_id = inbound.external_chat_id
+            # (D-091). Requester-scoped community for the author lookup — the
+            # same edge-resolved community_id (D-093 / G-1) and D-089
+            # community-scoped read used for /sources, so resolution never
+            # crosses a community boundary (I-7, R-3). The dispatcher sets
+            # grounding_chunks only when the grounding set is non-empty, so the
+            # footer renders iff grounded.
+            community_id = inbound.community_id
             footer = render_contributors_footer(
                 result.grounding_chunks,
                 backend_store,

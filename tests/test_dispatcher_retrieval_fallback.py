@@ -64,6 +64,7 @@ def _ask(
         external_message_id="1",
         external_chat_id="fam-A",
         external_user_id="7",
+        community_id="fam-A",
         text=f"/ask {query}",
         route=RouteKind.ASK,
         received_at=datetime.now(tz=UTC),

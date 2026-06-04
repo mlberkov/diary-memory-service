@@ -24,6 +24,7 @@ def _inbound(
         external_message_id="1",
         external_chat_id="42",
         external_user_id="7",
+        community_id="42",
         text=text,
         route=route,
         received_at=datetime(2026, 5, 10, tzinfo=UTC),
