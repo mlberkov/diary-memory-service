@@ -86,6 +86,7 @@ class Note:
     note_date: date
     note_text: str
     created_at: datetime
+    subject_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +110,7 @@ class EventChunk:
     chunk_text: str
     created_at: datetime
     embedding_status: EmbeddingStatus = EmbeddingStatus.PENDING
+    subject_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

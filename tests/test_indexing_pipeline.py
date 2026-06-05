@@ -48,7 +48,7 @@ def _source(sid: str = "s1") -> SourceMessage:
     )
 
 
-def _note(eid: str = "e1", sid: str = "s1") -> Note:
+def _note(eid: str = "e1", sid: str = "s1", subject_id: str | None = None) -> Note:
     return Note(
         note_id=eid,
         source_message_id=sid,
@@ -57,10 +57,17 @@ def _note(eid: str = "e1", sid: str = "s1") -> Note:
         note_date=date(2026, 5, 11),
         note_text="Walked the dog",
         created_at=_now(),
+        subject_id=subject_id,
     )
 
 
-def _chunk(cid: str = "c1", eid: str = "e1", sid: str = "s1", idx: int = 0) -> EventChunk:
+def _chunk(
+    cid: str = "c1",
+    eid: str = "e1",
+    sid: str = "s1",
+    idx: int = 0,
+    subject_id: str | None = None,
+) -> EventChunk:
     return EventChunk(
         chunk_id=cid,
         note_id=eid,
@@ -71,6 +78,7 @@ def _chunk(cid: str = "c1", eid: str = "e1", sid: str = "s1", idx: int = 0) -> E
         event_index=idx,
         chunk_text="Walked the dog",
         created_at=_now(),
+        subject_id=subject_id,
     )
 
 
@@ -155,6 +163,26 @@ def test_freshly_saved_chunk_is_pending(store: DomainRepository) -> None:
     chunk = store.get_event_chunk("c1", community_id="fam-A")
     assert chunk is not None
     assert chunk.embedding_status is EmbeddingStatus.PENDING
+
+
+def test_subject_id_round_trips_across_backends(store: DomainRepository) -> None:
+    """An opaque subject_id persists identically on mock / sqlite / postgres (H-1)."""
+    store.save_source_message(_source())
+    store.save_note(_note(subject_id="subj-1"))
+    store.save_event_chunks([_chunk(cid="c1", subject_id="subj-1")])
+
+    note = store.get_note_by_source_message_id("s1")
+    chunk = store.get_event_chunk("c1", community_id="fam-A")
+    assert note is not None and note.subject_id == "subj-1"
+    assert chunk is not None and chunk.subject_id == "subj-1"
+
+
+def test_freshly_saved_chunk_has_no_subject(store: DomainRepository) -> None:
+    """Default-None subject scoping (community-wide) survives the round trip (H-1)."""
+    _seed_chunk(store)
+    chunk = store.get_event_chunk("c1", community_id="fam-A")
+    assert chunk is not None
+    assert chunk.subject_id is None
 
 
 def test_get_event_chunk_missing_returns_none(store: DomainRepository) -> None:

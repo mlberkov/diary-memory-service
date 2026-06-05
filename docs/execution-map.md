@@ -237,8 +237,9 @@ R-8) — so this milestone pins the contract, makes the chat→community mapping
 single adapter-owned seam, and characterizes the behavior. Decomposed docs-first
 in `docs/GROUPED-MULTI-DIARY-ROADMAP.md` (D-093); packets G-0..G-4 below. A-14
 is **closed → D-093** for the community half; subject/child bootstrap is carved
-out to **A-45**; A-15 visibility is deferred and sequenced after the first
-grouped pilot. **Milestone closed by G-3 (D-096): G-0..G-3 landed (D-093 / D-094
+out to **A-45** (since resolved at the contract level by **D-097** — see the
+Subject-scoping milestone below); A-15 visibility is deferred and sequenced after
+the first grouped pilot. **Milestone closed by G-3 (D-096): G-0..G-3 landed (D-093 / D-094
 / D-095 / D-096); G-4 deferred.** **Out of scope:** core participant/ACL/registry,
 `/setup`, visibility model (A-15 / Slice 8.2), subject bootstrap (A-45), DEPLOY-2,
 any schema/DDL/migration.
@@ -249,3 +250,23 @@ any schema/DDL/migration.
 | G-2 — grouped + multi-diary regression suite | **Done (D-095).** New consolidated `tests/test_grouped_multi_diary.py` (6 tests, mock-mode) pinning already-true behavior through the G-1 `resolve_community_id` seam: group chat → one `community_id` + distinct `author_user_id` per sender; grouped `/ask` preserves ≥2 contributors into `AnswerResult.context.ordered_chunks` (I-6) and the ASK dispatch `grounding_chunks` seam (D-091); N distinct chats → N isolated communities; cross-community `/sources`-cache isolation at grouped granularity (composing with `tests/test_read_access_isolation.py` and `tests/test_dispatcher_sources.py`). Mock-mode only; PG/sqlite storage-read parity stays with the existing PG-gated suites. No `src/` / schema / migration change. → G-2 (D-095). |
 | G-3 — operator + product docs | **Done (D-096).** New `docs/RUNBOOK.md` "Grouped & multi-diary on one instance" how-to (bootstrap/mapping/membership + running multi-diary on one instance); reconciled `docs/ARCHITECTURE.md` Axis-5 prose (named the `resolve_community_id` seam, D-094) + `docs/product/TechSpec.md` §5 (marked grouped/multi-diary **supported**); flipped the roadmap `Status:` / §6 / this row + note block / `docs/todo.md` to milestone-closed. Docs-only — no `src/` / `tests/` / schema / migration change. → G-3 (D-096). |
 | G-4 — visibility model (A-15 / Slice 8.2) *(deferred, not built)* | Enumerate `visibility_scope` + per-note / per-participant read control **after** the first grouped pilot. Out of scope of this milestone. |
+
+## Subject scoping (`subject_id` dimension, D-097) *(sequenced separately from the Phase/Stage axis)*
+Adds a subject-scoping dimension on top of the closed community-scoped data plane
+(Milestone G): an opaque, community-scoped, **nullable** `subject_id` on `Note` /
+`EventChunk`, assigned by an adapter-axis function with a default single-subject
+mapping (`null` = community-wide), with an **optional** retrieval filter mirroring
+the D-040 `date_range` seam. Decomposed docs-first in
+`docs/SUBJECT-SCOPING-ROADMAP.md` (D-097); packets H-0..H-4 below. **A-45 is
+closed → D-097** at the contract level; community scoping (I-7 / R-3 / R-8) is the
+unchanged outer boundary. **Status: in progress — H-0 (D-097) and H-1 (data model)
+landed; H-2..H-4 pending.** **Out of scope:** core subject registry/entity, explicit
+subject-selection command / multi-subject UX, A-15 visibility (separate; Slice 8.2
+/ G-4), reopening Milestone G.
+| Slice | Files / artifacts |
+| --- | --- |
+| H-0 — subject-scoping contract + A-45 resolution + roadmap | **Done (D-097).** Docs-only: `docs/decision-log.md` (D-097), new `docs/SUBJECT-SCOPING-ROADMAP.md`, `docs/assumptions.md` + `docs/assumption-audit.md` (close A-45 → D-097; A-15 clarified, stays open), this map block; cross-reference-only touches to `docs/product/TechSpec.md` (§5), `docs/GLOSSARY.md`, `docs/RUNBOOK.md`. Ratifies the opaque / community-scoped / nullable `subject_id` contract, adapter-axis assignment with a default single-subject mapping, no core subject registry, an optional retrieval filter mirroring D-040, and orthogonality to A-15. No `src/` / `tests/` / schema / migration change. → H-0 (D-097). |
+| H-1 — `subject_id` in the data model | **Done (H-1).** Nullable, opaque `subject_id` on `Note` / `EventChunk` (`core/domain/models.py`), round-tripped through the mock / sqlite / postgres stores, plus the non-destructive `0005.subject-id-columns` Postgres migration (default `null`; community scoping unchanged). No assignment / retrieval change yet. |
+| H-2 — adapter-axis subject assignment | **Pending.** One adapter-owned host→subject mapping (default single-subject per community, parallel to `resolve_community_id`); resolved opaque `subject_id` crosses on `InboundMessage`; domain service carries it through. Behavior-preserving under the default mapping. |
+| H-3 — optional subject retrieval filter | **Pending.** `Query.subject_scope` + keyword-only optional subject filter on both `storage/search_repository.py` legs (postgres/mock parity), mirroring the D-040 `date_range` seam; `None` = no constraint; composes with `date_range`. |
+| H-4 — regression suite + operator/product docs + closure | **Pending.** Subject-scoping characterization suite (mock + PG-gated parity); reconcile `RUNBOOK.md` / `TechSpec.md` §5 / `ARCHITECTURE.md`; flip the roadmap + this block to milestone-closed (conditional on this packet landing). |

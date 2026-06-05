@@ -3020,3 +3020,45 @@ The milestone's mechanics and contract were already shipped (D-093/D-094/D-095);
 - Any new invariant in `INVARIANTS.md` / `RUNTIME-INVARIANTS.md` beyond pointer/wording corrections.
 - G-4 / A-15 visibility model (Slice 8.2); A-45 subject/child bootstrap; `/setup`; DEPLOY-2.
 - Reopening or re-deciding the D-093 contract.
+
+## D-097 — H-0: subject-scoping contract + A-45 resolution + Milestone H roadmap (docs-first)
+
+### Context
+
+Milestone G closed (D-096): the chat→community mapping is a single adapter-owned resolver (`resolve_community_id`, D-094) carried on `InboundMessage.community_id`, community scoping is enforced end-to-end and fail-closed (I-7 / R-3 / R-8; Slice 8.1), and grouped + multi-diary-on-one-instance are pinned (D-095). When D-093 resolved the community half of A-14 it **carved out the subject/child half as A-45**, pointing it one-directionally at "the D-040 child-filter lineage" (D-040 shipped only the date-range filter dimension; the child/subject dimension was deferred). That label is now stale: subject scoping is a milestone in its own right, and `child` is use-case vocabulary — the canonical core term is **subject** (D-041; `docs/GLOSSARY.md`). `subject_id` exists nowhere in code, schema, or the domain model today; community is the only scoping dimension.
+
+A-45 ("how a `subject` — first use case `child` — is first created and assigned to notes within a community") is still open and blocks any subject-scoped filtering / retrieval. This is the docs-first opener of the subject-scoping milestone (Packet H-0). It **resolves A-45 at the contract level** and sequences the follow-on code in `docs/SUBJECT-SCOPING-ROADMAP.md`. It changes no `src/`, schema, or runtime behavior. It mirrors the D-093 / G-0 precedent: this entry carries the stable contract; the roadmap doc carries the refinable sequence.
+
+### Decision
+
+- **`subject_id` shape (ratified).** Subject scope is carried as an **opaque, community-scoped, nullable** identifier `subject_id` on the subject-bearing core records (`Note`, `EventChunk`). It is born directly as `subject_id` (canonical vocabulary, D-041); the first use case maps `child → subject`, and `child` / `child_id` stay use-case-facing labels, never a core field name. `subject_id` is **subordinate to `community_id`**: it never widens or crosses community scope (I-7 / R-3 / R-8 are unchanged and remain the outer boundary).
+
+- **`null` = community-wide (ratified).** A `null` `subject_id` means the note/chunk is community-wide (unscoped to any subject) — the access model that exists today. Subject scoping is **additive and optional**: introducing it does not retro-scope existing community-wide records.
+
+- **Assignment is an adapter-axis function (ratified).** How a host assigns a `subject_id` to an inbound note is the **tenant/auth-mapping adapter axis** (D-026 axis 5: "the mapping function is adapter; the scoped query is core"), parallel to the chat→community resolver (D-094). The **default first-use-case mapping is single-subject per community** (one `child` per community) — behavior-preserving, since under it every note is community-wide / the lone subject and nothing changes versus today. The core receives an opaque `subject_id` (or `null`); it never derives subject from a host identity field (I-1). No follow-on packet may depend on an explicit subject-selection command existing first (parallel to D-093's `/setup`-deferred clause).
+
+- **No core subject registry/entity (ratified).** This milestone introduces **no** core `Subject` / subject-registry / membership / per-subject-ACL entity. `subject_id` is an opaque scalar on existing records, exactly as `community_id` is. A subject registry is deferred until the product needs subject metadata or assignment to diverge from the default single-subject mapping (e.g. multiple named subjects per community) — a later, separately-planned decision.
+
+- **Retrieval filter is optional, mirrors D-040 (ratified).** Subject-scoped retrieval is an **optional** keyword-only filter on the search legs, mirroring the D-040 `date_range` seam: a `Query.subject_scope` threaded to both retrieval legs, defaulting to `None` (no constraint, preserving the current retrieval shape and RRF inputs). It composes with — and is independent of — the date-range filter.
+
+- **Separate from A-15 visibility (ratified).** Subject scoping answers *what a note is about*; A-15 visibility answers *who may see a note*. They are orthogonal. A-15 stays **open** and sequenced (Slice 8.2 / G-4) and is **not** advanced, enumerated, or blocked by this milestone.
+
+- **A-45 disposition.** A-45 is **closed → D-097** at the bootstrap/assignment-contract level (mirroring A-14 → D-093). The code realization — `subject_id` in the data model, adapter-axis assignment, the optional retrieval filter, tests, and operator/product docs — is sequenced as Milestone H packets H-1..H-4 in `docs/SUBJECT-SCOPING-ROADMAP.md`. **No `src/` claim of a `subject_id` field/column/filter is made until H-1 makes it true** (mirroring D-093's "no single-resolver-seam claim until G-1").
+
+### Why
+
+The grouped/multi-diary milestone left subject scoping as the one open scoping question, parked under a now-stale "D-040 lineage" label. Ratifying the `subject_id` contract before any code names what the system will do and keeps the smallest-viable-slice rule: the default single-subject mapping is behavior-preserving, so H-1..H-4 add a dimension without moving existing behavior. Modeling `subject_id` as an opaque, nullable, community-subordinate scalar — assigned by an adapter axis, with no core registry — keeps the core channel-neutral and opaque-id-based (I-1) and avoids speculative subject-metadata architecture the product does not yet need, exactly as D-093 avoided a core participant/ACL table. Keeping subject scoping orthogonal to A-15 prevents the milestone from widening into visibility. Closing A-45 at the contract level (not the code level) matches the A-14 → D-093 precedent: the decision entry carries the contract; the roadmap carries the refinable code sequence.
+
+### Consequence
+
+- **Docs (this packet):** this D-097 entry; new `docs/SUBJECT-SCOPING-ROADMAP.md` (refinable H-0..H-4 packet ladder); `docs/assumptions.md` + `docs/assumption-audit.md` (close A-45 → D-097; A-15 clarified as distinct, stays open); `docs/product/TechSpec.md` §5 (subject-scoping note repointed to the ratified contract / Milestone H); `docs/GLOSSARY.md` (the `subject_id` identifier line repointed from D-040 to D-097 / Milestone H); `docs/execution-map.md` (new Milestone H block + forward-pointer from the closed Grouped block); `docs/RUNBOOK.md` (the subject/child-scoping forward note repointed to D-097 / Milestone H).
+- **No `src/` / `tests/` / schema / DDL / migration / config change.** Community scoping (I-7 / R-3 / R-8) and authorship (I-6) are unchanged; no new I-/R- number; no `subject_id` field/column/filter is added in this packet. `[[feedback_decision_log_citation]]`, `[[feedback_full_gate_and_doc_truthfulness]]`.
+- **Sequenced code work (not in this packet):** H-1 `subject_id` (nullable, opaque) in the `Note` / `EventChunk` domain model + migration; H-2 adapter-axis subject assignment (default single-subject mapping, carried on `InboundMessage`); H-3 optional `subject_scope` retrieval filter (mirroring D-040); H-4 regression suite + operator/product docs + milestone closure.
+
+### Out of scope (per packet boundaries)
+
+- Any `src/`, schema, migration, or runtime-behavior change — including H-1's `subject_id` field/column.
+- A core `Subject` / subject-registry / membership / per-subject-ACL entity (deferred until assignment must diverge from the default single-subject mapping).
+- An explicit subject-selection command or multi-subject UX (not built, not depended on).
+- A-15 `visibility_scope` enumeration or any visibility advance (separate; Slice 8.2 / G-4).
+- Reopening or re-deciding the D-093 / Milestone G community-bootstrap contract.

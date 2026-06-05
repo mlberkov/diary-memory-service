@@ -44,11 +44,14 @@ DEAD_LETTER_MIGRATION_ID = "0003.indexing-dead-letter-table"
 #: Id of the D-084 author display-input side-table migration (filename stem).
 AUTHOR_DISPLAY_MIGRATION_ID = "0004.author-display-inputs"
 
+#: Id of the H-1 / D-097 subject_id-columns migration (filename stem).
+SUBJECT_ID_MIGRATION_ID = "0005.subject-id-columns"
+
 #: Index added by the OP-1.2 upgrade migration on ``event_chunks``.
 EMBEDDING_STATUS_INDEX = "idx_event_chunks_embedding_status"
 
-#: Number of versioned migrations in the history (baseline + three upgrades).
-MIGRATION_COUNT = 4
+#: Number of versioned migrations in the history (baseline + four upgrades).
+MIGRATION_COUNT = 5
 
 PG_DSN = os.environ.get("MEMORY_RAG_PG_TEST_DSN")
 
@@ -75,6 +78,7 @@ def test_migrations_discoverable() -> None:
         UPGRADE_MIGRATION_ID,
         DEAD_LETTER_MIGRATION_ID,
         AUTHOR_DISPLAY_MIGRATION_ID,
+        SUBJECT_ID_MIGRATION_ID,
     ]
 
 
@@ -87,6 +91,7 @@ def test_migrations_dir_is_packaged() -> None:
         "0002.index-embedding-status.sql",
         "0003.indexing-dead-letter-table.sql",
         "0004.author-display-inputs.sql",
+        "0005.subject-id-columns.sql",
     ]
 
 
@@ -184,6 +189,25 @@ def _index_exists(dsn: str, index_name: str) -> bool:
     return row is not None and row[0] is not None
 
 
+def _column_exists(dsn: str, table: str, column: str) -> bool:
+    with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM information_schema.columns "
+            " WHERE table_name = %s AND column_name = %s",
+            (table, column),
+        )
+        row = cur.fetchone()
+    return row is not None
+
+
+def _column_all_null(dsn: str, table: str, column: str) -> bool:
+    with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT count(*) FROM {table} WHERE {column} IS NOT NULL")
+        row = cur.fetchone()
+    assert row is not None
+    return int(row[0]) == 0
+
+
 def _apply_only_baseline(dsn: str) -> None:
     """Apply only the 0001 baseline through yoyo, leaving 0002 pending.
 
@@ -210,7 +234,23 @@ def _apply_through_0002(dsn: str) -> None:
     backend = get_backend(mr._yoyo_uri(dsn))
     with migrations_dir() as path:
         migrations = read_migrations(str(path))
-        prior = migrations.filter(lambda m: m.id != DEAD_LETTER_MIGRATION_ID)
+        prior = migrations.filter(lambda m: m.id in {BASELINE_MIGRATION_ID, UPGRADE_MIGRATION_ID})
+        with backend.lock():
+            backend.apply_migrations(backend.to_apply(prior))
+
+
+def _apply_through_0004(dsn: str) -> None:
+    """Apply every migration except the 0005 tail, leaving it pending.
+
+    Stages a genuine prior schema version (no ``subject_id`` columns) so a later
+    ``apply_migrations`` runs the 0005 subject_id migration as a real
+    non-destructive upgrade over populated data."""
+    from yoyo import get_backend, read_migrations
+
+    backend = get_backend(mr._yoyo_uri(dsn))
+    with migrations_dir() as path:
+        migrations = read_migrations(str(path))
+        prior = migrations.filter(lambda m: m.id != SUBJECT_ID_MIGRATION_ID)
         with backend.lock():
             backend.apply_migrations(backend.to_apply(prior))
 
@@ -331,6 +371,33 @@ def test_upgrade_0003_preserves_data(clean_db: str) -> None:
     assert _count_rows(clean_db, "source_messages") == 1
     assert _count_rows(clean_db, "notes") == 1
     assert _count_rows(clean_db, "event_chunks") == 1
+
+
+@pgmark
+def test_upgrade_0005_preserves_data(clean_db: str) -> None:
+    """Applying 0005 over a populated 0001..0004 database is a non-destructive
+    upgrade: the nullable ``subject_id`` columns appear, every pre-existing row
+    survives, and those rows are ``subject_id IS NULL`` (community-wide)."""
+    # Stage a prior schema version (0001..0004) with realistic data.
+    _apply_through_0004(clean_db)
+    _insert_source_row(clean_db, "src-1")
+    _insert_note_row(clean_db, "note-1", "src-1")
+    _insert_chunk_row(clean_db, "chunk-1", "note-1", "src-1")
+    assert not _column_exists(clean_db, "notes", "subject_id")
+    assert not _column_exists(clean_db, "event_chunks", "subject_id")
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 1
+
+    # The real upgrade: 0005 applies on top of the populated database.
+    apply_migrations(clean_db)
+
+    assert _column_exists(clean_db, "notes", "subject_id")
+    assert _column_exists(clean_db, "event_chunks", "subject_id")
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT
+    assert _count_rows(clean_db, "source_messages") == 1
+    assert _count_rows(clean_db, "notes") == 1
+    assert _count_rows(clean_db, "event_chunks") == 1
+    assert _column_all_null(clean_db, "notes", "subject_id")
+    assert _column_all_null(clean_db, "event_chunks", "subject_id")
 
 
 @pgmark
