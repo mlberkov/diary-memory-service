@@ -45,7 +45,13 @@ def _source(
     )
 
 
-def _note(*, eid: str = "e1", sid: str = "s1", community_id: str = "fam-A") -> Note:
+def _note(
+    *,
+    eid: str = "e1",
+    sid: str = "s1",
+    community_id: str = "fam-A",
+    subject_id: str | None = None,
+) -> Note:
     return Note(
         note_id=eid,
         source_message_id=sid,
@@ -54,6 +60,7 @@ def _note(*, eid: str = "e1", sid: str = "s1", community_id: str = "fam-A") -> N
         note_date=date(2026, 5, 9),
         note_text="Walked the dog",
         created_at=_now(),
+        subject_id=subject_id,
     )
 
 
@@ -65,6 +72,7 @@ def _chunk(
     community_id: str = "fam-A",
     text: str = "Walked the dog",
     idx: int = 0,
+    subject_id: str | None = None,
 ) -> EventChunk:
     return EventChunk(
         chunk_id=cid,
@@ -76,6 +84,7 @@ def _chunk(
         event_index=idx,
         chunk_text=text,
         created_at=_now(),
+        subject_id=subject_id,
     )
 
 
@@ -182,6 +191,32 @@ def test_get_note_by_source_message_id(tmp_path: Path) -> None:
 def test_get_note_by_source_message_id_missing_returns_none(tmp_path: Path) -> None:
     store = SqliteDomainStore(str(tmp_path / "diary.db"))
     assert store.get_note_by_source_message_id("nope") is None
+
+
+def test_subject_id_defaults_to_none_round_trip(tmp_path: Path) -> None:
+    """A note/chunk saved without a subject_id reloads with subject_id None (H-1)."""
+    store = SqliteDomainStore(str(tmp_path / "diary.db"))
+    store.save_source_message(_source(sid="s1"))
+    store.save_note(_note(eid="e1", sid="s1"))
+    store.save_event_chunks([_chunk(cid="c1", eid="e1", sid="s1")])
+
+    note = store.get_note_by_source_message_id("s1")
+    chunk = store.get_event_chunk("c1", community_id="fam-A")
+    assert note is not None and note.subject_id is None
+    assert chunk is not None and chunk.subject_id is None
+
+
+def test_subject_id_round_trips_when_set(tmp_path: Path) -> None:
+    """An explicit opaque subject_id survives the round trip on both records (H-1)."""
+    store = SqliteDomainStore(str(tmp_path / "diary.db"))
+    store.save_source_message(_source(sid="s1"))
+    store.save_note(_note(eid="e1", sid="s1", subject_id="subj-1"))
+    store.save_event_chunks([_chunk(cid="c1", eid="e1", sid="s1", subject_id="subj-1")])
+
+    note = store.get_note_by_source_message_id("s1")
+    chunk = store.get_event_chunk("c1", community_id="fam-A")
+    assert note is not None and note.subject_id == "subj-1"
+    assert chunk is not None and chunk.subject_id == "subj-1"
 
 
 def test_count_event_chunks_for_source(tmp_path: Path) -> None:
