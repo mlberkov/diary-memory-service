@@ -234,7 +234,7 @@ def _apply_through_0002(dsn: str) -> None:
     backend = get_backend(mr._yoyo_uri(dsn))
     with migrations_dir() as path:
         migrations = read_migrations(str(path))
-        prior = migrations.filter(lambda m: m.id != DEAD_LETTER_MIGRATION_ID)
+        prior = migrations.filter(lambda m: m.id in {BASELINE_MIGRATION_ID, UPGRADE_MIGRATION_ID})
         with backend.lock():
             backend.apply_migrations(backend.to_apply(prior))
 
