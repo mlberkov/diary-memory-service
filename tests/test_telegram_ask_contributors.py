@@ -1,18 +1,10 @@
-"""Telegram-adapter tests for the ``/ask``-reply contributor footer (D-091).
+"""Telegram-adapter guard: the ``/ask`` reply carries no contributor footer (D-101).
 
-Asserts the webhook's outbound ASK render path for
-``DispatchResult.grounding_chunks``:
-
-- A grounded reply appends a single ``Contributors: …`` footer line beneath
-  ``answer_text``, blank-line separated; contributors are the distinct authors
-  of the grounding chunks, deduped by opaque ``author_user_id`` in
-  first-appearance order, resolved through the adapter-only fallback chain.
-- ``WEAK_EVIDENCE`` / ``AMBIGUOUS`` (which carry grounding chunks) keep the
-  footer beneath their trailer.
-- ``NO_EVIDENCE`` / empty-query / ``PROVIDER_UNAVAILABLE`` (no grounding
-  chunks) render no footer — byte-identical to the pre-D-091 reply.
-- Author resolution is requester-``community_id``-scoped (D-089): a chunk whose
-  source is owned by another community resolves to the opaque floor.
+The ``Contributors: …`` footer (contract D-091, code D-092) was removed as a
+user-facing element: ``/sources`` (cited-only, D-100) is the sole attribution
+surface. These tests pin the removal at the webhook's outbound ASK render path —
+even when the grounding chunks have fully resolvable authors, no footer (and no
+adapter-composed display name) is appended to the reply.
 """
 
 from __future__ import annotations
@@ -131,6 +123,7 @@ class _FixedAnswerQueryService:
             evidence=evidence,
             context=context,
             answer_text=self._answer_text,
+            cited_chunk_ids=tuple(c.chunk_id for c in self._chunks),
         )
 
 
@@ -151,8 +144,8 @@ def _build_client(
     app = create_app(settings)
     app.dependency_overrides[get_dispatcher] = lambda: dispatcher
     app.dependency_overrides[get_telegram_client] = lambda: telegram_client
-    # Contributor resolution reads through the backend store; point it at the
-    # same store the dispatcher uses so lookups are deterministic (D-086 / D-089).
+    # The author display store is still wired (it backs /sources); point it at the
+    # same store so a footer, if any were composed, would resolve real names.
     app.dependency_overrides[get_backend_store] = lambda: store
     return TestClient(app), telegram_client
 
@@ -188,9 +181,10 @@ def _save_source_and_snapshot(
     )
 
 
-def test_grounded_ask_reply_appends_contributors_footer() -> None:
-    # Two distinct authors resolved via the @username tier, deduped and ordered
-    # by first appearance over the grounding chunks.
+def test_grounded_ask_reply_has_no_contributors_footer() -> None:
+    # Two grounding chunks with fully resolvable @username authors. Pre-D-101 this
+    # appended "Contributors: @alice, @bob"; the footer is now gone, so the reply
+    # is the answer text alone, with no footer and no adapter-composed name.
     c_alice = _chunk("c-1", "Tried a new book", author_user_id="user-alice000")
     c_bob = _chunk("c-2", "Had a calm morning", author_user_id="user-bob00000")
     store = MockDomainStore()
@@ -207,31 +201,14 @@ def test_grounded_ask_reply_appends_contributors_footer() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["method"] == "sendMessage"
-    assert body["text"] == "Mock answer.\n\nContributors: @alice, @bob"
+    assert body["text"] == "Mock answer."
+    assert "Contributors:" not in body["text"]
+    assert "@" not in body["text"]
 
 
-def test_grounded_ask_footer_dedups_and_preserves_first_appearance() -> None:
-    # Authors appear alice, bob, alice — alice deduped to one entry, order kept.
-    c_a1 = _chunk("c-1", "one", author_user_id="user-alice000")
-    c_b = _chunk("c-2", "two", author_user_id="user-bob00000")
-    c_a2 = _chunk("c-3", "three", author_user_id="user-alice000")
-    store = MockDomainStore()
-    _save_source_and_snapshot(
-        store, chunk=c_a1, external_message_id="101", username="alice", first_name=None
-    )
-    _save_source_and_snapshot(
-        store, chunk=c_b, external_message_id="102", username="bob", first_name=None
-    )
-    _save_source_and_snapshot(
-        store, chunk=c_a2, external_message_id="103", username="alice", first_name=None
-    )
-    client, _tg = _build_client(_FixedAnswerQueryService((c_a1, c_b, c_a2)), store=store)
-
-    body = _post(client, _update("/ask anything")).json()
-    assert body["text"] == "Mock answer.\n\nContributors: @alice, @bob"
-
-
-def test_weak_evidence_ask_reply_keeps_footer_beneath_trailer() -> None:
+def test_weak_evidence_ask_reply_has_no_footer_beneath_trailer() -> None:
+    # WEAK_EVIDENCE carries grounding chunks (so it would have carried a footer);
+    # the reply now ends at the evidence-strength trailer, with no footer below it.
     c = _chunk("c-1", "note", author_user_id="user-alice000")
     store = MockDomainStore()
     _save_source_and_snapshot(
@@ -242,42 +219,5 @@ def test_weak_evidence_ask_reply_keeps_footer_beneath_trailer() -> None:
     )
 
     body = _post(client, _update("/ask thing")).json()
-    # The footer sits beneath the weak-evidence trailer, which itself sits
-    # beneath the answer body.
-    assert body["text"] == (
-        "Mock answer.\n\n(weak evidence — model expressed uncertainty)" "\n\nContributors: @alice"
-    )
-
-
-def test_no_evidence_ask_reply_has_no_footer() -> None:
-    # NO_EVIDENCE with no grounding context → grounding_chunks is None → no
-    # footer; the reply is byte-identical to the pre-D-091 surface.
-    store = MockDomainStore()
-    client, _tg = _build_client(
-        _FixedAnswerQueryService((), fallback=FallbackMode.NO_EVIDENCE, with_context=False),
-        store=store,
-    )
-
-    body = _post(client, _update("/ask nothing matches")).json()
+    assert body["text"] == "Mock answer.\n\n(weak evidence — model expressed uncertainty)"
     assert "Contributors:" not in body["text"]
-    assert body["text"] == (
-        "Nothing in your saved notes matched 'nothing matches'. "
-        "Try rephrasing the question, or use words that appear in your notes."
-    )
-
-
-def test_grounded_ask_footer_floor_when_source_in_other_community() -> None:
-    # The grounding chunk's source is owned by community "99"; the requester is
-    # community "42". The community-scoped read returns None, so the contributor
-    # resolves to the opaque floor — the read never crosses a community boundary
-    # (D-089, I-7). author_user_id="user-XYZ12345" → floor `user-XYZ12345` (last8).
-    c = _chunk("c-1", "note", author_user_id="user-XYZ12345", community_id="99")
-    store = MockDomainStore()
-    # Source persisted under the other community; the requester ("42") cannot read it.
-    _save_source_and_snapshot(
-        store, chunk=c, external_message_id="101", username="mallory", first_name=None
-    )
-    client, _tg = _build_client(_FixedAnswerQueryService((c,)), store=store)
-
-    body = _post(client, _update("/ask cross")).json()
-    assert body["text"] == "Mock answer.\n\nContributors: user-XYZ12345"

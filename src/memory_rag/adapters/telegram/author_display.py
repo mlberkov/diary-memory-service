@@ -35,7 +35,6 @@ builds once and hands to both the dispatcher and this port.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import Protocol
 
 from memory_rag.core.domain.models import EventChunk
@@ -195,47 +194,3 @@ def render_source_block(
         f"— {author}\n\n"
         f"{chunk.chunk_text}"
     )
-
-
-_CONTRIBUTORS_LABEL = "Contributors:"
-
-
-def render_contributors_footer(
-    chunks: Sequence[EventChunk],
-    store: TelegramBackendStore,
-    *,
-    community_id: str,
-) -> str:
-    """Render the ``/ask``-reply contributor-attribution footer (D-091).
-
-    The contributors are the **distinct authors of the answer's grounding
-    chunks** — deduplicated on the opaque ``author_user_id`` *before* display
-    resolution, in first-appearance order over ``chunks`` (the RRF
-    ``ordered_chunks`` order; no re-sort). One representative chunk per distinct
-    ``author_user_id`` is resolved through the adapter-only
-    :func:`resolve_chunk_author_display` fallback chain (``@username →
-    first_name → opaque short-ID``), so the same non-authoritative /
-    opaque-floor semantics as ``/sources`` apply. Two distinct
-    ``author_user_id``\\s that resolve to the same display string intentionally
-    stay two separate entries — dedup is on authorship truth (I-6), never on
-    the display string.
-
-    Returns a single labeled line: ``Contributors: <name1>, <name2>, …``
-    (comma-space separated; a single contributor renders as
-    ``Contributors: @alice``). ``community_id`` is the requester-scoped
-    community, forwarded to the community-scoped author lookup so resolution
-    never crosses a community boundary (Slice 8.1.2 / D-089; I-7, R-3). Callers
-    render this footer only when ``chunks`` is non-empty (D-091).
-    """
-    seen: set[str] = set()
-    representatives: list[EventChunk] = []
-    for chunk in chunks:
-        if chunk.author_user_id in seen:
-            continue
-        seen.add(chunk.author_user_id)
-        representatives.append(chunk)
-    names = [
-        resolve_chunk_author_display(chunk, store, community_id=community_id)
-        for chunk in representatives
-    ]
-    return f"{_CONTRIBUTORS_LABEL} {', '.join(names)}"

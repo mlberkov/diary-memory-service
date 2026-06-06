@@ -25,7 +25,6 @@ from memory_rag.adapters.embeddings import build_embedding_client
 from memory_rag.adapters.telegram.author_display import (
     AuthorDisplayInputStore,
     TelegramBackendStore,
-    render_contributors_footer,
     render_source_block,
 )
 from memory_rag.adapters.telegram.client import HttpxTelegramClient, TelegramClient
@@ -342,24 +341,6 @@ def register_telegram_webhook(app: FastAPI) -> None:
                 sent,
             )
             return {}
-        if result.grounding_chunks:
-            # Grounded /ask reply: append the contributor-attribution footer
-            # (D-091). Requester-scoped community for the author lookup — the
-            # same edge-resolved community_id (D-093 / G-1) and D-089
-            # community-scoped read used for /sources, so resolution never
-            # crosses a community boundary (I-7, R-3). The dispatcher sets
-            # grounding_chunks only when the grounding set is non-empty, so the
-            # footer renders iff grounded.
-            community_id = inbound.community_id
-            footer = render_contributors_footer(
-                result.grounding_chunks,
-                backend_store,
-                community_id=community_id,
-            )
-            return build_send_message_payload(
-                inbound.external_chat_id,
-                f"{result.reply_text}\n\n{footer}",
-            )
         return build_send_message_payload(inbound.external_chat_id, result.reply_text)
 
 

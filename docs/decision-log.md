@@ -3186,3 +3186,86 @@ This consumes the D-098 seam and the D-099 guardrail; it introduces **no new `/a
 - Any `QueryService` / `AnswerResult` seam widening or new fields.
 - Semantic groundedness / factuality — **Phase 7** track.
 - `/sources` header-wording redesign and `/sources N` argument.
+
+## D-101 — Evidence-faithful attribution, Packet C: remove the all-retrieved `Contributors:` footer from `/ask`
+
+### Context
+
+The "Evidence-faithful answer & source attribution" milestone (D-098 → D-099 → D-100)
+makes `/ask` + `/sources` report only the evidence the LLM actually cited
+(`cited_chunk_ids`). D-098 named **two** surfaces that over-claim by rendering the full
+retrieved set — the on-demand `/sources` reply and the `/ask` `Contributors:` footer
+(contract D-091, code D-092, keyed on `answer.context.ordered_chunks`). D-100 fixed the
+first (cited-only `/sources`). That left a cross-surface inconsistency on the *same*
+answer: `/sources` shows the cited subset while the footer still credits every retrieved
+contributor.
+
+The owner chose to resolve this not by re-keying the footer onto the cited subset but by
+**removing it entirely** — making `/sources` (cited-only) the single user-facing
+attribution surface, eliminating the divergence and the risk of a second attribution
+layer drifting in future.
+
+### Decision
+
+The `/ask` `Contributors:` footer is **removed as a user-facing element**, and its
+footer-only seam is fully deleted:
+
+- The Telegram webhook no longer appends a `Contributors: …` footer to grounded `/ask`
+  replies; the reply is the answer text alone (plus any existing evidence-strength
+  trailer).
+- `DispatchResult.grounding_chunks` (D-092) — produced only for the footer and consumed
+  only by it — is removed, along with the `Dispatcher` ASK derivation that set it.
+- `render_contributors_footer` (D-092) is deleted from
+  `adapters/telegram/author_display.py`. The shared author-resolution helpers
+  (`resolve_author_display_name`, `resolve_chunk_author_display`, `render_source_block`)
+  and the store protocols stay — `/sources` still uses them.
+
+This **supersedes the user-facing rendering of D-091 / D-092** while changing **no
+invariant**: authorship is still carried only as the opaque `author_user_id` (I-6),
+display names are still resolved adapter-side and requester-`community_id`-scoped (D-089;
+I-1 / I-7). `AnswerTrace.context_chunk_ids` still records the full retrieved context for
+operator forensics. The D-091 / D-092 entries stay as historical lineage; this entry is
+the forward supersession.
+
+### Why
+
+After D-100, the footer and `/sources` disagreed on the same answer — exactly the
+over-claiming the milestone exists to remove, now observable rather than latent. Full
+removal (vs. re-keying the footer to the cited subset) is the owner's choice: it keeps a
+single attribution surface, leaves no dormant attribution seam to drift, and keeps the
+branch story simple — D-098 + D-099 + D-100 make `/ask` + `/sources` evidence-faithful,
+and the redundant footer is withdrawn.
+
+### Consequence
+
+- Grounded `/ask` replies (incl. `WEAK_EVIDENCE` / `AMBIGUOUS`) no longer carry a
+  `Contributors:` footer; `NO_EVIDENCE` / empty-query / `PROVIDER_UNAVAILABLE` /
+  `PARSE_FAILURE` replies are behaviorally unchanged (they never carried one).
+- `/sources` is unchanged (cited-only, D-100) and is now the sole user-facing
+  attribution surface.
+- **Changed (`src/`):** `adapters/telegram/webhook.py` (drop the footer append + import),
+  `services/dispatcher.py` (drop the `grounding_chunks` derivation),
+  `core/routing/models.py` (delete the `DispatchResult.grounding_chunks` field + docstring),
+  `adapters/telegram/author_display.py` (delete `render_contributors_footer`).
+- **Changed (`tests/`):** `tests/test_telegram_ask_contributors.py` (presence tests →
+  an adapter-level absence guard), `tests/test_author_display_resolution.py` (drop the
+  footer-unit section), `tests/test_end_to_end_smoke.py` (assert no footer),
+  `tests/test_grouped_multi_diary.py` (drop the `grounding_chunks` seam test; multi-author
+  I-6 coverage retained via `context.ordered_chunks`),
+  `tests/test_dispatcher_retrieval_fallback.py` (drop the `grounding_chunks` assertions;
+  retain a core "composes no footer" guard).
+- **Docs:** this D-101 entry; `docs/execution-map.md` (Packet C row);
+  `docs/RUNBOOK.md` (remove the live footer paragraph; edit the grouped-diary footer
+  mention); `docs/INVARIANTS.md` (drop the now-false I-6 footer clause; I-6 itself
+  unchanged). No schema / DDL / migration / config change; no new I-/R- number.
+  `[[feedback_minimal_packet_docs]]`, `[[feedback_full_gate_and_doc_truthfulness]]`,
+  `[[feedback_doc_state_truthfulness]]`, `[[feedback_decision_log_citation]]`.
+
+### Out of scope (per packet boundaries)
+
+- Any `/sources` change (already cited-only, D-100).
+- Any `AnswerResult` / `QueryService` seam change or new field.
+- Human author names in `/drafts` — **Packet D**.
+- Any replacement attribution UI (badges, icons, per-claim markers) — separate future
+  work, not introduced here.
+- Semantic groundedness / factuality — **Phase 7** track.

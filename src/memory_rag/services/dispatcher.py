@@ -295,18 +295,6 @@ class Dispatcher:
                 )
             self._update_latest_sources(message.community_id, answer)
             reply = _format_answer_reply(answer)
-            # Carry the opaque grounding chunks to the adapter for
-            # contributor attribution (D-091), mirroring the source_chunks
-            # seam. Set iff the grounding set is non-empty (same guard as
-            # _update_latest_sources) so the adapter renders the
-            # Contributors footer only on grounded replies; no-evidence /
-            # empty-query / retrieval-unavailable contours carry None and
-            # stay byte-unchanged. The dispatcher composes no display name.
-            grounding_chunks = (
-                answer.context.ordered_chunks
-                if answer.context is not None and answer.context.ordered_chunks
-                else None
-            )
             return DispatchResult(
                 reply_text=reply,
                 route=route,
@@ -314,7 +302,6 @@ class Dispatcher:
                     "fallback": answer.fallback.value,
                     "route_source": message.route_source,
                 },
-                grounding_chunks=grounding_chunks,
             )
         if route is RouteKind.SOURCES:
             return self._dispatch_sources(message)

@@ -94,16 +94,8 @@ class DispatchResult:
     (``/sources``, D-036); the adapter renders each block as-is and
     resolves the (adapter-only, D-081 / D-086) author display name,
     packing the blocks with the same combined-message semantics used for
-    ``drafts``. ``grounding_chunks`` carries the opaque chunks that
-    grounded the chat's most recent ``/ask`` answer (D-091); the adapter
-    resolves the distinct contributors (by opaque ``author_user_id``) and
-    appends a ``Contributors: …`` footer to the reply. It mirrors
-    ``source_chunks`` as a separate seam so the ``/ask`` reply and
-    ``/sources`` render paths stay disjoint; like ``source_chunks`` it
-    carries opaque chunks, never a pre-rendered display name, so display
-    resolution never happens in the channel-neutral core. When
-    ``document``, ``drafts``, ``source_chunks``, and ``grounding_chunks``
-    are all ``None`` the adapter delivers ``reply_text`` only.
+    ``drafts``. When ``document``, ``drafts``, and ``source_chunks`` are
+    all ``None`` the adapter delivers ``reply_text`` only.
     """
 
     reply_text: str
@@ -112,4 +104,3 @@ class DispatchResult:
     document: ExportPayload | None = None
     drafts: list[SourceMessage] | None = None
     source_chunks: tuple[EventChunk, ...] | None = None
-    grounding_chunks: tuple[EventChunk, ...] | None = None

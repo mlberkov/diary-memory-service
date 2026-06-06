@@ -219,7 +219,7 @@ def test_parse_failure_replies_with_retry_hint() -> None:
 # was removed with the marker machinery.
 
 
-# --- D-091: ASK DispatchResult carries opaque grounding chunks --------------
+# --- D-101: ASK reply composes no contributor footer in the core ------------
 
 
 def _chunk(chunk_id: str = "c1", author_user_id: str = "user-abcdef12") -> EventChunk:
@@ -247,9 +247,10 @@ def _context(chunks: tuple[EventChunk, ...]) -> AnswerContext:
     )
 
 
-def test_grounded_ask_threads_grounding_chunks_onto_dispatch_result() -> None:
-    # The channel-neutral dispatcher carries the opaque grounding chunks
-    # (mirroring source_chunks); it composes no display name (D-091).
+def test_grounded_ask_reply_composes_no_contributor_footer() -> None:
+    # The channel-neutral dispatcher composes no display name and no
+    # `Contributors:` footer in the reply text — the footer was removed as a
+    # user surface (D-101) and was never the core's to compose anyway.
     chunks = (_chunk("c1"), _chunk("c2"))
     dispatcher = _build_dispatcher(
         AnswerResult(
@@ -263,55 +264,8 @@ def test_grounded_ask_threads_grounding_chunks_onto_dispatch_result() -> None:
 
     result = dispatcher.dispatch(_ask("book"))
 
-    assert result.grounding_chunks == chunks
-    # No display name composed in the core reply.
     assert "Contributors:" not in result.reply_text
     assert "@" not in result.reply_text
-
-
-def test_weak_evidence_ask_still_carries_grounding_chunks() -> None:
-    chunks = (_chunk("c1"),)
-    dispatcher = _build_dispatcher(
-        AnswerResult(
-            fallback=FallbackMode.WEAK_EVIDENCE,
-            query_text="book",
-            evidence=_evidence(),
-            context=_context(chunks),
-            answer_text="Maybe a book.",
-        )
-    )
-
-    result = dispatcher.dispatch(_ask("book"))
-
-    assert result.grounding_chunks == chunks
-
-
-def test_no_evidence_ask_carries_no_grounding_chunks() -> None:
-    # Empty-retrieval NO_EVIDENCE has no context → grounding_chunks is None, so
-    # the adapter renders no contributor footer (D-091 render condition).
-    dispatcher = _build_dispatcher(
-        AnswerResult(fallback=FallbackMode.NO_EVIDENCE, query_text="book", evidence=[])
-    )
-
-    result = dispatcher.dispatch(_ask("book"))
-
-    assert result.grounding_chunks is None
-
-
-def test_empty_context_ask_carries_no_grounding_chunks() -> None:
-    # A present-but-empty ordered_chunks set is treated as no grounding.
-    dispatcher = _build_dispatcher(
-        AnswerResult(
-            fallback=FallbackMode.NO_EVIDENCE,
-            query_text="book",
-            evidence=[],
-            context=_context(()),
-        )
-    )
-
-    result = dispatcher.dispatch(_ask("book"))
-
-    assert result.grounding_chunks is None
 
 
 def test_sibling_fallback_wording_unchanged() -> None:

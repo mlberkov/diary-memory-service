@@ -12,7 +12,6 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 
 from memory_rag.adapters.telegram.author_display import (
-    render_contributors_footer,
     render_source_block,
     resolve_author_display_name,
     resolve_chunk_author_display,
@@ -178,70 +177,3 @@ def test_render_source_block_floor_tier_format() -> None:
     store = _FakeStore(source=None, snapshot=None)
     block = render_source_block(_chunk(), index=2, total=2, store=store, community_id="42")  # type: ignore[arg-type]
     assert block == "[2026-05-09] (2/2)\n— user-abcdef12\n\nWalked the dog"
-
-
-# ---- contributor footer: dedup by author_user_id, first-appearance order ----
-#
-# These cover the pure dedup/order/render logic over the floor tier (no source
-# rows persisted), so display resolution is deterministic. The resolved
-# @username / first_name tiers in the rendered footer are covered end-to-end in
-# tests/test_telegram_ask_contributors.py. (D-091)
-
-
-class _FloorStore:
-    """Resolves every chunk to the opaque short-ID floor (no source rows)."""
-
-    def get_source_message(self, source_message_id: str, *, community_id: str) -> None:
-        return None
-
-    def get_author_display_input(
-        self, *, external_chat_id: str, external_message_id: str, edit_seq: int
-    ) -> None:  # pragma: no cover - never reached (no source row)
-        return None
-
-
-def test_footer_dedups_by_author_and_preserves_first_appearance() -> None:
-    # Authors appear A, B, A — A is deduped to one entry and the order is the
-    # first-appearance sequence (A before B), never re-sorted.
-    chunks = (
-        _chunk(source_message_id="s-1", author_user_id="user-aaaaaaaa"),
-        _chunk(source_message_id="s-2", author_user_id="user-bbbbbbbb"),
-        _chunk(source_message_id="s-3", author_user_id="user-aaaaaaaa"),
-    )
-    footer = render_contributors_footer(chunks, _FloorStore(), community_id="42")  # type: ignore[arg-type]
-    assert footer == "Contributors: user-aaaaaaaa, user-bbbbbbbb"
-
-
-def test_footer_single_contributor_format() -> None:
-    chunks = (_chunk(author_user_id="user-abcdef12"),)
-    footer = render_contributors_footer(chunks, _FloorStore(), community_id="42")  # type: ignore[arg-type]
-    assert footer == "Contributors: user-abcdef12"
-
-
-def test_footer_distinct_ids_same_display_string_stay_separate() -> None:
-    # Two distinct author_user_ids whose opaque floors collide on the last 8
-    # chars resolve to the same display string but must remain two entries —
-    # dedup is on the canonical author_user_id, never the display string (I-6).
-    chunks = (
-        _chunk(source_message_id="s-1", author_user_id="user-X-abcdef12"),
-        _chunk(source_message_id="s-2", author_user_id="user-Y-abcdef12"),
-    )
-    footer = render_contributors_footer(chunks, _FloorStore(), community_id="42")  # type: ignore[arg-type]
-    assert footer == "Contributors: user-abcdef12, user-abcdef12"
-
-
-def test_footer_reuses_username_tier_and_dedups_same_author() -> None:
-    # All chunks share one author resolved via the @username tier → one entry.
-    store = _FakeStore(source=_source(), snapshot=("alice", "Alice A"))
-    chunks = (_chunk(), _chunk(source_message_id="s-2"))
-    footer = render_contributors_footer(chunks, store, community_id="42")  # type: ignore[arg-type]
-    assert footer == "Contributors: @alice"
-
-
-def test_footer_community_mismatch_falls_to_floor() -> None:
-    # Requester community ("99") differs from the source's community ("42"):
-    # the community-scoped read returns None, so the contributor resolves to the
-    # opaque floor and the read never crosses a community boundary (D-089, I-7).
-    store = _FakeStore(source=_source(), snapshot=("alice", "Alice A"))
-    footer = render_contributors_footer((_chunk(),), store, community_id="99")  # type: ignore[arg-type]
-    assert footer == "Contributors: user-abcdef12"
