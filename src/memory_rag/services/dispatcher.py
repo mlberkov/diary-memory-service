@@ -144,6 +144,7 @@ _REPLY_NO_MATCHES_TEMPLATE = (
     "Try rephrasing the question, or use words that appear in your notes."
 )
 _REPLY_SOURCES_NONE = "No selected chunks available — ask a question with /ask first."
+_REPLY_SOURCES_NONE_CITED = "Your last /ask answer didn't cite any specific notes."
 
 
 def _format_answer_reply(result: AnswerResult) -> str:
@@ -216,12 +217,17 @@ def _format_drafts_header(*, returned: int, requested: int, explicit: bool, max_
 class Dispatcher:
     """Maps an :class:`InboundMessage` to a :class:`DispatchResult`.
 
-    Holds a small per-community in-memory cache of the chunks retrieval
-    selected for the chat's most recent ``/ask`` turn (Slice 4.4 /
-    D-036). The cache backs ``/sources``: every ``/ask`` dispatch
-    overwrites it with ``answer.context.ordered_chunks`` when non-empty
-    and clears it otherwise. The cache is process-local and dies on
-    restart; this is acceptable because the FastAPI wiring at
+    Holds a small per-community in-memory cache of the chunks the LLM
+    cited in the chat's most recent ``/ask`` answer (Slice 4.4 / D-036;
+    cited-only since D-100). The cache backs ``/sources``: every ``/ask``
+    dispatch overwrites it with the cited subset of
+    ``answer.context.ordered_chunks`` (the chunks in
+    ``answer.cited_chunk_ids``; D-098), which is empty for every
+    cited-empty contour (D-099). Key presence — not non-emptiness —
+    records that an ``/ask`` happened, so ``/sources`` distinguishes "no
+    prior /ask" from "prior /ask that cited nothing". The cache is
+    process-local and dies on restart; this is acceptable because the
+    FastAPI wiring at
     ``adapters/telegram/webhook.py`` makes ``Dispatcher`` a module-level
     singleton, so ``/ask`` and a follow-up ``/sources`` are served by
     the same instance within one process. Multi-worker deploys would
@@ -289,18 +295,6 @@ class Dispatcher:
                 )
             self._update_latest_sources(message.community_id, answer)
             reply = _format_answer_reply(answer)
-            # Carry the opaque grounding chunks to the adapter for
-            # contributor attribution (D-091), mirroring the source_chunks
-            # seam. Set iff the grounding set is non-empty (same guard as
-            # _update_latest_sources) so the adapter renders the
-            # Contributors footer only on grounded replies; no-evidence /
-            # empty-query / retrieval-unavailable contours carry None and
-            # stay byte-unchanged. The dispatcher composes no display name.
-            grounding_chunks = (
-                answer.context.ordered_chunks
-                if answer.context is not None and answer.context.ordered_chunks
-                else None
-            )
             return DispatchResult(
                 reply_text=reply,
                 route=route,
@@ -308,7 +302,6 @@ class Dispatcher:
                     "fallback": answer.fallback.value,
                     "route_source": message.route_source,
                 },
-                grounding_chunks=grounding_chunks,
             )
         if route is RouteKind.SOURCES:
             return self._dispatch_sources(message)
@@ -439,36 +432,58 @@ class Dispatcher:
         )
 
     def _update_latest_sources(self, community_id: str, answer: AnswerResult) -> None:
-        """Cache the chunks retrieval selected for the community's last /ask (D-036).
+        """Cache the chunks the LLM cited for the community's last /ask (D-036, D-100).
 
-        Every ``/ask`` dispatch writes the cache (no skip path). Non-empty
-        ``answer.context.ordered_chunks`` overwrites any prior value; empty
-        (empty-query or empty-retrieval ``NO_EVIDENCE``, plus the
-        ``NotImplementedError`` retrieval-unavailable contour where
-        ``answer.context`` is ``None``) clears the entry. Only the next
-        ``/ask`` invalidates this cache.
+        Every ``/ask`` dispatch writes the cache (no skip path), so key
+        presence records that an ``/ask`` happened at all. The stored
+        value is the *cited* subset — the chunks in
+        ``answer.context.ordered_chunks`` whose ``chunk_id`` is in
+        ``answer.cited_chunk_ids`` (the LLM's used-evidence set, an I-9
+        subset of the retrieved context; D-098), kept in post-RRF
+        ``ordered_chunks`` order. Every cited-empty contour
+        (``cited_chunk_ids == ()`` per D-099 — both ``NO_EVIDENCE``
+        paths, ``PROVIDER_UNAVAILABLE``, ``PARSE_FAILURE``, and the
+        no-context contour) stores an empty tuple, which ``/sources``
+        distinguishes from "no prior /ask" by key presence. Only the next
+        ``/ask`` overwrites this entry.
         """
-        if answer.context is not None and answer.context.ordered_chunks:
-            self._latest_sources[community_id] = answer.context.ordered_chunks
+        cited_ids = set(answer.cited_chunk_ids)
+        if answer.context is not None and cited_ids:
+            cited = tuple(c for c in answer.context.ordered_chunks if c.chunk_id in cited_ids)
         else:
-            self._latest_sources.pop(community_id, None)
+            cited = ()
+        self._latest_sources[community_id] = cited
 
     def _dispatch_sources(self, message: InboundMessage) -> DispatchResult:
-        """Serve ``/sources`` by reading the latest-sources cache (D-036).
+        """Serve ``/sources`` from the latest-cited cache (D-036, D-100).
 
-        Returns the selected chunks for the chat's most recent ``/ask``
-        turn — the post-RRF top-k chunks the prompt builder fed to the
-        LLM — as opaque ``EventChunk`` objects on ``source_chunks``. The
-        adapter renders each block (full ``chunk_text``) and resolves the
-        author display name (adapter-only; D-081 / D-086); the
-        channel-neutral dispatcher never composes a display name. Not
-        citations, not fine-grained attribution.
+        Returns the chunks the LLM *cited* in the chat's most recent
+        ``/ask`` answer (``AnswerResult.cited_chunk_ids``; D-098) as
+        opaque ``EventChunk`` objects on ``source_chunks``. The adapter
+        renders each block (full ``chunk_text``) and resolves the author
+        display name (adapter-only; D-081 / D-086); the channel-neutral
+        dispatcher never composes a display name. Two empty contours are
+        kept distinct by key presence: no prior ``/ask`` (key absent) →
+        ``_REPLY_SOURCES_NONE``; a prior ``/ask`` whose answer cited
+        nothing (key present, empty tuple — every cited-empty contour per
+        D-099) → ``_REPLY_SOURCES_NONE_CITED``. Not fine-grained
+        attribution.
         """
         community_id = message.community_id
-        chunks = self._latest_sources.get(community_id)
-        if not chunks:
+        if community_id not in self._latest_sources:
             return DispatchResult(
                 reply_text=_REPLY_SOURCES_NONE,
+                route=RouteKind.SOURCES,
+                metadata={
+                    "fallback": FallbackMode.NONE.value,
+                    "route_source": message.route_source,
+                    "returned": "0",
+                },
+            )
+        chunks = self._latest_sources[community_id]
+        if not chunks:
+            return DispatchResult(
+                reply_text=_REPLY_SOURCES_NONE_CITED,
                 route=RouteKind.SOURCES,
                 metadata={
                     "fallback": FallbackMode.NONE.value,

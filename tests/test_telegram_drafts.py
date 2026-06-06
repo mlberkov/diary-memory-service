@@ -11,7 +11,12 @@ from fastapi.testclient import TestClient
 
 from memory_rag.adapters.answers import MockChatClient
 from memory_rag.adapters.embeddings import MockEmbeddingClient
-from memory_rag.adapters.telegram.webhook import get_dispatcher, get_telegram_client
+from memory_rag.adapters.telegram.webhook import (
+    _render_draft_block,
+    get_backend_store,
+    get_dispatcher,
+    get_telegram_client,
+)
 from memory_rag.app import create_app
 from memory_rag.config import Settings
 from memory_rag.core.domain.models import SourceMessage
@@ -90,6 +95,9 @@ def _build_client(
     app = create_app(settings)
     app.dependency_overrides[get_dispatcher] = lambda: dispatcher
     app.dependency_overrides[get_telegram_client] = lambda: telegram_client
+    # /drafts author resolution reads through the backend store; point it at the
+    # same store the dispatcher uses so snapshot lookups are deterministic (D-086).
+    app.dependency_overrides[get_backend_store] = lambda: store
     return TestClient(app), store, telegram_client
 
 
@@ -131,6 +139,41 @@ def _seed_short_drafts(store: MockDomainStore, *, count: int) -> None:
                 created_at=base.replace(minute=i),
             )
         )
+
+
+def _seed_draft_with_snapshot(
+    store: MockDomainStore,
+    *,
+    index: int,
+    minute: int,
+    author_user_id: str,
+    username: str | None,
+    first_name: str | None,
+    raw_text: str,
+) -> None:
+    """Seed one draft source message plus its author display-input snapshot."""
+    base = datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC)
+    store.save_source_message(
+        SourceMessage(
+            source_message_id=f"draft-id-{index:03d}",
+            community_id="42",
+            author_user_id=author_user_id,
+            external_chat_id="42",
+            external_user_id=author_user_id,
+            external_message_id=f"m-{index}",
+            edit_seq=0,
+            raw_text=raw_text,
+            detected_route=RouteKind.DRAFT,
+            created_at=base.replace(minute=minute),
+        )
+    )
+    store.save_author_display_input(
+        external_chat_id="42",
+        external_message_id=f"m-{index}",
+        edit_seq=0,
+        username=username,
+        first_name=first_name,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -329,3 +372,76 @@ def test_drafts_log_drafts_delivered_on_success(
 
     assert response.status_code == 200
     assert any("drafts.delivered" in line for line in caplog.text.splitlines())
+
+
+# ---- author display-name rendering (D-086 / D-098) --------------------------
+
+
+def test_drafts_render_resolved_author_tiers_and_drop_technical_ids() -> None:
+    client, store, tg = _build_client(_settings())
+    # Three D-086 tiers: @username, first_name, opaque floor (both-null snapshot).
+    _seed_draft_with_snapshot(
+        store,
+        index=0,
+        minute=0,
+        author_user_id="7",
+        username="alice",
+        first_name="Alice A",
+        raw_text="walked the dog",
+    )
+    _seed_draft_with_snapshot(
+        store,
+        index=1,
+        minute=1,
+        author_user_id="7",
+        username=None,
+        first_name="Bob",
+        raw_text="read a book",
+    )
+    _seed_draft_with_snapshot(
+        store,
+        index=2,
+        minute=2,
+        author_user_id="7",
+        username=None,
+        first_name=None,
+        raw_text="cooked dinner",
+    )
+
+    response = _post(client, _update("/drafts"))
+
+    assert response.status_code == 200
+    assert isinstance(tg, RecordingTelegramClient)
+    body = tg.message_calls[0]["text"]
+    # Human author names, one per tier.
+    assert "· @alice" in body
+    assert "· Bob" in body
+    assert "· user-7" in body
+    # The raw opaque id and the technical id: segment are gone (header trimmed).
+    assert "author:" not in body
+    assert "id:" not in body
+
+
+def test_render_draft_block_format_is_byte_stable() -> None:
+    store = MockDomainStore()
+    draft = SourceMessage(
+        source_message_id="draft-id-000",
+        community_id="42",
+        author_user_id="7",
+        external_chat_id="42",
+        external_user_id="7",
+        external_message_id="m-0",
+        edit_seq=0,
+        raw_text="walked the dog",
+        detected_route=RouteKind.DRAFT,
+        created_at=datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC),
+    )
+    store.save_author_display_input(
+        external_chat_id="42",
+        external_message_id="m-0",
+        edit_seq=0,
+        username="alice",
+        first_name=None,
+    )
+    block = _render_draft_block(draft, store=store, community_id="42")
+    assert block == "\U0001f4dd 2026-05-09T10:00:00+00:00 · @alice\n\nwalked the dog"

@@ -181,6 +181,7 @@ class QueryService:
                 trace_latency_ms=0,
                 trace_context_chunk_ids=(),
                 answer_text=None,
+                cited_chunk_ids=(),
             )
 
         query_embedding = self._embed.embed([query_text])[0]
@@ -236,6 +237,7 @@ class QueryService:
                 trace_latency_ms=0,
                 trace_context_chunk_ids=(),
                 answer_text=None,
+                cited_chunk_ids=(),
             )
 
         prompt = build_answer_prompt(context)
@@ -261,6 +263,7 @@ class QueryService:
                 trace_latency_ms=0,
                 trace_context_chunk_ids=context_chunk_ids,
                 answer_text=None,
+                cited_chunk_ids=(),
             )
 
         try:
@@ -284,6 +287,7 @@ class QueryService:
                 trace_latency_ms=response.latency_ms,
                 trace_context_chunk_ids=context_chunk_ids,
                 answer_text=None,
+                cited_chunk_ids=(),
             )
 
         graded = _MARKER_TO_FALLBACK[structured.uncertainty]
@@ -305,6 +309,7 @@ class QueryService:
             trace_latency_ms=response.latency_ms,
             trace_context_chunk_ids=context_chunk_ids,
             answer_text=structured.answer_text,
+            cited_chunk_ids=structured.cited_chunk_ids,
         )
 
     def _finalize(
@@ -327,6 +332,7 @@ class QueryService:
         trace_latency_ms: int,
         trace_context_chunk_ids: tuple[str, ...],
         answer_text: str | None,
+        cited_chunk_ids: tuple[str, ...],
     ) -> AnswerResult:
         """Persist Query + retrieval hits + AnswerTrace; emit the log line; build the result.
 
@@ -370,6 +376,7 @@ class QueryService:
             evidence=evidence,
             context=context,
             answer_text=answer_text,
+            cited_chunk_ids=cited_chunk_ids,
         )
 
     def _persist_answer_trace(

@@ -3061,4 +3061,285 @@ The grouped/multi-diary milestone left subject scoping as the one open scoping q
 - A core `Subject` / subject-registry / membership / per-subject-ACL entity (deferred until assignment must diverge from the default single-subject mapping).
 - An explicit subject-selection command or multi-subject UX (not built, not depended on).
 - A-15 `visibility_scope` enumeration or any visibility advance (separate; Slice 8.2 / G-4).
+
+## D-098 — Evidence-faithful attribution, Packet 1: expose the LLM-cited evidence set (`cited_chunk_ids`) on `AnswerResult`
+
+### Context
+
+Milestone **Evidence-faithful answer & source attribution** makes `/ask` answers and `/sources` report only the evidence the LLM actually used — its `cited_chunk_ids` — rather than every retrieved chunk, and present authors as human names. `QueryService.answer` already parses `structured.cited_chunk_ids` (validated by `parse_structured_answer` to be a subset of `AnswerContext.ordered_chunks`, I-9) but **discards** it: only `structured.answer_text` reaches `AnswerResult`. The two surfaces the milestone fixes — the on-demand `/sources` reply (`_update_latest_sources` reads `answer.context.ordered_chunks`) and the `Contributors:` footer (D-091 / D-092, keyed on the same grounding set) — therefore both render the **full retrieved set**, over-claiming the basis of the answer (PRD §7 "users can inspect the basis of answers" / "no silent failure may pretend confidence"). Exposing `cited_chunk_ids` on `AnswerResult` was already a recorded follow-up (D-058).
+
+This is the foundational, additive seam packet: carry the LLM-used set out of the service. It is pure plumbing — **no consumer reads it yet**, no user-visible change — and unblocks the cited-only `/sources` packet (Packet 2) and the footer-removal packet (Packet 3) without forcing either to re-derive citations.
+
+### Decision
+
+- **`AnswerResult.cited_chunk_ids` (new field).** `AnswerResult` gains `cited_chunk_ids: tuple[str, ...] = ()`, the LLM's used-evidence set. It is **distinct from** the full retrieved set exposed by `context_chunk_ids` / `context.ordered_chunks`.
+- **Per-contour truth table (every contour sets it explicitly).** The single `_finalize` convergence point gains a required keyword `cited_chunk_ids`, passed at all five call sites:
+  - empty-query `NO_EVIDENCE` → `()`;
+  - empty-merged `NO_EVIDENCE` → `()`;
+  - `PROVIDER_UNAVAILABLE` → `()`;
+  - `PARSE_FAILURE` → `()` — deliberately **not** mined from `response.raw_text`; the I-9 subset guarantee was never established on that contour;
+  - graded `NONE` / `WEAK_EVIDENCE` / `AMBIGUOUS` → `structured.cited_chunk_ids` (a subset of `context_chunk_ids` by the parser's I-9 check);
+  - graded LLM-marker `NO_EVIDENCE` → `structured.cited_chunk_ids` verbatim (typically `()`, taken truthfully from the structured answer, not forced).
+
+### Why
+
+Surfacing the already-parsed cited set on the result is the smallest bounded change that lets the consuming packets render used-only evidence without reaching back into the LLM output downstream — a worse, repeated seam. Defaulting the field to `()` and threading it explicitly through the one `_finalize` entry point keeps `Query.fallback` / `AnswerTrace.fallback_mode` / the cited set written from one decision per contour. Keeping `PARSE_FAILURE` / `PROVIDER_UNAVAILABLE` empty avoids ever presenting an unvalidated citation set as the basis of an answer.
+
+### Consequence
+
+- **`src/`:** `core/domain/models.py` (the `AnswerResult.cited_chunk_ids` field + docstring); `services/query_service.py` (`_finalize` keyword + the five explicit call sites). No consumer (dispatcher, Telegram adapter, eval harness) reads the field in this packet; reply rendering is byte-unchanged.
+- **`tests/`:** `tests/test_query_service.py` gains a cited-set characterization block (empty on the four non-graded contours + the LLM-marker `no_evidence`; mirrors the full context under the cite-all mock; and a **strict-subset fidelity** case proving the seam carries the LLM's actual subset, not the retrieved set — via a test-only `cited_subset_size` knob on `_MarkerChatClient`).
+- **Docs (this packet):** this D-098 entry; `docs/execution-map.md` (new milestone block + Packet 1 row). `[[feedback_decision_log_citation]]`, `[[feedback_full_gate_and_doc_truthfulness]]`.
+- **No schema / DDL / migration / config change.** `AnswerTrace.context_chunk_ids` still records the full context set; no cited subset is persisted. I-9 / R-5 unchanged; no new I-/R- number.
+
+### Out of scope (per packet boundaries)
+
+- `/sources` rendering only the cited chunks + empty-cited wording (Packet 2).
+- Removing the all-retrieved `Contributors:` footer (Packet 3).
+- `/drafts` human author-name rendering (Packet 4).
+- Persisting the cited subset onto `AnswerTrace` / any schema change.
+- Threading `cited_chunk_ids` onto `DispatchResult` / the Telegram adapter (done by the consuming packets that need it).
 - Reopening or re-deciding the D-093 / Milestone G community-bootstrap contract.
+
+## D-099 — Evidence-faithful attribution, Packet A: ratify the `/ask` no-evidence guardrail (empty `cited_chunk_ids` ⇒ explicit technical no-evidence reply, never free-form `answer_text`)
+
+### Context
+
+The "Evidence-faithful answer & source attribution" milestone (D-098) exposed `AnswerResult.cited_chunk_ids` — the LLM's used-evidence subset — as a pure additive seam, to be consumed by a cited-only `/sources` packet (Packet B) and a footer-removal packet (Packet C). Before that consuming code lands, the owner has decided to **name and lock** the runtime property that the `/sources` re-keying makes load-bearing.
+
+Today that property is **emergent**, composed from two existing mechanisms, not stated as one contract:
+
+- **I-9 / `parse_structured_answer`** (`src/memory_rag/core/domain/answer_schema.py`): empty `cited_chunk_ids` is permitted **only** when `uncertainty == "no_evidence"`; `"confident"` / `"uncertain"` / `"ambiguous"` therefore require non-empty citations. A free-form substantive answer cannot pass the parser with an empty cited set.
+- **D-035 / R-6** (`services/query_service.py` grading → `services/dispatcher.py` `_format_answer_reply`): the free-form `answer_text` is surfaced only on `NONE` / `WEAK_EVIDENCE` / `AMBIGUOUS` (all citation-bearing); every cited-empty contour returns a fixed/templated technical reply and the LLM-marker `no_evidence` reply deliberately does not surface the model's prose.
+
+### Decision
+
+Ratify the guardrail as the contract of record. **Contract (verbatim):**
+
+> If `cited_chunk_ids` is empty, `/ask` returns an explicit technical no-evidence response and MUST NOT surface free-form `answer_text`.
+
+The guardrail **trigger** is `cited_chunk_ids == ()`; the **guarantee** is that no free-form `answer_text` reaches the user in that case. Two distinct contour classes carry an empty cited set (per the D-098 per-contour truth table), and the entry keeps them separate:
+
+- **No-evidence contours proper** (the system found or used no evidence): empty-query `NO_EVIDENCE`; empty-merged `NO_EVIDENCE` (retrieval returned nothing); LLM-marker `no_evidence` over non-empty retrieval (the LLM declared the retrieved chunks not-evidence). These return the explicit **technical no-evidence** reply.
+- **Other cited-empty technical-failure contours** (NOT no-evidence): `PROVIDER_UNAVAILABLE` (chat provider down) and `PARSE_FAILURE` (unparseable provider response). They also carry `cited_chunk_ids == ()` and also never surface free-form `answer_text`, but they are **technical failure** contours with their own retry-hint replies — they are **not** semantic no-evidence and must not be described as such.
+
+**Milestone scope of "no evidence" = the cited-empty reading only.** The stronger notion — *citations exist but are semantically weak / do not truly support the answer* — is a **separate, future groundedness/factuality concern** owned by the Phase 7 track and is explicitly **out of scope** here. D-099 makes **no claim** that citation presence alone proves factual support; it only ratifies that an **empty** cited set blocks a free-form answer.
+
+This is recorded via cross-reference clauses on **I-9** and **R-6** (no new invariant id, no semantic rewrite — the D-082 / D-083 / D-091 precedent), with this entry as the decision of record.
+
+### Why
+
+The cited-empty ⇒ no-free-form-answer property is now load-bearing for Packet B's cited-only `/sources` and must be an intentional contract, not an accident that a future refactor could silently erode. Recording it as a named guardrail with cross-references — rather than minting a parallel invariant — locks it at the invariant layer while honoring that **no runtime behavior changes**: the property already holds. Keeping the no-evidence contours proper distinct from the provider/parse technical-failure contours, and fencing the semantic-groundedness reading into Phase 7, prevents the contract from overclaiming.
+
+### Consequence
+
+- **Docs-only; no runtime behavior change** (the guardrail already holds; this packet does not alter any code path or user-facing reply).
+- **Changed:** this D-099 entry; `docs/execution-map.md` (Packet A row inserted as the next planned packet, pre-checkpoint; pending rows relabeled B / C / D); `docs/INVARIANTS.md` (one cross-reference clause on I-9 → D-099, **no new invariant, no semantic change**); `docs/RUNTIME-INVARIANTS.md` (parallel cross-reference clause on R-6 → D-099, **no new R-number**).
+- **No `src/` / `tests/` / schema / migration / config change.** I-9 / R-5 / R-6 semantics unchanged. `[[feedback_decision_log_citation]]`, `[[feedback_full_gate_and_doc_truthfulness]]`, `[[feedback_minimal_packet_docs]]`.
+
+### Out of scope (per packet boundaries)
+
+- The behavioral **guard test** pinning "no-evidence contours surface no `answer_text`" — a code artifact, deferred to **Packet B**.
+- `/sources` cited-only rendering + the empty-cited wording "Your last /ask answer didn't cite any specific notes." + the two distinct empty contours ("never asked" vs "asked, cited nothing") — **Packet B**.
+- Removing the all-retrieved `Contributors:` footer (same empty-cited semantics) — **Packet C**.
+- Semantic groundedness / factuality ("citations present but insufficient") — **Phase 7** track.
+- Minting a dedicated invariant id; any `todo.md` milestone section (none exists for this milestone; not gated by a concrete need here).
+
+## D-100 — Evidence-faithful attribution, Packet B: `/sources` renders only the LLM-cited chunks
+
+### Context
+
+D-098 exposed `AnswerResult.cited_chunk_ids` — the LLM's used-evidence subset, an I-9 subset of `AnswerContext.ordered_chunks` — as pure plumbing with no consumer. D-099 ratified the guardrail that an empty cited set never surfaces free-form `answer_text`. Packet B is the first consumer: it makes `/sources` report only the chunks the LLM actually cited, instead of the full retrieved set.
+
+Before this packet, `Dispatcher._update_latest_sources` cached `answer.context.ordered_chunks` (the full post-RRF retrieved set) and cleared the entry on any empty contour by *popping the key*. That had two problems: `/sources` over-reported (every retrieved chunk, not the cited ones), and the pop conflated "no prior `/ask`" with "asked, but the answer cited nothing" — both surfaced the same `_REPLY_SOURCES_NONE` reply.
+
+### Decision
+
+`/sources` consumes `AnswerResult.cited_chunk_ids`:
+
+- `_update_latest_sources` stores the **cited subset** — the chunks in `answer.context.ordered_chunks` whose `chunk_id ∈ answer.cited_chunk_ids` — in post-RRF `ordered_chunks` order (the subset relation holds by I-9). Every cited-empty contour (`cited_chunk_ids == ()` per D-099 — both `NO_EVIDENCE` paths, `PROVIDER_UNAVAILABLE`, `PARSE_FAILURE`, and the no-context contour) stores an empty tuple.
+- The cache write is now **always-set**: every `/ask` assigns the entry (the `.pop`-on-empty clear path is gone), so **key presence** records that an `/ask` ran at all.
+- `_dispatch_sources` branches on key presence:
+  - key absent (no prior `/ask` this process) → `_REPLY_SOURCES_NONE` = "No selected chunks available — ask a question with /ask first." (unchanged).
+  - key present, empty tuple (prior `/ask` cited nothing) → new `_REPLY_SOURCES_NONE_CITED` = "Your last /ask answer didn't cite any specific notes.".
+  - key present, non-empty → render the cited chunks (header + `source_chunks`), unchanged adapter path.
+- The behavioral **guard test** D-099 deferred here lands in `tests/test_dispatcher_sources.py`: parametrized over the five D-099 cited-empty contours, asserting the model's free-form `answer_text` does not appear in the `/ask` reply. It pins the ratified property only — the exact technical reply bodies stay pinned by the D-071 sibling guards in `tests/test_dispatcher_retrieval_fallback.py`.
+
+This consumes the D-098 seam and the D-099 guardrail; it introduces **no new `/ask` answer-path semantics** and reclassifies no contour.
+
+### Why
+
+`/sources` is the milestone's evidence-faithful surface: it should show what the answer was built on, not everything retrieval surfaced. Reading `cited_chunk_ids` makes it faithful; the always-set/presence cache is the minimum mechanism that separates the two empty contours the previous pop conflated. Keeping the change in the dispatcher that already owns `_latest_sources` keeps it channel-neutral and confined.
+
+### Consequence
+
+- `/sources` now returns only the cited chunks for a grounded `/ask`, and a distinct reply when the last `/ask` cited nothing.
+- `AnswerTrace.context_chunk_ids` still records the **full** retrieved context (a superset of the cited subset) — unchanged; operator forensics are unaffected.
+- The `grounding_chunks` / `Contributors:` footer seam (D-091 / D-092) is untouched — Packet C.
+- **Changed:** `src/memory_rag/services/dispatcher.py` (`_update_latest_sources`, `_dispatch_sources`, new `_REPLY_SOURCES_NONE_CITED`, docstrings); `tests/test_dispatcher_sources.py` (cited-only + both empty wordings + cited-empty guard); `tests/test_telegram_sources.py` (empty-cited inline delivery; `_FixedAnswerQueryService` now sets `cited_chunk_ids`); this entry; `docs/execution-map.md` (Packet B row); `docs/RUNBOOK.md` (§"Selected-chunks recall (`/sources`, D-036)"). The D-098 seam (I-9 citation subset) and the D-099 R-6 answer-reply guardrail directly relevant to these files are preserved; no schema / DDL / migration / config change. `[[feedback_minimal_packet_docs]]`, `[[feedback_full_gate_and_doc_truthfulness]]`, `[[feedback_doc_state_truthfulness]]`, `[[feedback_sibling_wording_guard_tests]]`.
+
+### Out of scope (per packet boundaries)
+
+- Removing the all-retrieved `Contributors:` footer (same empty-cited semantics) — **Packet C**.
+- Human author names in `/drafts` — **Packet D**.
+- Persisting the cited subset durably; cross-restart / multi-worker cache durability — unchanged D-036 follow-up triggers.
+- Any `QueryService` / `AnswerResult` seam widening or new fields.
+- Semantic groundedness / factuality — **Phase 7** track.
+- `/sources` header-wording redesign and `/sources N` argument.
+
+## D-101 — Evidence-faithful attribution, Packet C: remove the all-retrieved `Contributors:` footer from `/ask`
+
+### Context
+
+The "Evidence-faithful answer & source attribution" milestone (D-098 → D-099 → D-100)
+makes `/ask` + `/sources` report only the evidence the LLM actually cited
+(`cited_chunk_ids`). D-098 named **two** surfaces that over-claim by rendering the full
+retrieved set — the on-demand `/sources` reply and the `/ask` `Contributors:` footer
+(contract D-091, code D-092, keyed on `answer.context.ordered_chunks`). D-100 fixed the
+first (cited-only `/sources`). That left a cross-surface inconsistency on the *same*
+answer: `/sources` shows the cited subset while the footer still credits every retrieved
+contributor.
+
+The owner chose to resolve this not by re-keying the footer onto the cited subset but by
+**removing it entirely** — making `/sources` (cited-only) the single user-facing
+attribution surface, eliminating the divergence and the risk of a second attribution
+layer drifting in future.
+
+### Decision
+
+The `/ask` `Contributors:` footer is **removed as a user-facing element**, and its
+footer-only seam is fully deleted:
+
+- The Telegram webhook no longer appends a `Contributors: …` footer to grounded `/ask`
+  replies; the reply is the answer text alone (plus any existing evidence-strength
+  trailer).
+- `DispatchResult.grounding_chunks` (D-092) — produced only for the footer and consumed
+  only by it — is removed, along with the `Dispatcher` ASK derivation that set it.
+- `render_contributors_footer` (D-092) is deleted from
+  `adapters/telegram/author_display.py`. The shared author-resolution helpers
+  (`resolve_author_display_name`, `resolve_chunk_author_display`, `render_source_block`)
+  and the store protocols stay — `/sources` still uses them.
+
+This **supersedes the user-facing rendering of D-091 / D-092** while changing **no
+invariant**: authorship is still carried only as the opaque `author_user_id` (I-6),
+display names are still resolved adapter-side and requester-`community_id`-scoped (D-089;
+I-1 / I-7). `AnswerTrace.context_chunk_ids` still records the full retrieved context for
+operator forensics. The D-091 / D-092 entries stay as historical lineage; this entry is
+the forward supersession.
+
+### Why
+
+After D-100, the footer and `/sources` disagreed on the same answer — exactly the
+over-claiming the milestone exists to remove, now observable rather than latent. Full
+removal (vs. re-keying the footer to the cited subset) is the owner's choice: it keeps a
+single attribution surface, leaves no dormant attribution seam to drift, and keeps the
+branch story simple — D-098 + D-099 + D-100 make `/ask` + `/sources` evidence-faithful,
+and the redundant footer is withdrawn.
+
+### Consequence
+
+- Grounded `/ask` replies (incl. `WEAK_EVIDENCE` / `AMBIGUOUS`) no longer carry a
+  `Contributors:` footer; `NO_EVIDENCE` / empty-query / `PROVIDER_UNAVAILABLE` /
+  `PARSE_FAILURE` replies are behaviorally unchanged (they never carried one).
+- `/sources` is unchanged (cited-only, D-100) and is now the sole user-facing
+  attribution surface.
+- **Changed (`src/`):** `adapters/telegram/webhook.py` (drop the footer append + import),
+  `services/dispatcher.py` (drop the `grounding_chunks` derivation),
+  `core/routing/models.py` (delete the `DispatchResult.grounding_chunks` field + docstring),
+  `adapters/telegram/author_display.py` (delete `render_contributors_footer`).
+- **Changed (`tests/`):** `tests/test_telegram_ask_contributors.py` (presence tests →
+  an adapter-level absence guard), `tests/test_author_display_resolution.py` (drop the
+  footer-unit section), `tests/test_end_to_end_smoke.py` (assert no footer),
+  `tests/test_grouped_multi_diary.py` (drop the `grounding_chunks` seam test; multi-author
+  I-6 coverage retained via `context.ordered_chunks`),
+  `tests/test_dispatcher_retrieval_fallback.py` (drop the `grounding_chunks` assertions;
+  retain a core "composes no footer" guard).
+- **Docs:** this D-101 entry; `docs/execution-map.md` (Packet C row);
+  `docs/RUNBOOK.md` (remove the live footer paragraph; edit the grouped-diary footer
+  mention); `docs/INVARIANTS.md` (drop the now-false I-6 footer clause; I-6 itself
+  unchanged). No schema / DDL / migration / config change; no new I-/R- number.
+  `[[feedback_minimal_packet_docs]]`, `[[feedback_full_gate_and_doc_truthfulness]]`,
+  `[[feedback_doc_state_truthfulness]]`, `[[feedback_decision_log_citation]]`.
+
+### Out of scope (per packet boundaries)
+
+- Any `/sources` change (already cited-only, D-100).
+- Any `AnswerResult` / `QueryService` seam change or new field.
+- Human author names in `/drafts` — **Packet D**.
+- Any replacement attribution UI (badges, icons, per-claim markers) — separate future
+  work, not introduced here.
+- Semantic groundedness / factuality — **Phase 7** track.
+
+## D-102 — Evidence-faithful attribution, Packet D: human author names in `/drafts`
+
+### Context
+
+The "Evidence-faithful answer & source attribution" milestone (D-098 → D-099 → D-100 → D-101)
+has two halves (execution-map "Evidence-faithful answer & source attribution"): the cited-evidence
+half — `/ask` + `/sources` report only the LLM-cited set — landed in Packets 1/A/B/C; the second
+half, **"present authors as human names rather than opaque numeric ids,"** was the lone remaining
+**Pending** packet (Packet D). After D-101 made `/sources` the sole human-name attribution surface
+(D-086 resolution), `/drafts` still rendered the raw opaque id in its block header
+(`📝 <iso> · author:<author_user_id> · id:<short>`), a live cross-surface inconsistency on the same
+authors — the very over-claiming the milestone exists to remove, now in the *capture-recall* surface.
+
+### Decision
+
+`/drafts` renders the author as a resolved display name through the existing D-086 ladder, and the
+header is trimmed to `📝 <created_at ISO> · <author>`:
+
+- New **internal, adapter-only** helper `adapters/telegram/author_display._resolve_source_author_display(source, store, *, community_id)` — leading-underscore, **not** a public seam contract. Unlike
+  `resolve_chunk_author_display`, a draft is already a `SourceMessage` carrying its own
+  `(external_chat_id, external_message_id, edit_seq)` snapshot key, so the helper reads
+  `get_author_display_input` **directly** — no `get_source_message` bridge — and applies the
+  existing public `resolve_author_display_name`. No store protocol or resolver obligation is widened.
+- `community_id` (the requester-scoped community, `inbound.community_id`) is a **defensive** scope
+  check (`source.community_id != community_id → opaque floor`, never reading a foreign snapshot;
+  Slice 8.1.2 / D-089). Drafts are already community-scoped by `list_recent_drafts(community_id)`, so
+  this guards the seam, consistent with the D-088 defensive-scoping precedent.
+- `adapters/telegram/webhook._render_draft_block` gains keyword-only `store` + `community_id`,
+  resolves the author, and renders `📝 <iso> · <author>`. The previous `author:<id>` and
+  `id:<short>` technical segments are **dropped** (owner-chosen header). A missing / withheld
+  snapshot falls through to the opaque `user-<last8>` floor — never blank, never a raise.
+
+### Why
+
+After D-101, `/drafts` was the last surface still exposing the opaque numeric author id while
+`/sources` showed human names — exactly the inconsistency this milestone removes. Reusing the
+already-present D-086 resolver (rather than minting a parallel one) and reading the snapshot
+directly off the draft `SourceMessage` is the smallest change that makes the two surfaces
+consistent. Keeping the helper internal honors the approved boundary "reuse the `author_display`
+seam without changing its interface." Authorship is unchanged: still carried only as the opaque
+`author_user_id` (I-6); the display name is non-authoritative adapter-side presentation
+(I-1 / I-7 preserved).
+
+### Consequence
+
+- **`src/`:** `adapters/telegram/author_display.py` (new internal `_resolve_source_author_display`
+  + `SourceMessage` import; existing public functions / protocols untouched);
+  `adapters/telegram/webhook.py` (import the helper; `_render_draft_block` resolves the author and
+  drops the `author:`/`id:` segments; the `/drafts` call site threads `store=backend_store,
+  community_id=inbound.community_id`).
+- **`tests/`:** `tests/test_author_display_resolution.py` (a `_resolve_source_author_display` unit
+  section: three tiers; floor on missing / both-null snapshot; floor + no snapshot read on community
+  mismatch; happy-path key assertion); `tests/test_telegram_drafts.py` (the `get_backend_store`
+  override wired to the shared store, a snapshot-seeding helper, a three-tier integration test
+  asserting no `author:` / `id:` survive, and a byte-stable `_render_draft_block` format test).
+- **Docs:** this D-102 entry; `docs/execution-map.md` (Packet D row → Implemented, pre-checkpoint);
+  `docs/RUNBOOK.md` (new "`/drafts` author display (D-086 / D-098)" subsection). No schema / DDL /
+  migration / config change; no new I-/R- number. I-1 / I-6 / I-7 / D-089 preserved.
+- **Status: pre-checkpoint.** This entry and the execution-map Packet D row stay
+  **Implemented / pre-checkpoint**; they flip to **Done** only after report / checkpoint — at which
+  point the milestone's A/B/C/D rows are closed together. This packet does not assert the milestone
+  closed in the working tree. `[[feedback_doc_state_truthfulness]]`, `[[feedback_minimal_packet_docs]]`,
+  `[[feedback_full_gate_and_doc_truthfulness]]`, `[[feedback_decision_log_citation]]`.
+
+### Out of scope (per packet boundaries)
+
+- Re-keying or reviving the removed `Contributors:` footer (D-101) — `/sources` + `/drafts` are the
+  attribution surfaces.
+- Any `/sources` / `/ask` rendering or wording change; the D-099 guardrail.
+- Persisting cited subsets / `AnswerTrace` changes; visibility / multi-diary (A-15 / A-14); any
+  `/drafts` semantics change beyond the rendered author.
+- Changing the `author_display` public seam shape or any store protocol.
+- The milestone-closure Done-flips (A/B/C/D → Done) — a distinct checkpoint act after this packet.

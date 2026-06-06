@@ -113,17 +113,14 @@ def test_note_then_ask_returns_grounded_reply_with_date() -> None:
     assert text.startswith("Mock answer grounded in 1 diary chunk(s):")
     assert "dense+sparse RRF" not in text
     assert "hybrid retrieval" not in text
-    # D-092: the grounded /ask reply appends a `Contributors: …` footer naming
-    # the distinct authors who grounded the answer, beneath answer_text and
-    # blank-line separated. The lone author here has no display snapshot, so it
-    # resolves to the opaque floor `user-<last8>` (author_user_id "7").
-    footer = "\n\nContributors: user-7"
-    assert text.endswith(footer)
-    answer_body = text[: -len(footer)]
-    # No extra blank trailer line remains after answer_text itself — the mock
-    # answer is single-line, so a remnant `\n\n<trailer>` would surface as a
-    # double newline in the answer body (the footer separator is excluded above).
-    assert "\n\n" not in answer_body
+    # D-101: the `Contributors: …` footer was removed — the grounded /ask reply
+    # is the answer_text alone (no footer, no adapter-composed display name).
+    # /sources (cited-only, D-100) is the sole attribution surface.
+    assert "Contributors:" not in text
+    # No extra blank trailer line remains: the mock answer is single-line, so any
+    # remnant `\n\n<trailer>` (e.g. the removed footer separator) would surface as
+    # a double newline in the reply body.
+    assert "\n\n" not in text
     assert "Found 1 memory" not in text
     assert "Tried a new book" not in text
     # Slice 3.5: successful /ask persists one Query row + retrieval hits.

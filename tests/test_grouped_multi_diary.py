@@ -162,28 +162,6 @@ def test_grouped_ask_preserves_distinct_contributors_in_answer_context() -> None
     assert _grounding_authors(result) == {"alice", "bob"}
 
 
-def test_grouped_ask_dispatch_carries_multi_author_grounding_chunks() -> None:
-    """The ASK dispatch seam carries grounding chunks spanning >=2 senders.
-
-    Pins the opaque ``DispatchResult.grounding_chunks`` seam (D-091) at
-    grouped granularity. Adapter-side ``Contributors:`` rendering is pinned
-    separately in ``tests/test_telegram_ask_contributors.py`` and is out of
-    scope here (this asserts core ``author_user_id``, not rendered text).
-    """
-    store = MockDomainStore()
-    dispatcher = _dispatcher(store)
-    dispatcher.dispatch(_note("2026-05-09\nTried a new book", chat="grp", user="alice", msg_id="1"))
-    dispatcher.dispatch(
-        _note("2026-05-09\nAnother book chapter", chat="grp", user="bob", msg_id="2")
-    )
-
-    result = dispatcher.dispatch(_ask("book", chat="grp"))
-
-    assert result.route is RouteKind.ASK
-    assert result.grounding_chunks is not None
-    assert {c.author_user_id for c in result.grounding_chunks} == {"alice", "bob"}
-
-
 # === Group B: multi-diary on one instance (N chats -> N communities) =========
 
 
