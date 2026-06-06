@@ -3269,3 +3269,77 @@ and the redundant footer is withdrawn.
 - Any replacement attribution UI (badges, icons, per-claim markers) — separate future
   work, not introduced here.
 - Semantic groundedness / factuality — **Phase 7** track.
+
+## D-102 — Evidence-faithful attribution, Packet D: human author names in `/drafts`
+
+### Context
+
+The "Evidence-faithful answer & source attribution" milestone (D-098 → D-099 → D-100 → D-101)
+has two halves (execution-map "Evidence-faithful answer & source attribution"): the cited-evidence
+half — `/ask` + `/sources` report only the LLM-cited set — landed in Packets 1/A/B/C; the second
+half, **"present authors as human names rather than opaque numeric ids,"** was the lone remaining
+**Pending** packet (Packet D). After D-101 made `/sources` the sole human-name attribution surface
+(D-086 resolution), `/drafts` still rendered the raw opaque id in its block header
+(`📝 <iso> · author:<author_user_id> · id:<short>`), a live cross-surface inconsistency on the same
+authors — the very over-claiming the milestone exists to remove, now in the *capture-recall* surface.
+
+### Decision
+
+`/drafts` renders the author as a resolved display name through the existing D-086 ladder, and the
+header is trimmed to `📝 <created_at ISO> · <author>`:
+
+- New **internal, adapter-only** helper `adapters/telegram/author_display._resolve_source_author_display(source, store, *, community_id)` — leading-underscore, **not** a public seam contract. Unlike
+  `resolve_chunk_author_display`, a draft is already a `SourceMessage` carrying its own
+  `(external_chat_id, external_message_id, edit_seq)` snapshot key, so the helper reads
+  `get_author_display_input` **directly** — no `get_source_message` bridge — and applies the
+  existing public `resolve_author_display_name`. No store protocol or resolver obligation is widened.
+- `community_id` (the requester-scoped community, `inbound.community_id`) is a **defensive** scope
+  check (`source.community_id != community_id → opaque floor`, never reading a foreign snapshot;
+  Slice 8.1.2 / D-089). Drafts are already community-scoped by `list_recent_drafts(community_id)`, so
+  this guards the seam, consistent with the D-088 defensive-scoping precedent.
+- `adapters/telegram/webhook._render_draft_block` gains keyword-only `store` + `community_id`,
+  resolves the author, and renders `📝 <iso> · <author>`. The previous `author:<id>` and
+  `id:<short>` technical segments are **dropped** (owner-chosen header). A missing / withheld
+  snapshot falls through to the opaque `user-<last8>` floor — never blank, never a raise.
+
+### Why
+
+After D-101, `/drafts` was the last surface still exposing the opaque numeric author id while
+`/sources` showed human names — exactly the inconsistency this milestone removes. Reusing the
+already-present D-086 resolver (rather than minting a parallel one) and reading the snapshot
+directly off the draft `SourceMessage` is the smallest change that makes the two surfaces
+consistent. Keeping the helper internal honors the approved boundary "reuse the `author_display`
+seam without changing its interface." Authorship is unchanged: still carried only as the opaque
+`author_user_id` (I-6); the display name is non-authoritative adapter-side presentation
+(I-1 / I-7 preserved).
+
+### Consequence
+
+- **`src/`:** `adapters/telegram/author_display.py` (new internal `_resolve_source_author_display`
+  + `SourceMessage` import; existing public functions / protocols untouched);
+  `adapters/telegram/webhook.py` (import the helper; `_render_draft_block` resolves the author and
+  drops the `author:`/`id:` segments; the `/drafts` call site threads `store=backend_store,
+  community_id=inbound.community_id`).
+- **`tests/`:** `tests/test_author_display_resolution.py` (a `_resolve_source_author_display` unit
+  section: three tiers; floor on missing / both-null snapshot; floor + no snapshot read on community
+  mismatch; happy-path key assertion); `tests/test_telegram_drafts.py` (the `get_backend_store`
+  override wired to the shared store, a snapshot-seeding helper, a three-tier integration test
+  asserting no `author:` / `id:` survive, and a byte-stable `_render_draft_block` format test).
+- **Docs:** this D-102 entry; `docs/execution-map.md` (Packet D row → Implemented, pre-checkpoint);
+  `docs/RUNBOOK.md` (new "`/drafts` author display (D-086 / D-098)" subsection). No schema / DDL /
+  migration / config change; no new I-/R- number. I-1 / I-6 / I-7 / D-089 preserved.
+- **Status: pre-checkpoint.** This entry and the execution-map Packet D row stay
+  **Implemented / pre-checkpoint**; they flip to **Done** only after report / checkpoint — at which
+  point the milestone's A/B/C/D rows are closed together. This packet does not assert the milestone
+  closed in the working tree. `[[feedback_doc_state_truthfulness]]`, `[[feedback_minimal_packet_docs]]`,
+  `[[feedback_full_gate_and_doc_truthfulness]]`, `[[feedback_decision_log_citation]]`.
+
+### Out of scope (per packet boundaries)
+
+- Re-keying or reviving the removed `Contributors:` footer (D-101) — `/sources` + `/drafts` are the
+  attribution surfaces.
+- Any `/sources` / `/ask` rendering or wording change; the D-099 guardrail.
+- Persisting cited subsets / `AnswerTrace` changes; visibility / multi-diary (A-15 / A-14); any
+  `/drafts` semantics change beyond the rendered author.
+- Changing the `author_display` public seam shape or any store protocol.
+- The milestone-closure Done-flips (A/B/C/D → Done) — a distinct checkpoint act after this packet.

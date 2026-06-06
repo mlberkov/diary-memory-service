@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 
 from memory_rag.adapters.telegram.author_display import (
+    _resolve_source_author_display,
     render_source_block,
     resolve_author_display_name,
     resolve_chunk_author_display,
@@ -161,6 +162,57 @@ def test_bridge_floor_when_snapshot_both_null() -> None:
         resolve_chunk_author_display(_chunk(), store, community_id="42")  # type: ignore[arg-type]
         == "user-abcdef12"
     )
+
+
+# ---- source/draft helper: direct snapshot (no bridge) -----------------------
+# A SourceMessage already carries its own external tuple, so _resolve_source_author_display
+# reads the snapshot directly — no get_source_message bridge (used by /drafts, D-098).
+
+
+def test_source_resolver_username_tier() -> None:
+    store = _FakeStore(source=None, snapshot=("alice", "Alice A"))
+    assert (
+        _resolve_source_author_display(_source(), store, community_id="42")  # type: ignore[arg-type]
+        == "@alice"
+    )
+    # Keyed by the source's own external tuple — no get_source_message bridge.
+    assert store.snapshot_keys == [("42", "101", 3)]
+
+
+def test_source_resolver_first_name_tier() -> None:
+    store = _FakeStore(source=None, snapshot=(None, "Bob"))
+    assert (
+        _resolve_source_author_display(_source(), store, community_id="42")  # type: ignore[arg-type]
+        == "Bob"
+    )
+
+
+def test_source_resolver_floor_when_snapshot_missing() -> None:
+    store = _FakeStore(source=None, snapshot=None)
+    assert (
+        _resolve_source_author_display(_source(), store, community_id="42")  # type: ignore[arg-type]
+        == "user-abcdef12"
+    )
+
+
+def test_source_resolver_floor_when_snapshot_both_null() -> None:
+    store = _FakeStore(source=None, snapshot=(None, None))
+    assert (
+        _resolve_source_author_display(_source(), store, community_id="42")  # type: ignore[arg-type]
+        == "user-abcdef12"
+    )
+
+
+def test_source_resolver_floor_on_community_mismatch_reads_no_snapshot() -> None:
+    # Defensive scope (Slice 8.1.2 / D-089): a source owned by another community
+    # resolves to the opaque floor and never reads a snapshot. Drafts are already
+    # community-scoped by the caller, so this guards the seam, not a live path.
+    store = _FakeStore(source=None, snapshot=("alice", "Alice A"))
+    assert (
+        _resolve_source_author_display(_source(), store, community_id="99")  # type: ignore[arg-type]
+        == "user-abcdef12"
+    )
+    assert store.snapshot_keys == []
 
 
 # ---- rendered block format (byte-stable, sibling-guarded) -------------------

@@ -37,7 +37,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from memory_rag.core.domain.models import EventChunk
+from memory_rag.core.domain.models import EventChunk, SourceMessage
 from memory_rag.storage.search_repository import HybridDomainStore
 
 
@@ -161,6 +161,38 @@ def resolve_chunk_author_display(
         if snapshot is not None:
             username, first_name = snapshot
     return resolve_author_display_name(username, first_name, chunk.author_user_id)
+
+
+def _resolve_source_author_display(
+    source: SourceMessage, store: AuthorDisplayInputStore, *, community_id: str
+) -> str:
+    """Internal adapter helper (not a public seam): resolve a source/draft author
+    display name from the durable snapshot (D-086).
+
+    Unlike :func:`resolve_chunk_author_display`, a ``SourceMessage`` already
+    carries its own ``(external_chat_id, external_message_id, edit_seq)`` snapshot
+    key, so no ``get_source_message`` bridge is needed — this reads the snapshot
+    directly and applies :func:`resolve_author_display_name`. A missing or
+    both-null snapshot falls through to the opaque short-ID floor — never blank,
+    never a raise.
+
+    ``community_id`` is the requester-scoped community. A draft list is already
+    community-scoped by the caller, so this is a defensive check (Slice 8.1.2 /
+    D-089): a source owned by another community resolves to the opaque floor
+    without reading a foreign snapshot — the read can never cross a community
+    boundary (I-7, R-3).
+    """
+    username: str | None = None
+    first_name: str | None = None
+    if source.community_id == community_id:
+        snapshot = store.get_author_display_input(
+            external_chat_id=source.external_chat_id,
+            external_message_id=source.external_message_id,
+            edit_seq=source.edit_seq,
+        )
+        if snapshot is not None:
+            username, first_name = snapshot
+    return resolve_author_display_name(username, first_name, source.author_user_id)
 
 
 def render_source_block(
