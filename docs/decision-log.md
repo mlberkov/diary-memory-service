@@ -3343,3 +3343,33 @@ seam without changing its interface." Authorship is unchanged: still carried onl
   `/drafts` semantics change beyond the rendered author.
 - Changing the `author_display` public seam shape or any store protocol.
 - The milestone-closure Done-flips (A/B/C/D → Done) — a distinct checkpoint act after this packet.
+
+## D-103 — Post-attribution user-surface cleanup, Packet 1: trim the draft-save confirmation reply
+
+### Context
+
+Post-merge UI testing of the Evidence-faithful attribution milestone (D-098 → D-102) surfaced three user-facing roughness findings on the surfaces that milestone touched or sits beside: the draft-save confirmation, the `/drafts` header, and the `/sources` header. They cohere as a small **product-baseline surface-polish** milestone (`fix/post-attribution-surface-cleanup`), sequenced ahead of resuming the in-flight Subject-scoping milestone (H-2..H-4) because they are confirmed defects on every interaction and cheapest to fix while the surfaces are warm. This is Packet 1 — the most self-contained of the three.
+
+Today a successful plain-text draft store replies with a two-part string: `_format_draft_reply` (`services/dispatcher.py`) returned `f"{_DRAFT_REPLY_PREFIX}{suffix}. {_DRAFT_REPLY_HINT}"`, e.g. `"Stored as draft. Send /note <YYYY-MM-DD> on the first line to commit it as a note, or /ask to query."` The trailing `/note` + `/ask` hint is noise on every plain-text message.
+
+### Decision
+
+- **Trim the hint.** `_format_draft_reply` now returns `f"{_DRAFT_REPLY_PREFIX}{suffix}."` — the `/note` + `/ask` hint is removed and the unused `_DRAFT_REPLY_HINT` constant deleted (single consumer).
+- **Keep the R-2 replay provenance suffix (owner-decided).** Fresh store → `"Stored as draft."`; idempotent re-delivery → `"Stored as draft (replay)."`. Only the hint is removed; the requested-vs-effective-path distinction stays visible in the reply (Fallback Rule). Replay provenance also remains in logs (`effective_path=replay`).
+
+### Why
+
+The hint repeated promotion instructions on every draft, duplicating `/start` (`_REPLY_START`) and `/help` (`_REPLY_HELP`), which already document how to promote a draft. Removing it leaves a clean confirmation. Keeping the `(replay)` suffix preserves the Fallback Rule's "make requested and effective path distinguishable" guarantee at the user surface.
+
+### Consequence
+
+- **`src/`:** `services/dispatcher.py` — `_format_draft_reply` trimmed; `_DRAFT_REPLY_HINT` deleted. `_DRAFT_REPLY_PREFIX` and the `suffix` logic unchanged.
+- **`tests/`:** `tests/test_telegram_reply.py` (two assertions tightened to exact equality; new `test_draft_reply_wording_and_sibling_literals_are_pinned` byte-equality guard pinning the fresh/replay replies, asserting the removed hint sentence survives in no reply literal, and pinning the sibling literals `_REPLY_START` / `_REPLY_HELP` / `_REPLY_UNKNOWN` / `_REPLY_CLARIFY`); `tests/test_end_to_end_smoke.py` (the `"/note" in …` draft assertion replaced with exact equality). The nine other `startswith("Stored as draft")` assertions stay valid.
+- **Docs:** this D-103 entry; `docs/execution-map.md` (new "Post-attribution user-surface cleanup" block, Packet 1 row — Implemented, pre-checkpoint); `QUICKSTART.md` (three `# → text:` examples trimmed to `"Stored as draft."` and the now-false "The reply tells the user how to promote the draft." sentence dropped). An older historical decision-log reply quote is left untouched (a stale `/entry` snapshot — past records are not rewritten). No schema / DDL / migration / config change; no new I-/R- number. R-2 preserved.
+- **Status: pre-checkpoint.** This entry and the execution-map Packet 1 row stay **Implemented / pre-checkpoint**; they flip to **Done** only after report / checkpoint. `[[feedback_doc_state_truthfulness]]`, `[[feedback_sibling_wording_guard_tests]]`, `[[feedback_minimal_packet_docs]]`, `[[feedback_full_gate_and_doc_truthfulness]]`.
+
+### Out of scope (per packet boundaries)
+
+- `/drafts` date/author header formatting (Packet 2); `/sources` header removal (Packet 3).
+- Subject scoping, retrieval behavior, author resolution; schema / migrations / core domain models.
+- The milestone Done-flip checkpoint (a distinct act after this packet).

@@ -123,7 +123,7 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
 
 #### Plain text without a command — draft floor
 
-Plain text without a slash command is classified by `core.routing.classifier` and routes only to the **draft floor**: it is persisted raw as a draft and never parsed, chunked, embedded, indexed, or retrieved. NOTE and ASK lifecycles are reached only via the explicit `/note` / `/ask` commands — no heuristic auto-routes a dated line or a question (D-078, enforced in code by D-079; D-027 / D-028 / R-13). The reply tells the user how to promote the draft.
+Plain text without a slash command is classified by `core.routing.classifier` and routes only to the **draft floor**: it is persisted raw as a draft and never parsed, chunked, embedded, indexed, or retrieved. NOTE and ASK lifecycles are reached only via the explicit `/note` / `/ask` commands — no heuristic auto-routes a dated line or a question (D-078, enforced in code by D-079; D-027 / D-028 / R-13).
 
 ```bash
 # 5. Dated plain text — stored as a draft (NOT auto-committed as a note)
@@ -131,21 +131,21 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
   -d '{"update_id":5,"message":{"message_id":5,"date":1715300400,"chat":{"id":42},"from":{"id":7},"text":"2026-05-10\nLearned a new recipe\nWalked 5km"}}'
-# → text: "Stored as draft. Send /note <YYYY-MM-DD> on the first line to commit it as a note, or /ask to query."
+# → text: "Stored as draft."
 
 # 6. Plain question — stored as a draft (NOT auto-run as a query)
 curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
   -d '{"update_id":6,"message":{"message_id":6,"date":1715300500,"chat":{"id":42},"from":{"id":7},"text":"recipe?"}}'
-# → text: "Stored as draft. Send /note <YYYY-MM-DD> on the first line to commit it as a note, or /ask to query."
+# → text: "Stored as draft."
 
 # 7. Ambiguous text — stored as a draft (no guessed route)
 curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
   -d '{"update_id":7,"message":{"message_id":7,"date":1715300600,"chat":{"id":42},"from":{"id":7},"text":"recipe yesterday"}}'
-# → text: "Stored as draft. Send /note <YYYY-MM-DD> on the first line to commit it as a note, or /ask to query."
+# → text: "Stored as draft."
 ```
 
 #### Durable local store (Postgres)

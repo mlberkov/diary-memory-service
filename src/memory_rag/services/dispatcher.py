@@ -69,9 +69,6 @@ _REPLY_EXPORT_USAGE = "Usage: /export json | /export txt — pick a format."
 _REPLY_DRAFTS_USAGE = "Usage: /drafts [N]. N must be a positive integer."
 _REPLY_DRAFTS_EMPTY = "No drafts to show."
 _DRAFT_REPLY_PREFIX = "Stored as draft"
-_DRAFT_REPLY_HINT = (
-    "Send /note <YYYY-MM-DD> on the first line to commit it as a note, or /ask to query."
-)
 
 
 def _format_ingest_reply(result: IngestResult) -> str:
@@ -130,7 +127,7 @@ def _normalize_note_first_line(message: InboundMessage) -> InboundMessage:
 
 def _format_draft_reply(result: IngestResult) -> str:
     suffix = " (replay)" if result.replayed else ""
-    return f"{_DRAFT_REPLY_PREFIX}{suffix}. {_DRAFT_REPLY_HINT}"
+    return f"{_DRAFT_REPLY_PREFIX}{suffix}."
 
 
 _TRAILER_WEAK_EVIDENCE = "(weak evidence — model expressed uncertainty)"

@@ -310,8 +310,7 @@ def test_ambiguous_plain_text_persists_as_draft_under_no_command_default() -> No
 
     assert resp.status_code == 200
     body = resp.json()
-    assert body["text"].startswith("Stored as draft")
-    assert "/note" in body["text"]
+    assert body["text"] == "Stored as draft."
     assert store.len_sources() == 1
     assert store.len_notes() == 0
     assert store.len_chunks() == 0
