@@ -3144,3 +3144,45 @@ The cited-empty ⇒ no-free-form-answer property is now load-bearing for Packet 
 - Removing the all-retrieved `Contributors:` footer (same empty-cited semantics) — **Packet C**.
 - Semantic groundedness / factuality ("citations present but insufficient") — **Phase 7** track.
 - Minting a dedicated invariant id; any `todo.md` milestone section (none exists for this milestone; not gated by a concrete need here).
+
+## D-100 — Evidence-faithful attribution, Packet B: `/sources` renders only the LLM-cited chunks
+
+### Context
+
+D-098 exposed `AnswerResult.cited_chunk_ids` — the LLM's used-evidence subset, an I-9 subset of `AnswerContext.ordered_chunks` — as pure plumbing with no consumer. D-099 ratified the guardrail that an empty cited set never surfaces free-form `answer_text`. Packet B is the first consumer: it makes `/sources` report only the chunks the LLM actually cited, instead of the full retrieved set.
+
+Before this packet, `Dispatcher._update_latest_sources` cached `answer.context.ordered_chunks` (the full post-RRF retrieved set) and cleared the entry on any empty contour by *popping the key*. That had two problems: `/sources` over-reported (every retrieved chunk, not the cited ones), and the pop conflated "no prior `/ask`" with "asked, but the answer cited nothing" — both surfaced the same `_REPLY_SOURCES_NONE` reply.
+
+### Decision
+
+`/sources` consumes `AnswerResult.cited_chunk_ids`:
+
+- `_update_latest_sources` stores the **cited subset** — the chunks in `answer.context.ordered_chunks` whose `chunk_id ∈ answer.cited_chunk_ids` — in post-RRF `ordered_chunks` order (the subset relation holds by I-9). Every cited-empty contour (`cited_chunk_ids == ()` per D-099 — both `NO_EVIDENCE` paths, `PROVIDER_UNAVAILABLE`, `PARSE_FAILURE`, and the no-context contour) stores an empty tuple.
+- The cache write is now **always-set**: every `/ask` assigns the entry (the `.pop`-on-empty clear path is gone), so **key presence** records that an `/ask` ran at all.
+- `_dispatch_sources` branches on key presence:
+  - key absent (no prior `/ask` this process) → `_REPLY_SOURCES_NONE` = "No selected chunks available — ask a question with /ask first." (unchanged).
+  - key present, empty tuple (prior `/ask` cited nothing) → new `_REPLY_SOURCES_NONE_CITED` = "Your last /ask answer didn't cite any specific notes.".
+  - key present, non-empty → render the cited chunks (header + `source_chunks`), unchanged adapter path.
+- The behavioral **guard test** D-099 deferred here lands in `tests/test_dispatcher_sources.py`: parametrized over the five D-099 cited-empty contours, asserting the model's free-form `answer_text` does not appear in the `/ask` reply. It pins the ratified property only — the exact technical reply bodies stay pinned by the D-071 sibling guards in `tests/test_dispatcher_retrieval_fallback.py`.
+
+This consumes the D-098 seam and the D-099 guardrail; it introduces **no new `/ask` answer-path semantics** and reclassifies no contour.
+
+### Why
+
+`/sources` is the milestone's evidence-faithful surface: it should show what the answer was built on, not everything retrieval surfaced. Reading `cited_chunk_ids` makes it faithful; the always-set/presence cache is the minimum mechanism that separates the two empty contours the previous pop conflated. Keeping the change in the dispatcher that already owns `_latest_sources` keeps it channel-neutral and confined.
+
+### Consequence
+
+- `/sources` now returns only the cited chunks for a grounded `/ask`, and a distinct reply when the last `/ask` cited nothing.
+- `AnswerTrace.context_chunk_ids` still records the **full** retrieved context (a superset of the cited subset) — unchanged; operator forensics are unaffected.
+- The `grounding_chunks` / `Contributors:` footer seam (D-091 / D-092) is untouched — Packet C.
+- **Changed:** `src/memory_rag/services/dispatcher.py` (`_update_latest_sources`, `_dispatch_sources`, new `_REPLY_SOURCES_NONE_CITED`, docstrings); `tests/test_dispatcher_sources.py` (cited-only + both empty wordings + cited-empty guard); `tests/test_telegram_sources.py` (empty-cited inline delivery; `_FixedAnswerQueryService` now sets `cited_chunk_ids`); this entry; `docs/execution-map.md` (Packet B row); `docs/RUNBOOK.md` (§"Selected-chunks recall (`/sources`, D-036)"). The D-098 seam (I-9 citation subset) and the D-099 R-6 answer-reply guardrail directly relevant to these files are preserved; no schema / DDL / migration / config change. `[[feedback_minimal_packet_docs]]`, `[[feedback_full_gate_and_doc_truthfulness]]`, `[[feedback_doc_state_truthfulness]]`, `[[feedback_sibling_wording_guard_tests]]`.
+
+### Out of scope (per packet boundaries)
+
+- Removing the all-retrieved `Contributors:` footer (same empty-cited semantics) — **Packet C**.
+- Human author names in `/drafts` — **Packet D**.
+- Persisting the cited subset durably; cross-restart / multi-worker cache durability — unchanged D-036 follow-up triggers.
+- Any `QueryService` / `AnswerResult` seam widening or new fields.
+- Semantic groundedness / factuality — **Phase 7** track.
+- `/sources` header-wording redesign and `/sources N` argument.

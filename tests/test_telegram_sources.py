@@ -107,6 +107,7 @@ class _FixedAnswerQueryService:
             query_text=message.payload,
             evidence=evidence,
             context=context,
+            cited_chunk_ids=tuple(c.chunk_id for c in self._chunks),
             answer_text="Mock answer.",
         )
 
@@ -253,6 +254,23 @@ def test_sources_without_prior_ask_returns_inline_fail_closed_reply() -> None:
     assert body["method"] == "sendMessage"
     assert body["text"] == "No selected chunks available — ask a question with /ask first."
     # Fail-closed reply uses the inline response body; no outbound call.
+    assert tg.message_calls == []
+
+
+def test_sources_after_cited_empty_ask_returns_inline_empty_cited_reply() -> None:
+    # An /ask over an empty store yields a cited-empty NO_EVIDENCE answer
+    # (cited_chunk_ids == ()), so /sources returns the empty-cited reply
+    # inline — distinct from the never-asked reply — with no outbound call
+    # (D-100).
+    client, tg = _build_client()  # real QueryService over an empty store
+
+    _post(client, _update("/ask nothing matches", update_id=1, message_id=1))
+    response = _post(client, _update("/sources", update_id=2, message_id=2))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["method"] == "sendMessage"
+    assert body["text"] == "Your last /ask answer didn't cite any specific notes."
     assert tg.message_calls == []
 
 
