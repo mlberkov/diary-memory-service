@@ -421,10 +421,12 @@ class _MarkerChatClient:
         marker: str,
         *,
         cite_all: bool = True,
+        cited_subset_size: int | None = None,
         answer_text: str = "stub answer",
     ) -> None:
         self._marker = marker
         self._cite_all = cite_all
+        self._cited_subset_size = cited_subset_size
         self._answer_text = answer_text
 
     @property
@@ -432,7 +434,13 @@ class _MarkerChatClient:
         return f"stub-{self._marker}"
 
     def complete(self, prompt: AnswerPrompt) -> ChatResponse:
-        citations = list(prompt.cited_chunk_ids) if self._cite_all else []
+        # ``cited_subset_size`` (test-only) cites a strict prefix of the
+        # context so the seam can be characterized carrying the LLM's
+        # actual subset rather than the full retrieved set.
+        if self._cited_subset_size is not None:
+            citations = list(prompt.cited_chunk_ids)[: self._cited_subset_size]
+        else:
+            citations = list(prompt.cited_chunk_ids) if self._cite_all else []
         raw = json.dumps(
             {
                 "answer_text": self._answer_text,
@@ -617,3 +625,102 @@ def test_parse_failure_grades_query_and_trace_with_raw_text() -> None:
     assert trace.latency_ms == 33
     assert trace.token_counts == {"prompt": 5, "completion": 0}
     assert tuple(trace.context_chunk_ids) == tuple(e.chunk_id for e in result.evidence)
+
+
+# --- Packet 1 (D-098): cited_chunk_ids seam characterization -------------------
+
+
+def test_cited_chunk_ids_empty_on_empty_store_no_evidence() -> None:
+    store = MockDomainStore()
+    query = _wire(store)
+
+    result = query.answer(_ask("anything"))
+
+    assert result.fallback is FallbackMode.NO_EVIDENCE
+    assert result.cited_chunk_ids == ()
+
+
+def test_cited_chunk_ids_empty_on_blank_query() -> None:
+    store = MockDomainStore()
+    _ingest(store, "2026-05-09\nMorning routine")
+    query = _wire(store)
+
+    result = query.answer(_ask("   "))
+
+    assert result.fallback is FallbackMode.NO_EVIDENCE
+    assert result.cited_chunk_ids == ()
+
+
+def test_cited_chunk_ids_empty_on_unrelated_query_no_evidence() -> None:
+    store = MockDomainStore()
+    _ingest(store, "2026-05-09\nMorning routine")
+    query = _wire(store)
+
+    result = query.answer(_ask("snowstorm"))
+
+    assert result.fallback is FallbackMode.NO_EVIDENCE
+    assert result.cited_chunk_ids == ()
+
+
+def test_cited_chunk_ids_empty_on_provider_unavailable() -> None:
+    store = MockDomainStore()
+    _ingest(store, "2026-05-09\nMorning routine\nTried a new book")
+    query = _wire_with_chat(store, _UnavailableChatClient())
+
+    result = query.answer(_ask("book"))
+
+    assert result.fallback is FallbackMode.PROVIDER_UNAVAILABLE
+    assert result.evidence  # retrieval succeeded — but no trustworthy cited set
+    assert result.cited_chunk_ids == ()
+
+
+def test_cited_chunk_ids_empty_on_parse_failure() -> None:
+    """PARSE_FAILURE never derives a cited set from raw_text (I-9 unvalidated)."""
+    store = MockDomainStore()
+    _ingest(store, "2026-05-09\nMorning routine\nTried a new book")
+    query = _wire_with_chat(store, _MalformedChatClient())
+
+    result = query.answer(_ask("book"))
+
+    assert result.fallback is FallbackMode.PARSE_FAILURE
+    assert result.evidence
+    assert result.cited_chunk_ids == ()
+
+
+def test_cited_chunk_ids_empty_on_llm_no_evidence_marker() -> None:
+    store = MockDomainStore()
+    _ingest(store, "2026-05-09\nMorning routine\nTried a new book")
+    query = _wire_with_chat(
+        store, _MarkerChatClient("no_evidence", cite_all=False, answer_text="not evidence")
+    )
+
+    result = query.answer(_ask("book"))
+
+    assert result.fallback is FallbackMode.NO_EVIDENCE
+    assert result.cited_chunk_ids == ()
+
+
+def test_cited_chunk_ids_mirror_full_context_when_model_cites_all() -> None:
+    store = MockDomainStore()
+    _ingest(store, "2026-05-09\nMorning routine\nTried a new book\nAnother book chapter")
+    query = _wire(store)  # production MockChatClient cites the whole context
+
+    result = query.answer(_ask("book"))
+
+    assert result.fallback is FallbackMode.NONE
+    assert list(result.cited_chunk_ids) == result.context_chunk_ids
+    assert set(result.cited_chunk_ids).issubset(set(result.context_chunk_ids))
+
+
+def test_cited_chunk_ids_carry_llm_subset_not_full_retrieved() -> None:
+    """The milestone core: the seam carries the LLM's actual subset, not all retrieved."""
+    store = MockDomainStore()
+    _ingest(store, "2026-05-09\nTried a new book\nAnother book chapter")
+    query = _wire_with_chat(store, _MarkerChatClient("confident", cited_subset_size=1))
+
+    result = query.answer(_ask("book"))
+
+    assert result.fallback is FallbackMode.NONE
+    assert len(result.context_chunk_ids) >= 2  # >1 chunk retrieved
+    assert len(result.cited_chunk_ids) == 1  # but the model cited only one
+    assert set(result.cited_chunk_ids) < set(result.context_chunk_ids)  # strict subset

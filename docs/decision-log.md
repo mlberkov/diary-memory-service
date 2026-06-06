@@ -3061,4 +3061,42 @@ The grouped/multi-diary milestone left subject scoping as the one open scoping q
 - A core `Subject` / subject-registry / membership / per-subject-ACL entity (deferred until assignment must diverge from the default single-subject mapping).
 - An explicit subject-selection command or multi-subject UX (not built, not depended on).
 - A-15 `visibility_scope` enumeration or any visibility advance (separate; Slice 8.2 / G-4).
+
+## D-098 — Evidence-faithful attribution, Packet 1: expose the LLM-cited evidence set (`cited_chunk_ids`) on `AnswerResult`
+
+### Context
+
+Milestone **Evidence-faithful answer & source attribution** makes `/ask` answers and `/sources` report only the evidence the LLM actually used — its `cited_chunk_ids` — rather than every retrieved chunk, and present authors as human names. `QueryService.answer` already parses `structured.cited_chunk_ids` (validated by `parse_structured_answer` to be a subset of `AnswerContext.ordered_chunks`, I-9) but **discards** it: only `structured.answer_text` reaches `AnswerResult`. The two surfaces the milestone fixes — the on-demand `/sources` reply (`_update_latest_sources` reads `answer.context.ordered_chunks`) and the `Contributors:` footer (D-091 / D-092, keyed on the same grounding set) — therefore both render the **full retrieved set**, over-claiming the basis of the answer (PRD §7 "users can inspect the basis of answers" / "no silent failure may pretend confidence"). Exposing `cited_chunk_ids` on `AnswerResult` was already a recorded follow-up (D-058).
+
+This is the foundational, additive seam packet: carry the LLM-used set out of the service. It is pure plumbing — **no consumer reads it yet**, no user-visible change — and unblocks the cited-only `/sources` packet (Packet 2) and the footer-removal packet (Packet 3) without forcing either to re-derive citations.
+
+### Decision
+
+- **`AnswerResult.cited_chunk_ids` (new field).** `AnswerResult` gains `cited_chunk_ids: tuple[str, ...] = ()`, the LLM's used-evidence set. It is **distinct from** the full retrieved set exposed by `context_chunk_ids` / `context.ordered_chunks`.
+- **Per-contour truth table (every contour sets it explicitly).** The single `_finalize` convergence point gains a required keyword `cited_chunk_ids`, passed at all five call sites:
+  - empty-query `NO_EVIDENCE` → `()`;
+  - empty-merged `NO_EVIDENCE` → `()`;
+  - `PROVIDER_UNAVAILABLE` → `()`;
+  - `PARSE_FAILURE` → `()` — deliberately **not** mined from `response.raw_text`; the I-9 subset guarantee was never established on that contour;
+  - graded `NONE` / `WEAK_EVIDENCE` / `AMBIGUOUS` → `structured.cited_chunk_ids` (a subset of `context_chunk_ids` by the parser's I-9 check);
+  - graded LLM-marker `NO_EVIDENCE` → `structured.cited_chunk_ids` verbatim (typically `()`, taken truthfully from the structured answer, not forced).
+
+### Why
+
+Surfacing the already-parsed cited set on the result is the smallest bounded change that lets the consuming packets render used-only evidence without reaching back into the LLM output downstream — a worse, repeated seam. Defaulting the field to `()` and threading it explicitly through the one `_finalize` entry point keeps `Query.fallback` / `AnswerTrace.fallback_mode` / the cited set written from one decision per contour. Keeping `PARSE_FAILURE` / `PROVIDER_UNAVAILABLE` empty avoids ever presenting an unvalidated citation set as the basis of an answer.
+
+### Consequence
+
+- **`src/`:** `core/domain/models.py` (the `AnswerResult.cited_chunk_ids` field + docstring); `services/query_service.py` (`_finalize` keyword + the five explicit call sites). No consumer (dispatcher, Telegram adapter, eval harness) reads the field in this packet; reply rendering is byte-unchanged.
+- **`tests/`:** `tests/test_query_service.py` gains a cited-set characterization block (empty on the four non-graded contours + the LLM-marker `no_evidence`; mirrors the full context under the cite-all mock; and a **strict-subset fidelity** case proving the seam carries the LLM's actual subset, not the retrieved set — via a test-only `cited_subset_size` knob on `_MarkerChatClient`).
+- **Docs (this packet):** this D-098 entry; `docs/execution-map.md` (new milestone block + Packet 1 row). `[[feedback_decision_log_citation]]`, `[[feedback_full_gate_and_doc_truthfulness]]`.
+- **No schema / DDL / migration / config change.** `AnswerTrace.context_chunk_ids` still records the full context set; no cited subset is persisted. I-9 / R-5 unchanged; no new I-/R- number.
+
+### Out of scope (per packet boundaries)
+
+- `/sources` rendering only the cited chunks + empty-cited wording (Packet 2).
+- Removing the all-retrieved `Contributors:` footer (Packet 3).
+- `/drafts` human author-name rendering (Packet 4).
+- Persisting the cited subset onto `AnswerTrace` / any schema change.
+- Threading `cited_chunk_ids` onto `DispatchResult` / the Telegram adapter (done by the consuming packets that need it).
 - Reopening or re-deciding the D-093 / Milestone G community-bootstrap contract.

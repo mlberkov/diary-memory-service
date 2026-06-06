@@ -196,6 +196,16 @@ class AnswerResult:
     contours where no chat call ran, and on the no-retrieval-call branch.
     The Telegram reply layer still renders the evidence-bullets shape in
     this packet; Slice 4.4 will switch it to consume ``answer_text``.
+
+    ``cited_chunk_ids`` carries the chunks the LLM actually used — its
+    parsed ``StructuredAnswer.cited_chunk_ids`` (a subset of
+    ``context.ordered_chunks`` by I-9). It is distinct from the full
+    retrieved set exposed by ``context_chunk_ids`` / ``context.ordered_chunks``:
+    only the graded (post-parse) contours carry a non-empty value; the
+    empty-query, empty-merged ``NO_EVIDENCE``, ``PROVIDER_UNAVAILABLE``,
+    and ``PARSE_FAILURE`` contours carry ``()`` because no trustworthy
+    citation set exists for them (D-098). The cited-only ``/sources`` and
+    contributor-footer surfaces consume this field in later packets.
     """
 
     fallback: FallbackMode
@@ -203,6 +213,7 @@ class AnswerResult:
     evidence: list[Evidence] = field(default_factory=list)
     context: AnswerContext | None = None
     answer_text: str | None = None
+    cited_chunk_ids: tuple[str, ...] = ()
 
     @property
     def context_chunk_ids(self) -> list[str]:

@@ -270,3 +270,17 @@ subject-selection command / multi-subject UX, A-15 visibility (separate; Slice 8
 | H-2 — adapter-axis subject assignment | **Pending.** One adapter-owned host→subject mapping (default single-subject per community, parallel to `resolve_community_id`); resolved opaque `subject_id` crosses on `InboundMessage`; domain service carries it through. Behavior-preserving under the default mapping. |
 | H-3 — optional subject retrieval filter | **Pending.** `Query.subject_scope` + keyword-only optional subject filter on both `storage/search_repository.py` legs (postgres/mock parity), mirroring the D-040 `date_range` seam; `None` = no constraint; composes with `date_range`. |
 | H-4 — regression suite + operator/product docs + closure | **Pending.** Subject-scoping characterization suite (mock + PG-gated parity); reconcile `RUNBOOK.md` / `TechSpec.md` §5 / `ARCHITECTURE.md`; flip the roadmap + this block to milestone-closed (conditional on this packet landing). |
+
+## Evidence-faithful answer & source attribution (D-098) *(sequenced separately from the Phase/Stage axis)*
+Makes `/ask` answers and `/sources` report only the evidence the LLM actually
+used (its `cited_chunk_ids`), not every retrieved chunk, and present authors as
+human names rather than opaque numeric ids. Root cause: `QueryService.answer`
+parses `structured.cited_chunk_ids` (a subset of `AnswerContext.ordered_chunks`,
+I-9) but discards it, so `/sources` (`_update_latest_sources`) and the
+`Contributors:` footer (D-091 / D-092) both render the full retrieved set.
+| Slice | Files / artifacts |
+| --- | --- |
+| Packet 1 — expose `cited_chunk_ids` on the answer/result seam | **Done (D-098).** Additive `AnswerResult.cited_chunk_ids: tuple[str, ...] = ()` carrying the LLM's used-evidence set, distinct from the full retrieved `context_chunk_ids`; threaded through the single `QueryService._finalize` convergence point and set explicitly at all five contours (`()` on empty-query / empty-merged / `PROVIDER_UNAVAILABLE` / `PARSE_FAILURE`; `structured.cited_chunk_ids` on the graded branch). No consumer reads it yet — pure plumbing, reply rendering byte-unchanged. `core/domain/models.py`, `services/query_service.py`; `tests/test_query_service.py` (cited-set characterization incl. a strict-subset fidelity case via a test-only `_MarkerChatClient` `cited_subset_size` knob); `decision-log.md` (D-098), this map. No schema / DDL / migration / config change; `AnswerTrace.context_chunk_ids` still records the full context set. I-9 / R-5 preserved. **Out of scope:** `/sources` cited-only rendering (Packet 2), `Contributors:` footer removal (Packet 3), `/drafts` author names (Packet 4), persisting the cited subset, `DispatchResult`/adapter threading. → Packet 1 (D-098). |
+| Packet 2 — `/sources` renders only the cited chunks | **Pending.** `/sources` consumes `AnswerResult.cited_chunk_ids` instead of `context.ordered_chunks`, with explicit empty-cited wording. |
+| Packet 3 — remove the all-retrieved `Contributors:` footer | **Pending.** Remove the D-091 / D-092 footer from the answer text. |
+| Packet 4 — human author names in `/drafts` | **Pending.** Render `@username → first_name → id floor` instead of numeric author ids; drop unnecessary technical detail. |
