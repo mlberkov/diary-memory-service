@@ -3100,3 +3100,47 @@ Surfacing the already-parsed cited set on the result is the smallest bounded cha
 - Persisting the cited subset onto `AnswerTrace` / any schema change.
 - Threading `cited_chunk_ids` onto `DispatchResult` / the Telegram adapter (done by the consuming packets that need it).
 - Reopening or re-deciding the D-093 / Milestone G community-bootstrap contract.
+
+## D-099 — Evidence-faithful attribution, Packet A: ratify the `/ask` no-evidence guardrail (empty `cited_chunk_ids` ⇒ explicit technical no-evidence reply, never free-form `answer_text`)
+
+### Context
+
+The "Evidence-faithful answer & source attribution" milestone (D-098) exposed `AnswerResult.cited_chunk_ids` — the LLM's used-evidence subset — as a pure additive seam, to be consumed by a cited-only `/sources` packet (Packet B) and a footer-removal packet (Packet C). Before that consuming code lands, the owner has decided to **name and lock** the runtime property that the `/sources` re-keying makes load-bearing.
+
+Today that property is **emergent**, composed from two existing mechanisms, not stated as one contract:
+
+- **I-9 / `parse_structured_answer`** (`src/memory_rag/core/domain/answer_schema.py`): empty `cited_chunk_ids` is permitted **only** when `uncertainty == "no_evidence"`; `"confident"` / `"uncertain"` / `"ambiguous"` therefore require non-empty citations. A free-form substantive answer cannot pass the parser with an empty cited set.
+- **D-035 / R-6** (`services/query_service.py` grading → `services/dispatcher.py` `_format_answer_reply`): the free-form `answer_text` is surfaced only on `NONE` / `WEAK_EVIDENCE` / `AMBIGUOUS` (all citation-bearing); every cited-empty contour returns a fixed/templated technical reply and the LLM-marker `no_evidence` reply deliberately does not surface the model's prose.
+
+### Decision
+
+Ratify the guardrail as the contract of record. **Contract (verbatim):**
+
+> If `cited_chunk_ids` is empty, `/ask` returns an explicit technical no-evidence response and MUST NOT surface free-form `answer_text`.
+
+The guardrail **trigger** is `cited_chunk_ids == ()`; the **guarantee** is that no free-form `answer_text` reaches the user in that case. Two distinct contour classes carry an empty cited set (per the D-098 per-contour truth table), and the entry keeps them separate:
+
+- **No-evidence contours proper** (the system found or used no evidence): empty-query `NO_EVIDENCE`; empty-merged `NO_EVIDENCE` (retrieval returned nothing); LLM-marker `no_evidence` over non-empty retrieval (the LLM declared the retrieved chunks not-evidence). These return the explicit **technical no-evidence** reply.
+- **Other cited-empty technical-failure contours** (NOT no-evidence): `PROVIDER_UNAVAILABLE` (chat provider down) and `PARSE_FAILURE` (unparseable provider response). They also carry `cited_chunk_ids == ()` and also never surface free-form `answer_text`, but they are **technical failure** contours with their own retry-hint replies — they are **not** semantic no-evidence and must not be described as such.
+
+**Milestone scope of "no evidence" = the cited-empty reading only.** The stronger notion — *citations exist but are semantically weak / do not truly support the answer* — is a **separate, future groundedness/factuality concern** owned by the Phase 7 track and is explicitly **out of scope** here. D-099 makes **no claim** that citation presence alone proves factual support; it only ratifies that an **empty** cited set blocks a free-form answer.
+
+This is recorded via cross-reference clauses on **I-9** and **R-6** (no new invariant id, no semantic rewrite — the D-082 / D-083 / D-091 precedent), with this entry as the decision of record.
+
+### Why
+
+The cited-empty ⇒ no-free-form-answer property is now load-bearing for Packet B's cited-only `/sources` and must be an intentional contract, not an accident that a future refactor could silently erode. Recording it as a named guardrail with cross-references — rather than minting a parallel invariant — locks it at the invariant layer while honoring that **no runtime behavior changes**: the property already holds. Keeping the no-evidence contours proper distinct from the provider/parse technical-failure contours, and fencing the semantic-groundedness reading into Phase 7, prevents the contract from overclaiming.
+
+### Consequence
+
+- **Docs-only; no runtime behavior change** (the guardrail already holds; this packet does not alter any code path or user-facing reply).
+- **Changed:** this D-099 entry; `docs/execution-map.md` (Packet A row inserted as the next planned packet, pre-checkpoint; pending rows relabeled B / C / D); `docs/INVARIANTS.md` (one cross-reference clause on I-9 → D-099, **no new invariant, no semantic change**); `docs/RUNTIME-INVARIANTS.md` (parallel cross-reference clause on R-6 → D-099, **no new R-number**).
+- **No `src/` / `tests/` / schema / migration / config change.** I-9 / R-5 / R-6 semantics unchanged. `[[feedback_decision_log_citation]]`, `[[feedback_full_gate_and_doc_truthfulness]]`, `[[feedback_minimal_packet_docs]]`.
+
+### Out of scope (per packet boundaries)
+
+- The behavioral **guard test** pinning "no-evidence contours surface no `answer_text`" — a code artifact, deferred to **Packet B**.
+- `/sources` cited-only rendering + the empty-cited wording "Your last /ask answer didn't cite any specific notes." + the two distinct empty contours ("never asked" vs "asked, cited nothing") — **Packet B**.
+- Removing the all-retrieved `Contributors:` footer (same empty-cited semantics) — **Packet C**.
+- Semantic groundedness / factuality ("citations present but insufficient") — **Phase 7** track.
+- Minting a dedicated invariant id; any `todo.md` milestone section (none exists for this milestone; not gated by a concrete need here).

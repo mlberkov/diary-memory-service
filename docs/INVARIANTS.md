@@ -39,6 +39,8 @@ Citation grounding is enforced in code as of Slice 4.2 (D-033): `parse_structure
 
 Answer-side trace persistence is enforced on every `/ask` reply as of Slice 4.3b (D-035): one `AnswerTrace` row is written per call (FK to `queries.query_id`, UNIQUE on `query_id`) recording `prompt_version`, `context_chunk_ids`, `answer_text`, `model_name`, `token_counts`, `latency_ms`, and `fallback_mode`. `Query.fallback` and `AnswerTrace.fallback_mode` are written from one decision per call so they always agree. Slice 4.3a (D-034) landed the seam on the success and no-evidence/empty-query contours; Slice 4.3b extended it to weak-evidence, ambiguous, the LLM-marker `no_evidence` sub-branch, provider-unavailable, and parse-failure. Live provider integration remains deferred to Phase 6.
 
+Ratified as a named product guardrail in D-099: when `cited_chunk_ids` is empty, `/ask` returns an explicit technical no-evidence response and never surfaces free-form `answer_text` (cited-empty reading only; semantic-groundedness of present citations is a separate Phase 7 concern). This is a cross-reference to existing behavior — no new invariant, no semantic change to I-9.
+
 ## I-10. Optional AI is optional
 Query rewriting, semantic expansion, reranking, and answer-style modes are feature-flagged. The base ingestion → retrieval → answer flow must work end-to-end with all enhancements disabled.
 
