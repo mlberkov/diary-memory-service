@@ -208,7 +208,8 @@ def test_ask_success_then_sources_returns_cited_chunks() -> None:
 
     assert ask_result.route is RouteKind.ASK
     assert sources_result.route is RouteKind.SOURCES
-    assert sources_result.reply_text == "Selected chunks for your last /ask (2 chunk(s)):"
+    # No header line on the populated reply (D-105): the source blocks alone.
+    assert sources_result.reply_text == ""
     # The dispatcher returns the opaque cited chunks (post-RRF order,
     # identity preserved); the adapter renders blocks + resolves the
     # author (D-086).
@@ -241,7 +242,8 @@ def test_sources_returns_only_the_cited_subset_in_post_rrf_order() -> None:
     # Order follows ordered_chunks (post-RRF), not cited_chunk_ids order.
     assert sources_result.source_chunks == (c1, c3)
     assert c2 not in (sources_result.source_chunks or ())
-    assert sources_result.reply_text == "Selected chunks for your last /ask (2 chunk(s)):"
+    # No header line on the populated reply (D-105).
+    assert sources_result.reply_text == ""
     assert sources_result.metadata["returned"] == "2"
 
 

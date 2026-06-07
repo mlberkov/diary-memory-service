@@ -3402,3 +3402,33 @@ The full ISO datetime exposed implementation detail (UTC offset, seconds) that t
 - Any author-resolution behavior change; the `created_at` source field, timezone normalization, or user-local time conversion.
 - Subject scoping, retrieval behavior; schema / migrations / core domain models.
 - The milestone Done-flip checkpoint (a distinct act after this packet).
+
+## D-105 — Post-attribution user-surface cleanup, Packet 3: remove the `/sources` header line
+
+### Context
+
+Third and final packet of the post-attribution surface-polish milestone (`fix/post-attribution-surface-cleanup`; see D-103 for the milestone framing and the three findings). Packets 1 (D-103) and 2 (D-104) are landed. A populated `/sources` reply led with a header line — `_dispatch_sources` (`services/dispatcher.py`) returned `reply_text = f"Selected chunks for your last /ask ({len(chunks)} chunk(s)):"`, which the Telegram adapter packed ahead of the rendered source blocks. The chunk count is already implicit in each block's `(i/N)` index, so the header is redundant noise on every populated `/sources`.
+
+### Decision
+
+- **Drop the header on the populated branch.** `_dispatch_sources` now returns `reply_text=""` on the populated branch; the reply is the source blocks alone. `route`, the opaque `source_chunks` carried to the adapter, and `metadata` (incl. `returned=str(len(chunks))`) are unchanged.
+- **No adapter or packer change.** The adapter packs `reply_text` + blocks via `pack_drafts_into_messages` (`adapters/telegram/drafts_packing.py`). Its existing `if not current:` branch already absorbs an empty header — the first block becomes the running message with no leading separator and no empty leading message; the `messages or [header]` fallback can only emit `[""]` when there are zero blocks, which the populated branch (past the `if not chunks:` guard) never reaches. The packer stays generic, so `/drafts` packing is unaffected.
+- **Both empty contours byte-identical.** No prior `/ask` → `"No selected chunks available — ask a question with /ask first."` (`_REPLY_SOURCES_NONE`); last `/ask` cited nothing → `"Your last /ask answer didn't cite any specific notes."` (`_REPLY_SOURCES_NONE_CITED`). Only the populated header is removed.
+
+### Why
+
+The header duplicated information the user can already see: the per-block `[YYYY-MM-DD] (i/N)` line carries both ordering and the total `N`. Removing it leaves a clean blocks-only reply, consistent with the surface-polish framing of the milestone. Representing "no header" as an empty `reply_text` reuses the packer's existing empty-header behavior rather than adding an adapter branch.
+
+### Consequence
+
+- **`src/`:** `services/dispatcher.py` — `_dispatch_sources` populated branch returns `reply_text=""` (header line + its f-string deleted). No other `src/` change; the adapter and packer are untouched.
+- **`tests/`:** `tests/test_dispatcher_sources.py` — the two populated header asserts tightened to `reply_text == ""`; the two empty-contour literals stay byte-pinned by the existing `test_sources_without_prior_ask_fails_closed` / `test_never_asked_and_cited_nothing_replies_are_byte_distinct` (sibling-wording guard already in place). `tests/test_telegram_sources.py` — the combined-message body assert now expects the first source block (`[2026-05-09] (1/2)`) with an explicit `"Selected chunks for your last /ask" not in body`; the oversized-split assert expects message 1 to start with `[2026-05-09] (1/3)` with the removed header absent from every message.
+- **Docs:** this D-105 entry; `docs/execution-map.md` (Packet 3 row → Implemented, pre-checkpoint). `docs/RUNBOOK.md` and `QUICKSTART.md` are **not** touched — neither asserts a populated `/sources` header line, so the change makes no sentence there false (RUNBOOK's "`(i/N)` block header" phrase refers to the per-block date/index line, not the removed reply header). The historical D-036 reply-text quote and the D-098-era relocation note are left untouched — past records are not rewritten. No schema / DDL / migration / config change; no new I-/R- number. Supersedes only the header-presence half of D-036; D-036's cited-only selection and the D-086 author-resolution decisions stand.
+- **Status: pre-checkpoint.** This entry and the execution-map Packet 3 row stay **Implemented / pre-checkpoint**; they flip to **Done** only after report / checkpoint. `[[feedback_doc_state_truthfulness]]`, `[[feedback_sibling_wording_guard_tests]]`, `[[feedback_minimal_packet_docs]]`, `[[feedback_full_gate_and_doc_truthfulness]]`.
+
+### Out of scope (per packet boundaries)
+
+- Any change to the two empty-`/sources` contours beyond preserving their wording.
+- Source-block body format, the `(i/N)` index, cited-only behavior, `_latest_sources` cache semantics, retrieval / answer-path, author resolution; schema / migrations / core domain models.
+- Subject scoping (H-2..H-4) and any other milestone.
+- The milestone Done-flip checkpoint and PR preparation (distinct acts after this packet).
