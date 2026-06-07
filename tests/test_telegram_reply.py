@@ -10,6 +10,12 @@ from memory_rag.adapters.telegram.reply import build_send_message_payload
 from memory_rag.config import Settings
 from memory_rag.core.routing import InboundMessage, RouteKind, RouteSource
 from memory_rag.services import Dispatcher, DomainService, ExportService, QueryService
+from memory_rag.services.dispatcher import (
+    _REPLY_CLARIFY,
+    _REPLY_HELP,
+    _REPLY_START,
+    _REPLY_UNKNOWN,
+)
 from memory_rag.storage.mock import MockDomainStore
 
 
@@ -97,8 +103,7 @@ def test_dispatcher_no_command_default_draft_stores_via_heuristic() -> None:
         )
     )
     assert result.route is RouteKind.DRAFT
-    assert result.reply_text.startswith("Stored as draft")
-    assert "/note" in result.reply_text
+    assert result.reply_text == "Stored as draft."
     assert result.metadata["effective_path"] == "fresh"
     assert result.metadata["fallback"] == "none"
 
@@ -115,7 +120,8 @@ def test_dispatcher_draft_reply_marks_replay_on_repeated_delivery() -> None:
     second = dispatcher.dispatch(msg)
     assert first.metadata["effective_path"] == "fresh"
     assert second.metadata["effective_path"] == "replay"
-    assert "replay" in second.reply_text
+    assert first.reply_text == "Stored as draft."
+    assert second.reply_text == "Stored as draft (replay)."
 
 
 def test_dispatcher_no_command_default_draft_omits_heuristic_marker() -> None:
@@ -132,6 +138,53 @@ def test_dispatcher_no_command_default_draft_omits_heuristic_marker() -> None:
     # The draft floor is unconditional; no requested-vs-effective marker is needed
     # because nothing about the draft outcome diverged from the routing decision.
     assert "routed as" not in result.reply_text
+
+
+def test_draft_reply_wording_and_sibling_literals_are_pinned() -> None:
+    """Byte-equality guards for the trimmed draft reply and its sibling reply literals.
+
+    Packet 1 removed the ``/note`` + ``/ask`` hint from the draft-save confirmation. These
+    guards pin the trimmed draft reply (fresh + replay), assert the removed hint sentence
+    survives in no reply literal, and byte-pin the neighboring reply literals that
+    legitimately still mention ``/note`` — so the trim cannot silently bleed into a sibling
+    string or be reverted in this milestone.
+    """
+    dispatcher = _dispatcher()
+    msg = _inbound(RouteKind.DRAFT, text="x", payload="x", route_source="heuristic")
+    first = dispatcher.dispatch(msg)
+    second = dispatcher.dispatch(msg)
+    assert first.reply_text == "Stored as draft."
+    assert second.reply_text == "Stored as draft (replay)."
+    assert "/note" not in first.reply_text
+    assert "/ask" not in first.reply_text
+
+    # The exact hint sentence removed from the draft reply must survive nowhere else.
+    removed_hint = (
+        "Send /note <YYYY-MM-DD> on the first line to commit it as a note, or /ask to query."
+    )
+    for literal in (first.reply_text, _REPLY_START, _REPLY_HELP, _REPLY_UNKNOWN, _REPLY_CLARIFY):
+        assert removed_hint not in literal
+
+    # Sibling reply literals — byte-equality pins (must not change under this milestone).
+    assert _REPLY_HELP == (
+        "Commands: /start, /help, /note, /ask, /sources, /drafts, /export. Plain text "
+        "without a command is stored as a draft."
+    )
+    assert _REPLY_UNKNOWN == (
+        "I haven't been taught how to handle that yet — use /note, /ask, /sources, or /drafts."
+    )
+    assert _REPLY_CLARIFY == (
+        "I couldn't tell if that's a diary entry or a question. "
+        "Send /note <YYYY-MM-DD> on the first line then your events to record it, "
+        "or /ask <your question> to query."
+    )
+    assert _REPLY_START == (
+        "Welcome — diary mode. Use /note to record, /ask to query, /sources to see the chunks "
+        "behind your last answer, or /drafts to recall recent drafts. For /note, put a date on "
+        "the first line — 2026-05-09 is the recommended form; 2026/05/09, 2026.05.09, "
+        "09-05-2026, 09/05/2026, and 09.05.2026 also work (DD-first is read as DD/MM/YYYY). "
+        "Plain text without a command is stored as a draft so nothing is lost."
+    )
 
 
 def test_dispatcher_clarify_reply_explains_both_commands() -> None:

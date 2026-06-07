@@ -444,4 +444,4 @@ def test_render_draft_block_format_is_byte_stable() -> None:
         first_name=None,
     )
     block = _render_draft_block(draft, store=store, community_id="42")
-    assert block == "\U0001f4dd 2026-05-09T10:00:00+00:00 · @alice\n\nwalked the dog"
+    assert block == "\U0001f4dd 2026-05-09 · @alice\n\nwalked the dog"

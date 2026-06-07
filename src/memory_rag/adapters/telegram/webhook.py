@@ -360,5 +360,5 @@ def _render_draft_block(
     opaque ``author_user_id`` (I-6); the display name is non-authoritative.
     """
     author = _resolve_source_author_display(draft, store, community_id=community_id)
-    header = f"\U0001f4dd {draft.created_at.isoformat()} · {author}"
+    header = f"\U0001f4dd {draft.created_at.date().isoformat()} · {author}"
     return f"{header}\n\n{draft.raw_text}"

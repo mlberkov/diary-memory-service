@@ -155,7 +155,10 @@ def test_sources_after_ask_delivers_one_combined_outbound_message() -> None:
     assert response.json() == {}
     assert len(tg.message_calls) == 1
     body = tg.message_calls[0]["text"]
-    assert body.startswith("Selected chunks for your last /ask (2 chunk(s)):")
+    # No header line (D-105): the message starts with the first source block,
+    # and the removed header string appears nowhere.
+    assert body.startswith("[2026-05-09] (1/2)")
+    assert "Selected chunks for your last /ask" not in body
     # No source row / snapshot persisted for these chunks → author falls to the
     # opaque short-ID floor `user-<last8>` (author_user_id="7").
     assert "[2026-05-09] (1/2)\n— user-7\n\nTried a new book" in body
@@ -295,5 +298,7 @@ def test_oversized_chunks_force_multi_message_split() -> None:
     assert "x" * 1500 in joined
     assert "y" * 1500 in joined
     assert "z" * 1500 in joined
-    # Header lands on the first message only.
-    assert tg.message_calls[0]["text"].startswith("Selected chunks for your last /ask")
+    # No header line (D-105): the first message starts with the first source
+    # block, and the removed header string appears in no message.
+    assert tg.message_calls[0]["text"].startswith("[2026-05-09] (1/3)")
+    assert "Selected chunks for your last /ask" not in joined

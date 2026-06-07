@@ -69,9 +69,6 @@ _REPLY_EXPORT_USAGE = "Usage: /export json | /export txt — pick a format."
 _REPLY_DRAFTS_USAGE = "Usage: /drafts [N]. N must be a positive integer."
 _REPLY_DRAFTS_EMPTY = "No drafts to show."
 _DRAFT_REPLY_PREFIX = "Stored as draft"
-_DRAFT_REPLY_HINT = (
-    "Send /note <YYYY-MM-DD> on the first line to commit it as a note, or /ask to query."
-)
 
 
 def _format_ingest_reply(result: IngestResult) -> str:
@@ -130,7 +127,7 @@ def _normalize_note_first_line(message: InboundMessage) -> InboundMessage:
 
 def _format_draft_reply(result: IngestResult) -> str:
     suffix = " (replay)" if result.replayed else ""
-    return f"{_DRAFT_REPLY_PREFIX}{suffix}. {_DRAFT_REPLY_HINT}"
+    return f"{_DRAFT_REPLY_PREFIX}{suffix}."
 
 
 _TRAILER_WEAK_EVIDENCE = "(weak evidence — model expressed uncertainty)"
@@ -491,9 +488,13 @@ class Dispatcher:
                     "returned": "0",
                 },
             )
-        header = f"Selected chunks for your last /ask ({len(chunks)} chunk(s)):"
+        # No header line (D-105): the populated reply is the source blocks
+        # alone — the chunk count is already implicit in the per-block (i/N)
+        # indices. An empty reply_text is absorbed by the adapter's packer
+        # (pack_drafts_into_messages: empty header → no leading blank message),
+        # and the populated branch always carries >=1 block.
         return DispatchResult(
-            reply_text=header,
+            reply_text="",
             route=RouteKind.SOURCES,
             metadata={
                 "fallback": FallbackMode.NONE.value,

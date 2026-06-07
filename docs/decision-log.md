@@ -3343,3 +3343,92 @@ seam without changing its interface." Authorship is unchanged: still carried onl
   `/drafts` semantics change beyond the rendered author.
 - Changing the `author_display` public seam shape or any store protocol.
 - The milestone-closure Done-flips (A/B/C/D → Done) — a distinct checkpoint act after this packet.
+
+## D-103 — Post-attribution user-surface cleanup, Packet 1: trim the draft-save confirmation reply
+
+### Context
+
+Post-merge UI testing of the Evidence-faithful attribution milestone (D-098 → D-102) surfaced three user-facing roughness findings on the surfaces that milestone touched or sits beside: the draft-save confirmation, the `/drafts` header, and the `/sources` header. They cohere as a small **product-baseline surface-polish** milestone (`fix/post-attribution-surface-cleanup`), sequenced ahead of resuming the in-flight Subject-scoping milestone (H-2..H-4) because they are confirmed defects on every interaction and cheapest to fix while the surfaces are warm. This is Packet 1 — the most self-contained of the three.
+
+Today a successful plain-text draft store replies with a two-part string: `_format_draft_reply` (`services/dispatcher.py`) returned `f"{_DRAFT_REPLY_PREFIX}{suffix}. {_DRAFT_REPLY_HINT}"`, e.g. `"Stored as draft. Send /note <YYYY-MM-DD> on the first line to commit it as a note, or /ask to query."` The trailing `/note` + `/ask` hint is noise on every plain-text message.
+
+### Decision
+
+- **Trim the hint.** `_format_draft_reply` now returns `f"{_DRAFT_REPLY_PREFIX}{suffix}."` — the `/note` + `/ask` hint is removed and the unused `_DRAFT_REPLY_HINT` constant deleted (single consumer).
+- **Keep the R-2 replay provenance suffix (owner-decided).** Fresh store → `"Stored as draft."`; idempotent re-delivery → `"Stored as draft (replay)."`. Only the hint is removed; the requested-vs-effective-path distinction stays visible in the reply (Fallback Rule). Replay provenance also remains in logs (`effective_path=replay`).
+
+### Why
+
+The hint repeated promotion instructions on every draft, duplicating `/start` (`_REPLY_START`) and `/help` (`_REPLY_HELP`), which already document how to promote a draft. Removing it leaves a clean confirmation. Keeping the `(replay)` suffix preserves the Fallback Rule's "make requested and effective path distinguishable" guarantee at the user surface.
+
+### Consequence
+
+- **`src/`:** `services/dispatcher.py` — `_format_draft_reply` trimmed; `_DRAFT_REPLY_HINT` deleted. `_DRAFT_REPLY_PREFIX` and the `suffix` logic unchanged.
+- **`tests/`:** `tests/test_telegram_reply.py` (two assertions tightened to exact equality; new `test_draft_reply_wording_and_sibling_literals_are_pinned` byte-equality guard pinning the fresh/replay replies, asserting the removed hint sentence survives in no reply literal, and pinning the sibling literals `_REPLY_START` / `_REPLY_HELP` / `_REPLY_UNKNOWN` / `_REPLY_CLARIFY`); `tests/test_end_to_end_smoke.py` (the `"/note" in …` draft assertion replaced with exact equality). The nine other `startswith("Stored as draft")` assertions stay valid.
+- **Docs:** this D-103 entry; `docs/execution-map.md` (new "Post-attribution user-surface cleanup" block, Packet 1 row — Implemented, pre-checkpoint); `QUICKSTART.md` (three `# → text:` examples trimmed to `"Stored as draft."` and the now-false "The reply tells the user how to promote the draft." sentence dropped). An older historical decision-log reply quote is left untouched (a stale `/entry` snapshot — past records are not rewritten). No schema / DDL / migration / config change; no new I-/R- number. R-2 preserved.
+- **Status: Done.** This entry and the execution-map Packet 1 row are **Done** as of the milestone-closure checkpoint. `[[feedback_doc_state_truthfulness]]`, `[[feedback_sibling_wording_guard_tests]]`, `[[feedback_minimal_packet_docs]]`, `[[feedback_full_gate_and_doc_truthfulness]]`.
+
+### Out of scope (per packet boundaries)
+
+- `/drafts` date/author header formatting (Packet 2); `/sources` header removal (Packet 3).
+- Subject scoping, retrieval behavior, author resolution; schema / migrations / core domain models.
+- The milestone Done-flip checkpoint (a distinct act after this packet).
+
+## D-104 — Post-attribution user-surface cleanup, Packet 2: trim the `/drafts` header to date + author only
+
+### Context
+
+Second packet of the post-attribution surface-polish milestone (`fix/post-attribution-surface-cleanup`; see D-103 for the milestone framing and the three findings). D-102 made the `/drafts` block header render the human author display name and trimmed it to `📝 <created_at> · <author>`, but used `created_at.isoformat()` — a full datetime + timezone suffix (e.g. `📝 2026-05-09T10:00:00+00:00 · @alice`). The time-of-day + offset is noise on a journaling surface where the calendar date is the meaningful field.
+
+### Decision
+
+- **Render the header date-only.** `_render_draft_block` (`adapters/telegram/webhook.py`) now builds the header with `draft.created_at.date().isoformat()` instead of `draft.created_at.isoformat()`, so `📝 <created_at full-ISO> · <author>` becomes `📝 <created_at date> · <author>` (`YYYY-MM-DD`). `SourceMessage.created_at` is a `datetime` (`core/domain/models.py`), so `.date().isoformat()` yields the calendar date of the stored UTC timestamp.
+- **Everything else byte-unchanged.** Author resolution (the D-086 ladder `@username → first_name → opaque `user-<last8>` floor`, requester-`community_id`-scoped per D-089), the `· ` separator, the `\n\n` blank line, and the verbatim `{draft.raw_text}` body are untouched. This is an adapter-only rendering change.
+
+### Why
+
+The full ISO datetime exposed implementation detail (UTC offset, seconds) that the user does not need to read on every draft. A bare date keeps `/drafts` scannable and consistent with the date-first framing of the journal. Rendering the UTC `created_at`'s date (no timezone normalization or user-local conversion) keeps the change minimal and behavior-preserving for everything but the header precision — that asymmetry is deliberately left for a future packet if it ever matters.
+
+### Consequence
+
+- **`src/`:** `adapters/telegram/webhook.py` — one line in `_render_draft_block` (`.isoformat()` → `.date().isoformat()`). Sole caller (the `/drafts` outbound branch) and the helper signature are unchanged.
+- **`tests/`:** `tests/test_telegram_drafts.py` — the `test_render_draft_block_format_is_byte_stable` expected literal updated from `"\U0001f4dd 2026-05-09T10:00:00+00:00 · @alice\n\nwalked the dog"` to `"\U0001f4dd 2026-05-09 · @alice\n\nwalked the dog"` (fixture `created_at=datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC)`). The nine other `/drafts` tests reference only the `· <author>` segment and stay green.
+- **Docs:** this D-104 entry; `docs/execution-map.md` (Packet 2 row → Implemented, pre-checkpoint); `docs/RUNBOOK.md` (the `/drafts` author-display note's header literal `📝 <created_at ISO>` → `📝 <created_at date>` — a same-packet truthfulness fix, the change made the quoted literal false). The D-102 decision-log entry and execution-map row are historical and left untouched. No schema / DDL / migration / config change; no new I-/R- number. Supersedes only the header-format half of D-102; D-102's author-resolution decision stands.
+- **Status: Done.** This entry and the execution-map Packet 2 row are **Done** as of the milestone-closure checkpoint. `[[feedback_doc_state_truthfulness]]`, `[[feedback_sibling_wording_guard_tests]]`, `[[feedback_minimal_packet_docs]]`, `[[feedback_full_gate_and_doc_truthfulness]]`.
+
+### Out of scope (per packet boundaries)
+
+- `/sources` header removal (Packet 3).
+- Any author-resolution behavior change; the `created_at` source field, timezone normalization, or user-local time conversion.
+- Subject scoping, retrieval behavior; schema / migrations / core domain models.
+- The milestone Done-flip checkpoint (a distinct act after this packet).
+
+## D-105 — Post-attribution user-surface cleanup, Packet 3: remove the `/sources` header line
+
+### Context
+
+Third and final packet of the post-attribution surface-polish milestone (`fix/post-attribution-surface-cleanup`; see D-103 for the milestone framing and the three findings). Packets 1 (D-103) and 2 (D-104) are landed. A populated `/sources` reply led with a header line — `_dispatch_sources` (`services/dispatcher.py`) returned `reply_text = f"Selected chunks for your last /ask ({len(chunks)} chunk(s)):"`, which the Telegram adapter packed ahead of the rendered source blocks. The chunk count is already implicit in each block's `(i/N)` index, so the header is redundant noise on every populated `/sources`.
+
+### Decision
+
+- **Drop the header on the populated branch.** `_dispatch_sources` now returns `reply_text=""` on the populated branch; the reply is the source blocks alone. `route`, the opaque `source_chunks` carried to the adapter, and `metadata` (incl. `returned=str(len(chunks))`) are unchanged.
+- **No adapter or packer change.** The adapter packs `reply_text` + blocks via `pack_drafts_into_messages` (`adapters/telegram/drafts_packing.py`). Its existing `if not current:` branch already absorbs an empty header — the first block becomes the running message with no leading separator and no empty leading message; the `messages or [header]` fallback can only emit `[""]` when there are zero blocks, which the populated branch (past the `if not chunks:` guard) never reaches. The packer stays generic, so `/drafts` packing is unaffected.
+- **Both empty contours byte-identical.** No prior `/ask` → `"No selected chunks available — ask a question with /ask first."` (`_REPLY_SOURCES_NONE`); last `/ask` cited nothing → `"Your last /ask answer didn't cite any specific notes."` (`_REPLY_SOURCES_NONE_CITED`). Only the populated header is removed.
+
+### Why
+
+The header duplicated information the user can already see: the per-block `[YYYY-MM-DD] (i/N)` line carries both ordering and the total `N`. Removing it leaves a clean blocks-only reply, consistent with the surface-polish framing of the milestone. Representing "no header" as an empty `reply_text` reuses the packer's existing empty-header behavior rather than adding an adapter branch.
+
+### Consequence
+
+- **`src/`:** `services/dispatcher.py` — `_dispatch_sources` populated branch returns `reply_text=""` (header line + its f-string deleted). No other `src/` change; the adapter and packer are untouched.
+- **`tests/`:** `tests/test_dispatcher_sources.py` — the two populated header asserts tightened to `reply_text == ""`; the two empty-contour literals stay byte-pinned by the existing `test_sources_without_prior_ask_fails_closed` / `test_never_asked_and_cited_nothing_replies_are_byte_distinct` (sibling-wording guard already in place). `tests/test_telegram_sources.py` — the combined-message body assert now expects the first source block (`[2026-05-09] (1/2)`) with an explicit `"Selected chunks for your last /ask" not in body`; the oversized-split assert expects message 1 to start with `[2026-05-09] (1/3)` with the removed header absent from every message.
+- **Docs:** this D-105 entry; `docs/execution-map.md` (Packet 3 row → Implemented, pre-checkpoint). `docs/RUNBOOK.md` and `QUICKSTART.md` are **not** touched — neither asserts a populated `/sources` header line, so the change makes no sentence there false (RUNBOOK's "`(i/N)` block header" phrase refers to the per-block date/index line, not the removed reply header). The historical D-036 reply-text quote and the D-098-era relocation note are left untouched — past records are not rewritten. No schema / DDL / migration / config change; no new I-/R- number. Supersedes only the header-presence half of D-036; D-036's cited-only selection and the D-086 author-resolution decisions stand.
+- **Status: Done.** This entry and the execution-map Packet 3 row are **Done** as of the milestone-closure checkpoint; this closes the Post-attribution user-surface cleanup milestone (D-103 → D-105). `[[feedback_doc_state_truthfulness]]`, `[[feedback_sibling_wording_guard_tests]]`, `[[feedback_minimal_packet_docs]]`, `[[feedback_full_gate_and_doc_truthfulness]]`.
+
+### Out of scope (per packet boundaries)
+
+- Any change to the two empty-`/sources` contours beyond preserving their wording.
+- Source-block body format, the `(i/N)` index, cited-only behavior, `_latest_sources` cache semantics, retrieval / answer-path, author resolution; schema / migrations / core domain models.
+- Subject scoping (H-2..H-4) and any other milestone.
+- The milestone Done-flip checkpoint and PR preparation (distinct acts after this packet).
