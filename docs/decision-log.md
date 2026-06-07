@@ -3373,3 +3373,32 @@ The hint repeated promotion instructions on every draft, duplicating `/start` (`
 - `/drafts` date/author header formatting (Packet 2); `/sources` header removal (Packet 3).
 - Subject scoping, retrieval behavior, author resolution; schema / migrations / core domain models.
 - The milestone Done-flip checkpoint (a distinct act after this packet).
+
+## D-104 — Post-attribution user-surface cleanup, Packet 2: trim the `/drafts` header to date + author only
+
+### Context
+
+Second packet of the post-attribution surface-polish milestone (`fix/post-attribution-surface-cleanup`; see D-103 for the milestone framing and the three findings). D-102 made the `/drafts` block header render the human author display name and trimmed it to `📝 <created_at> · <author>`, but used `created_at.isoformat()` — a full datetime + timezone suffix (e.g. `📝 2026-05-09T10:00:00+00:00 · @alice`). The time-of-day + offset is noise on a journaling surface where the calendar date is the meaningful field.
+
+### Decision
+
+- **Render the header date-only.** `_render_draft_block` (`adapters/telegram/webhook.py`) now builds the header with `draft.created_at.date().isoformat()` instead of `draft.created_at.isoformat()`, so `📝 <created_at full-ISO> · <author>` becomes `📝 <created_at date> · <author>` (`YYYY-MM-DD`). `SourceMessage.created_at` is a `datetime` (`core/domain/models.py`), so `.date().isoformat()` yields the calendar date of the stored UTC timestamp.
+- **Everything else byte-unchanged.** Author resolution (the D-086 ladder `@username → first_name → opaque `user-<last8>` floor`, requester-`community_id`-scoped per D-089), the `· ` separator, the `\n\n` blank line, and the verbatim `{draft.raw_text}` body are untouched. This is an adapter-only rendering change.
+
+### Why
+
+The full ISO datetime exposed implementation detail (UTC offset, seconds) that the user does not need to read on every draft. A bare date keeps `/drafts` scannable and consistent with the date-first framing of the journal. Rendering the UTC `created_at`'s date (no timezone normalization or user-local conversion) keeps the change minimal and behavior-preserving for everything but the header precision — that asymmetry is deliberately left for a future packet if it ever matters.
+
+### Consequence
+
+- **`src/`:** `adapters/telegram/webhook.py` — one line in `_render_draft_block` (`.isoformat()` → `.date().isoformat()`). Sole caller (the `/drafts` outbound branch) and the helper signature are unchanged.
+- **`tests/`:** `tests/test_telegram_drafts.py` — the `test_render_draft_block_format_is_byte_stable` expected literal updated from `"\U0001f4dd 2026-05-09T10:00:00+00:00 · @alice\n\nwalked the dog"` to `"\U0001f4dd 2026-05-09 · @alice\n\nwalked the dog"` (fixture `created_at=datetime(2026, 5, 9, 10, 0, 0, tzinfo=UTC)`). The nine other `/drafts` tests reference only the `· <author>` segment and stay green.
+- **Docs:** this D-104 entry; `docs/execution-map.md` (Packet 2 row → Implemented, pre-checkpoint); `docs/RUNBOOK.md` (the `/drafts` author-display note's header literal `📝 <created_at ISO>` → `📝 <created_at date>` — a same-packet truthfulness fix, the change made the quoted literal false). The D-102 decision-log entry and execution-map row are historical and left untouched. No schema / DDL / migration / config change; no new I-/R- number. Supersedes only the header-format half of D-102; D-102's author-resolution decision stands.
+- **Status: pre-checkpoint.** This entry and the execution-map Packet 2 row stay **Implemented / pre-checkpoint**; they flip to **Done** only after report / checkpoint. `[[feedback_doc_state_truthfulness]]`, `[[feedback_sibling_wording_guard_tests]]`, `[[feedback_minimal_packet_docs]]`, `[[feedback_full_gate_and_doc_truthfulness]]`.
+
+### Out of scope (per packet boundaries)
+
+- `/sources` header removal (Packet 3).
+- Any author-resolution behavior change; the `created_at` source field, timezone normalization, or user-local time conversion.
+- Subject scoping, retrieval behavior; schema / migrations / core domain models.
+- The milestone Done-flip checkpoint (a distinct act after this packet).
