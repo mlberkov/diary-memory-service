@@ -18,8 +18,8 @@ Every inbound diary message is persisted as a `SourceMessage` before any enrichm
 ## I-4. Lineage preserved
 Every `EventChunk` references its `Note` and `SourceMessage`. Lineage from chunk → note → source → channel message is never lost.
 
-## I-5. Event-per-chunk
-Each diary event line becomes exactly one `EventChunk`. Multiple events do not share a chunk; one event does not split across chunks.
+## I-5. One explicit `/note` is one chunk
+Each explicit `/note` payload becomes exactly one `EventChunk`, even when the payload contains newline characters. Newlines inside a `/note` are content structure (a multi-line dialogue or transcript), not event separators, and never split the note across chunks. Per-line splitting is retired for explicit `/note` (D-106, which supersedes the per-line half of D-005). Any future batch or multi-event capture is a separate explicit command or separator contract, not a reinstatement of per-line splitting inside `/note`.
 
 ## I-6. Authorship
 `author_user_id` is mandatory at `SourceMessage`, `Note`, and `EventChunk`. Shared diary mode never erases authorship. `author_user_id` is an opaque core identifier; human-readable author display names are resolved only at the host adapter seam and are non-authoritative presentation, never a substitute for it (D-081; `docs/assumptions.md` A-44). Capturing and persisting those display inputs is likewise adapter/storage-owned and adds no core authorship field (D-082); they land in a separate adapter-owned side table via an adapter-owned storage port distinct from the core repository, never entering a core type or core function signature (D-083). Resolved display names are surfaced only on `/sources` (D-086); the `/ask`-reply `Contributors:` footer that once also surfaced them (D-091 / D-092) was removed in D-101, with no change to this invariant — the core still carries authorship only as the opaque `author_user_id`. Grouped-diary membership inherited from host-chat membership (D-093) preserves each sender's distinct opaque `author_user_id` and adds no core authorship field.

@@ -94,7 +94,7 @@ Fell asleep 20 minutes earlier than usual
 ```
 
 - the first line contains the date,
-- each following line is a separate event and becomes its own chunk.
+- the remaining lines are the note body and become exactly one chunk; newlines are content structure, not event separators (I-5, D-106).
 
 ### Command-less plain text → draft (D-078)
 
@@ -111,8 +111,7 @@ The Telegram command surface is `/note`, `/ask`, `/drafts`, `/export` (D-031). T
 - explicit `/note`, `/ask`, and `/drafts` commands (the explicit `/draft` command was removed in D-030 — the no-command default carries the draft floor),
 - command-less plain text persists as a draft — there is no heuristic auto-routing of plain text to note or ask; NOTE and ASK are reached only via explicit `/note` / `/ask` (D-027 / D-028 / D-078 / D-079; D-078 records this contract and D-079 enforces it in code),
 - date parsing,
-- line-by-line event splitting,
-- one event per chunk,
+- one explicit `/note` becomes exactly one chunk (newlines are content, not event separators — I-5, D-106),
 - raw message persistence,
 - event chunk persistence,
 - embeddings generation,

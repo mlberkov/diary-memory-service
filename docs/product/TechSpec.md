@@ -233,10 +233,10 @@ failure signal.
 Input:
 - one Telegram diary message,
 - date at the beginning,
-- each following line is a diary event.
+- the remaining lines are the note body (which may be a multi-line dialogue or transcript).
 
 Chunking rule:
-- each event line becomes one chunk.
+- each explicit `/note` becomes exactly one chunk; newlines in the body are content structure, not event separators (I-5, D-106).
 
 Additional storage recommendation:
 - preserve raw source message,
