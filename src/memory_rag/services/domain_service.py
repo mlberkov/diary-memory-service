@@ -2,8 +2,9 @@
 
 Persists the raw inbound message first (Invariant I-3, runtime R-1),
 then — for note-lifecycle messages (``RouteKind.NOTE``) — parses the
-date-led payload and creates one ``Note`` plus one ``EventChunk``
-per event line (I-5). Authorship and community scope are carried through
+date-led payload and creates one ``Note`` plus exactly one ``EventChunk``
+holding the whole note body (I-5 / D-106); a date-only note creates the
+``Note`` with no chunk. Authorship and community scope are carried through
 (I-6, I-7).
 
 Draft floor (D-027 / R-13): when the inbound route is
@@ -129,25 +130,30 @@ class DomainService:
             community_id=community_id,
             author_user_id=author_user_id,
             note_date=parsed.note_date,
-            note_text="\n".join(parsed.events),
+            note_text=parsed.body,
             created_at=now,
         )
         self._store.save_note(note)
 
-        chunks = [
-            EventChunk(
-                chunk_id=str(uuid4()),
-                note_id=note_id,
-                source_message_id=source_message_id,
-                community_id=community_id,
-                author_user_id=author_user_id,
-                note_date=parsed.note_date,
-                event_index=i,
-                chunk_text=line,
-                created_at=now,
-            )
-            for i, line in enumerate(parsed.events)
-        ]
+        # One explicit /note is exactly one EventChunk holding the whole body
+        # (I-5 / D-106); a date-only note (empty body) creates no chunk.
+        chunks = (
+            [
+                EventChunk(
+                    chunk_id=str(uuid4()),
+                    note_id=note_id,
+                    source_message_id=source_message_id,
+                    community_id=community_id,
+                    author_user_id=author_user_id,
+                    note_date=parsed.note_date,
+                    event_index=0,
+                    chunk_text=parsed.body,
+                    created_at=now,
+                )
+            ]
+            if parsed.body
+            else []
+        )
         self._store.save_event_chunks(chunks)
 
         if chunks and self._embedding_client is not None:

@@ -76,10 +76,11 @@ def _format_ingest_reply(result: IngestResult) -> str:
         got = result.invalid_first_line or ""
         return f"First line must be a date like 2026-05-09. Got: '{got}'."
     assert result.note_date is not None
+    # One explicit /note is one note (I-5 / D-106); a date-only note saves
+    # with no content. events_count is the chunk count (0 or 1).
     if result.events_count == 0:
-        return f"Saved {result.note_date.isoformat()} with no event lines."
-    plural = "event" if result.events_count == 1 else "events"
-    return f"Saved {result.events_count} {plural} for {result.note_date.isoformat()}."
+        return f"Saved your note for {result.note_date.isoformat()} with no content."
+    return f"Saved your note for {result.note_date.isoformat()}."
 
 
 def _normalize_note_first_line(message: InboundMessage) -> InboundMessage:

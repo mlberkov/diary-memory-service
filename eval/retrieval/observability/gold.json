@@ -1,16 +1,16 @@
 {
-  "_handle_contract": "expected_handles entries are \"{external_message_id}#{event_index}\". event_index is the 0-based ordinal of the produced EventChunk within the source message after canonical parse_note + chunking by DomainService.ingest. It is NOT a business event id, NOT a Telegram message id, NOT any external domain identifier; it exists only because chunk_id is uuid4 at ingest time and so cannot be pinned in this file directly.",
+  "_handle_contract": "expected_handles entries are \"{external_message_id}#{event_index}\". One explicit /note is exactly one EventChunk (I-5 / D-106), so event_index is always 0 — each corpus message resolves to a single \"#0\" handle whose chunk holds the whole note body. It is NOT a business event id, NOT a Telegram message id, NOT any external domain identifier; it exists only because chunk_id is uuid4 at ingest time and so cannot be pinned in this file directly.",
   "_set_role": "OP-5 observability gold set (D-056). Sits beside the frozen D-038 baseline set (eval/retrieval/gold.json + corpus.jsonl); it does not supersede it. Select this set explicitly via the harness --gold/--corpus flags — the default no-flag invocation still loads the D-038 baseline set.",
   "_coverage_axes": "OP-5.1 contract — the initial expanded observability set must hold: at least 2 negative queries (empty expected_handles); at least 2 multilingual (Russian) queries tied to Russian corpus lines; at least 3 paraphrase queries whose wording meaningfully diverges from the corpus event text; and a mix of single-hit and multi-hit queries. This is the initial expanded set, not the final coverage target.",
   "community_id_default": "eval-community",
   "queries": [
     {
       "query": "the squeaky door hinge",
-      "expected_handles": ["obs-msg-1#1"]
+      "expected_handles": ["obs-msg-1#0"]
     },
     {
       "query": "household appliance that broke down",
-      "expected_handles": ["obs-msg-3#0", "obs-msg-10#2", "obs-msg-18#0"]
+      "expected_handles": ["obs-msg-3#0", "obs-msg-10#0", "obs-msg-18#0"]
     },
     {
       "query": "did I see any doctors",
@@ -18,15 +18,15 @@
     },
     {
       "query": "trouble with the car",
-      "expected_handles": ["obs-msg-13#1"]
+      "expected_handles": ["obs-msg-13#0"]
     },
     {
       "query": "baking that went wrong",
-      "expected_handles": ["obs-msg-6#2"]
+      "expected_handles": ["obs-msg-6#0"]
     },
     {
       "query": "outdoor physical activity",
-      "expected_handles": ["obs-msg-2#0", "obs-msg-5#1", "obs-msg-9#0"]
+      "expected_handles": ["obs-msg-2#0", "obs-msg-5#0", "obs-msg-9#0"]
     },
     {
       "query": "когда я заказывал наушники",
@@ -42,19 +42,19 @@
     },
     {
       "query": "phone and video calls",
-      "expected_handles": ["obs-msg-2#2", "obs-msg-6#1", "obs-msg-12#0", "obs-msg-17#1"]
+      "expected_handles": ["obs-msg-2#0", "obs-msg-6#0", "obs-msg-12#0", "obs-msg-17#0"]
     },
     {
       "query": "cooking dinner",
-      "expected_handles": ["obs-msg-4#2", "obs-msg-11#2", "obs-msg-15#2", "obs-msg-19#2"]
+      "expected_handles": ["obs-msg-4#0", "obs-msg-11#0", "obs-msg-15#0", "obs-msg-19#0"]
     },
     {
       "query": "gardening and plants",
-      "expected_handles": ["obs-msg-1#0", "obs-msg-6#0", "obs-msg-12#1"]
+      "expected_handles": ["obs-msg-1#0", "obs-msg-6#0", "obs-msg-12#0"]
     },
     {
       "query": "reading books",
-      "expected_handles": ["obs-msg-3#1", "obs-msg-19#1"]
+      "expected_handles": ["obs-msg-3#0", "obs-msg-19#0"]
     },
     {
       "query": "new bookshelf assembly",
@@ -62,7 +62,7 @@
     },
     {
       "query": "the bee sting",
-      "expected_handles": ["obs-msg-14#1"]
+      "expected_handles": ["obs-msg-14#0"]
     },
     {
       "query": "power outage",
@@ -70,15 +70,15 @@
     },
     {
       "query": "learning the ukulele",
-      "expected_handles": ["obs-msg-18#1"]
+      "expected_handles": ["obs-msg-18#0"]
     },
     {
       "query": "documentary about polar expeditions",
-      "expected_handles": ["obs-msg-14#2"]
+      "expected_handles": ["obs-msg-14#0"]
     },
     {
       "query": "sourdough bread",
-      "expected_handles": ["obs-msg-13#2"]
+      "expected_handles": ["obs-msg-13#0"]
     },
     {
       "query": "did I go skiing this winter",

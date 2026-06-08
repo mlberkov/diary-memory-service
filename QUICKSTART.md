@@ -89,7 +89,8 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
   -d '{"update_id":1,"message":{"message_id":1,"date":1715300000,"chat":{"id":42},"from":{"id":7},"text":"/note 2026-05-09\nHad a calm morning\nTried a new book"}}'
-# → {"method":"sendMessage","chat_id":42,"text":"Saved 2 events for 2026-05-09."}
+# → {"method":"sendMessage","chat_id":42,"text":"Saved your note for 2026-05-09."}
+#   One /note is one chunk (I-5 / D-106): the whole body is a single chunk; the newline is content.
 
 # 2. Ask — baseline hybrid retrieval (dense + sparse + RRF) returns the matching line with its date
 curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
@@ -106,12 +107,12 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
 # → text: "Nothing in your saved notes matched 'snowstorm'. Try rephrasing the question, or use words that appear in your notes."
 
 # 4. Dateless first line → defaults to "today" (the message's received date, UTC);
-#    the text becomes event lines (D-085). Here message date 1715300300 → 2024-05-10.
+#    the text becomes the note body (D-085). Here message date 1715300300 → 2024-05-10.
 curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
   -d '{"update_id":4,"message":{"message_id":4,"date":1715300300,"chat":{"id":42},"from":{"id":7},"text":"/note not-a-date\nfoo"}}'
-# → text: "Saved 2 events for 2024-05-10."
+# → text: "Saved your note for 2024-05-10."
 
 # 5. Empty /note → INVALID_INPUT reply; raw SourceMessage is still recorded
 curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
@@ -173,7 +174,7 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
   -d '{"update_id":1,"message":{"message_id":1,"date":1715300000,"chat":{"id":42},"from":{"id":7},"text":"/note 2026-05-09\nWalked the dog\nTried a new book"}}'
-# → text: "Saved 2 events for 2026-05-09."
+# → text: "Saved your note for 2026-05-09."
 
 # 3. Verify rows landed in Postgres
 docker compose exec -T postgres psql -U postgres -d memory_rag -c \
@@ -182,7 +183,7 @@ docker compose exec -T postgres psql -U postgres -d memory_rag -c \
      (SELECT count(*) FROM notes)     AS notes,
      (SELECT count(*) FROM event_chunks)      AS chunks,
      (SELECT count(*) FROM embedding_records) AS embeddings;"
-# → sources=1 notes=1 chunks=2 embeddings=2
+# → sources=1 notes=1 chunks=1 embeddings=1   (one /note is one chunk — I-5 / D-106)
 
 # 3a. Verify embedding contour (D-024): status flipped to 'ready',
 #     model_name and vector dimension are correct.
@@ -229,14 +230,14 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
   -H "Content-Type: application/json" \
   -H "X-Telegram-Bot-Api-Secret-Token: dev-secret" \
   -d '{"update_id":1,"message":{"message_id":1,"date":1715300000,"chat":{"id":42},"from":{"id":7},"text":"/note 2026-05-09\nWalked the dog\nTried a new book"}}'
-# → text: "Saved 2 events for 2026-05-09."
+# → text: "Saved your note for 2026-05-09."
 
 # 2. Verify rows landed in the SQLite file
 python -c "import sqlite3; c=sqlite3.connect('./data/memory_rag.db'); \
   print('sources:', c.execute('select count(*) from source_messages').fetchone()[0]); \
   print('notes:', c.execute('select count(*) from notes').fetchone()[0]); \
   print('chunks:',  c.execute('select count(*) from event_chunks').fetchone()[0])"
-# → sources: 1 / notes: 1 / chunks: 2
+# → sources: 1 / notes: 1 / chunks: 1
 
 # 3. Stop uvicorn (Ctrl+C), then `make run` again with the same env
 #    (a fresh process re-opens the same ./data/memory_rag.db).

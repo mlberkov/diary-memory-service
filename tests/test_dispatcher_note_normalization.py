@@ -154,7 +154,7 @@ def test_normalize_helper_preserves_payload_for_empty_input() -> None:
 def test_dispatch_explicit_note_with_slash_separated_date_persists_canonical_date() -> None:
     dispatcher, store = _dispatcher()
     result = dispatcher.dispatch(_inbound("2026/05/09\nfoo"))
-    assert result.reply_text == "Saved 1 event for 2026-05-09."
+    assert result.reply_text == "Saved your note for 2026-05-09."
     assert store.len_notes() == 1
     assert store.len_chunks() == 1
 
@@ -163,26 +163,28 @@ def test_dispatch_explicit_note_with_dd_first_date_uses_dd_mm_yyyy_convention() 
     dispatcher, store = _dispatcher()
     # 05/09/2026 in DD/MM/YYYY is 5 September 2026 → canonical 2026-09-05.
     result = dispatcher.dispatch(_inbound("05/09/2026\nfoo"))
-    assert result.reply_text == "Saved 1 event for 2026-09-05."
+    assert result.reply_text == "Saved your note for 2026-09-05."
     assert store.len_notes() == 1
 
 
 def test_dispatch_explicit_dateless_note_saves_under_today() -> None:
     # D-085: a dateless /note defaults to the message's received_at date
-    # (2026-05-10 in this fixture); the text becomes a single event.
+    # (2026-05-10 in this fixture); the text becomes the note body.
     dispatcher, store = _dispatcher()
     result = dispatcher.dispatch(_inbound("walk in park"))
-    assert result.reply_text == "Saved 1 event for 2026-05-10."
+    assert result.reply_text == "Saved your note for 2026-05-10."
     assert store.len_notes() == 1
     assert store.len_chunks() == 1
 
 
-def test_dispatch_explicit_dateless_multi_line_note_saves_all_events_under_today() -> None:
+def test_dispatch_explicit_dateless_multi_line_note_is_single_chunk_under_today() -> None:
+    # I-5 / D-106: the multi-line body is one chunk, not one-per-line, even
+    # when the date is supplied by the D-085 today-default.
     dispatcher, store = _dispatcher()
     result = dispatcher.dispatch(_inbound("walk\nslept well"))
-    assert result.reply_text == "Saved 2 events for 2026-05-10."
+    assert result.reply_text == "Saved your note for 2026-05-10."
     assert store.len_notes() == 1
-    assert store.len_chunks() == 2
+    assert store.len_chunks() == 1
 
 
 # ---------------------------------------------------------------------------
@@ -208,14 +210,13 @@ def test_dispatch_explicit_whitespace_only_note_still_returns_invalid_input_word
     assert store.len_notes() == 0
 
 
-def test_dispatch_explicit_dateless_note_with_no_events_uses_saved_no_events_wording() -> None:
-    # A single non-date line becomes one event, so reaching the
-    # "no event lines" literal would require a today-line with nothing after
-    # it — only possible via an explicit canonical date with no body. Pin that
-    # sibling literal here so it cannot drift.
+def test_dispatch_explicit_date_only_note_uses_no_content_wording() -> None:
+    # A date-only /note is a success case with an empty body: it saves the
+    # note with no chunk and returns the no-content reply. Pin that sibling
+    # literal here so it cannot drift.
     dispatcher, _ = _dispatcher()
     result = dispatcher.dispatch(_inbound("2026-05-09"))
-    assert result.reply_text == "Saved 2026-05-09 with no event lines."
+    assert result.reply_text == "Saved your note for 2026-05-09 with no content."
 
 
 # The heuristic-routed NOTE normalize-seam (the dispatcher's former
