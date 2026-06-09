@@ -83,6 +83,10 @@ class DomainService:
         # Opaque community scope resolved by the adapter at the edge (D-093 /
         # G-1); the core never re-derives it from external_chat_id (I-1).
         community_id = message.community_id
+        # Opaque subject scope assigned by the adapter axis (H-2 / D-097),
+        # subordinate to community_id; None = community-wide. Carried onto
+        # Note / EventChunk; the core never derives it from a host field (I-1).
+        subject_id = message.subject_id
         author_user_id = message.external_user_id
         candidate_id = str(uuid4())
 
@@ -132,6 +136,7 @@ class DomainService:
             note_date=parsed.note_date,
             note_text=parsed.body,
             created_at=now,
+            subject_id=subject_id,
         )
         self._store.save_note(note)
 
@@ -149,6 +154,7 @@ class DomainService:
                     event_index=0,
                     chunk_text=parsed.body,
                     created_at=now,
+                    subject_id=subject_id,
                 )
             ]
             if parsed.body

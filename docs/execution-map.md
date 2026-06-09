@@ -259,15 +259,15 @@ mapping (`null` = community-wide), with an **optional** retrieval filter mirrori
 the D-040 `date_range` seam. Decomposed docs-first in
 `docs/SUBJECT-SCOPING-ROADMAP.md` (D-097); packets H-0..H-4 below. **A-45 is
 closed → D-097** at the contract level; community scoping (I-7 / R-3 / R-8) is the
-unchanged outer boundary. **Status: in progress — H-0 (D-097) and H-1 (data model)
-landed; H-2..H-4 pending.** **Out of scope:** core subject registry/entity, explicit
+unchanged outer boundary. **Status: in progress — H-0 (D-097), H-1 (data model), and
+H-2 (adapter-axis assignment) landed; H-3..H-4 pending.** **Out of scope:** core subject registry/entity, explicit
 subject-selection command / multi-subject UX, A-15 visibility (separate; Slice 8.2
 / G-4), reopening Milestone G.
 | Slice | Files / artifacts |
 | --- | --- |
 | H-0 — subject-scoping contract + A-45 resolution + roadmap | **Done (D-097).** Docs-only: `docs/decision-log.md` (D-097), new `docs/SUBJECT-SCOPING-ROADMAP.md`, `docs/assumptions.md` + `docs/assumption-audit.md` (close A-45 → D-097; A-15 clarified, stays open), this map block; cross-reference-only touches to `docs/product/TechSpec.md` (§5), `docs/GLOSSARY.md`, `docs/RUNBOOK.md`. Ratifies the opaque / community-scoped / nullable `subject_id` contract, adapter-axis assignment with a default single-subject mapping, no core subject registry, an optional retrieval filter mirroring D-040, and orthogonality to A-15. No `src/` / `tests/` / schema / migration change. → H-0 (D-097). |
 | H-1 — `subject_id` in the data model | **Done (H-1).** Nullable, opaque `subject_id` on `Note` / `EventChunk` (`core/domain/models.py`), round-tripped through the mock / sqlite / postgres stores, plus the non-destructive `0005.subject-id-columns` Postgres migration (default `null`; community scoping unchanged). No assignment / retrieval change yet. |
-| H-2 — adapter-axis subject assignment | **Pending.** One adapter-owned host→subject mapping (default single-subject per community, parallel to `resolve_community_id`); resolved opaque `subject_id` crosses on `InboundMessage`; domain service carries it through. Behavior-preserving under the default mapping. |
+| H-2 — adapter-axis subject assignment | **Done (H-2).** New adapter-owned `adapters/telegram/subject.py` `resolve_subject_id(community_id) -> str \| None` (default single-subject mapping returns `None` = community-wide, parallel to `resolve_community_id`); the resolved opaque `subject_id` crosses on the new defaulted `InboundMessage.subject_id` field (set at the webhook edge); `domain_service.ingest` carries it onto `Note` / `EventChunk`. Behavior- and data-preserving under the default (persisted `subject_id` stays `null`); no schema / migration change (H-1's nullable column already round-trips it). Tests: `tests/test_telegram_subject_resolver.py` (new), `tests/test_domain_service.py` (default-`None` + non-`None` threading guards). No assignment-divergence or retrieval change yet. |
 | H-3 — optional subject retrieval filter | **Pending.** `Query.subject_scope` + keyword-only optional subject filter on both `storage/search_repository.py` legs (postgres/mock parity), mirroring the D-040 `date_range` seam; `None` = no constraint; composes with `date_range`. |
 | H-4 — regression suite + operator/product docs + closure | **Pending.** Subject-scoping characterization suite (mock + PG-gated parity); reconcile `RUNBOOK.md` / `TechSpec.md` §5 / `ARCHITECTURE.md`; flip the roadmap + this block to milestone-closed (conditional on this packet landing). |
 

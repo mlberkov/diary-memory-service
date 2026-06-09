@@ -34,6 +34,7 @@ from memory_rag.adapters.telegram.community import resolve_community_id
 from memory_rag.adapters.telegram.drafts_packing import pack_drafts_into_messages
 from memory_rag.adapters.telegram.models import TelegramUpdate
 from memory_rag.adapters.telegram.reply import build_send_message_payload
+from memory_rag.adapters.telegram.subject import resolve_subject_id
 from memory_rag.config import Settings, get_settings
 from memory_rag.core.domain.models import SourceMessage
 from memory_rag.core.routing import InboundMessage, RouteKind, RouteSource, lifecycle_for
@@ -184,6 +185,11 @@ def register_telegram_webhook(app: FastAPI) -> None:
         # (D-093 / G-1). The core receives the opaque community_id and never
         # re-derives scope from external_chat_id (I-1).
         community_id = resolve_community_id(external_chat_id)
+        # Adapter-axis community→subject mapping resolved at the edge (H-2 /
+        # D-097), parallel to community resolution. Default single-subject
+        # mapping returns None (community-wide); the core carries the opaque
+        # subject_id through ingest and never derives it from a host field (I-1).
+        subject_id = resolve_subject_id(community_id)
         inbound = InboundMessage(
             external_message_id=str(message.message_id),
             external_chat_id=external_chat_id,
@@ -195,6 +201,7 @@ def register_telegram_webhook(app: FastAPI) -> None:
             route_source=route_source,
             payload=payload,
             edit_seq=edit_seq,
+            subject_id=subject_id,
         )
 
         result = dispatcher.dispatch(inbound)
