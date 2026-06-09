@@ -1,5 +1,5 @@
 {
-  "_handle_contract": "expected_handles entries are \"{external_message_id}#{event_index}\". event_index is the 0-based ordinal of the produced EventChunk within the source message after canonical parse_note + chunking by DomainService.ingest. It is NOT a business event id, NOT a Telegram message id, NOT any external domain identifier; it exists only because chunk_id is uuid4 at ingest time and so cannot be pinned in this file directly.",
+  "_handle_contract": "expected_handles entries are \"{external_message_id}#{event_index}\". One explicit /note is exactly one EventChunk (I-5 / D-106), so event_index is always 0 — each corpus message resolves to a single \"#0\" handle whose chunk holds the whole note body. It is NOT a business event id, NOT a Telegram message id, NOT any external domain identifier; it exists only because chunk_id is uuid4 at ingest time and so cannot be pinned in this file directly.",
   "community_id_default": "eval-fam",
   "queries": [
     {
@@ -9,11 +9,11 @@
     {
       "query": "what happened with the cat",
       "expected_handles": [
-        "corpus-msg-1#1",
-        "corpus-msg-4#2",
-        "corpus-msg-7#1",
-        "corpus-msg-10#1",
-        "corpus-msg-12#1"
+        "corpus-msg-1#0",
+        "corpus-msg-4#0",
+        "corpus-msg-7#0",
+        "corpus-msg-10#0",
+        "corpus-msg-12#0"
       ]
     },
     {
@@ -22,15 +22,15 @@
     },
     {
       "query": "phone calls with family",
-      "expected_handles": ["corpus-msg-2#1", "corpus-msg-8#2"]
+      "expected_handles": ["corpus-msg-2#0", "corpus-msg-8#0"]
     },
     {
       "query": "did I cook anything",
-      "expected_handles": ["corpus-msg-5#2", "corpus-msg-7#2", "corpus-msg-12#2"]
+      "expected_handles": ["corpus-msg-5#0", "corpus-msg-7#0", "corpus-msg-12#0"]
     },
     {
       "query": "когда я ходил в магазин",
-      "expected_handles": ["corpus-msg-9#1"]
+      "expected_handles": ["corpus-msg-9#0"]
     },
     {
       "query": "что я читал про космос",
@@ -40,18 +40,18 @@
       "query": "exercise and outdoor activities",
       "expected_handles": [
         "corpus-msg-4#0",
-        "corpus-msg-5#1",
+        "corpus-msg-5#0",
         "corpus-msg-10#0",
-        "corpus-msg-11#1"
+        "corpus-msg-11#0"
       ]
     },
     {
       "query": "the new lamp for the office",
-      "expected_handles": ["corpus-msg-8#1"]
+      "expected_handles": ["corpus-msg-8#0"]
     },
     {
       "query": "documentary about bees",
-      "expected_handles": ["corpus-msg-6#2"]
+      "expected_handles": ["corpus-msg-6#0"]
     },
     {
       "query": "groceries from the corner market",

@@ -1,9 +1,12 @@
 """Note parser.
 
 Strict ISO ``YYYY-MM-DD`` on the first non-empty line of the payload;
-remaining non-empty lines become events. Returns ``None`` when the
-first non-empty line is not an ISO date — the service layer turns that
-into an explicit ``INVALID_INPUT`` fallback rather than inventing a date.
+everything after the date line is the note body, kept as one logical
+unit (Invariant I-5 / D-106) — newlines inside a ``/note`` are content
+structure, not event separators, and never split the note. Returns
+``None`` when the first non-empty line is not an ISO date — the service
+layer turns that into an explicit ``INVALID_INPUT`` fallback rather than
+inventing a date.
 
 ``normalize_iso_date_token`` is an additive helper used by the explicit
 ``/note`` dispatcher path to accept a small whitelist of near-ISO forms
@@ -21,10 +24,15 @@ from datetime import date
 
 @dataclass(frozen=True, slots=True)
 class ParsedNote:
-    """Result of a successful parse: a date and the event lines that follow."""
+    """Result of a successful parse: a date and the note body that follows.
+
+    ``body`` is the single logical unit after the date line (the non-empty
+    body lines joined by ``\\n``); it is ``""`` for a date-only note. Per
+    Invariant I-5 / D-106 the body is never split into per-line events.
+    """
 
     note_date: date
-    events: list[str]
+    body: str
     first_line: str
 
 
@@ -69,11 +77,12 @@ def normalize_iso_date_token(token: object) -> str | None:
 
 
 def parse_note(payload: str) -> ParsedNote | None:
-    """Parse ``payload`` into ``(note_date, events)``.
+    """Parse ``payload`` into ``(note_date, body)``.
 
-    The first non-empty line must be an ISO ``YYYY-MM-DD`` date. The
-    remaining non-empty lines become events, in order, one event per
-    line (Invariant I-5).
+    The first non-empty line must be an ISO ``YYYY-MM-DD`` date. Everything
+    after it is the note body — the remaining non-empty lines joined by
+    ``\\n`` into one logical unit (Invariant I-5 / D-106), never split into
+    per-line events. A date-only note has an empty ``body``.
     """
     lines = _split_non_empty_lines(payload or "")
     if not lines:
@@ -84,4 +93,5 @@ def parse_note(payload: str) -> ParsedNote | None:
     if parsed_date is None:
         return None
 
-    return ParsedNote(note_date=parsed_date, events=lines[1:], first_line=first_line)
+    body = "\n".join(lines[1:])
+    return ParsedNote(note_date=parsed_date, body=body, first_line=first_line)

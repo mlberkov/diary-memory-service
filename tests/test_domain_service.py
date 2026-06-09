@@ -44,11 +44,11 @@ def test_ingest_persists_source_note_and_chunks() -> None:
 
     assert result.fallback is FallbackMode.NONE
     assert result.note_date == date(2026, 5, 9)
-    assert result.events_count == 2
+    assert result.events_count == 1
     assert result.replayed is False
     assert store.len_sources() == 1
     assert store.len_notes() == 1
-    assert store.len_chunks() == 2
+    assert store.len_chunks() == 1
 
 
 def test_ingest_records_source_even_when_parser_rejects() -> None:
@@ -98,15 +98,22 @@ def test_chunks_carry_lineage_back_to_source_and_note() -> None:
     assert next(iter(note_ids)) in store._notes
 
 
-def test_ingest_assigns_event_index_in_order() -> None:
+def test_multiline_note_is_a_single_chunk() -> None:
+    # I-5 / D-106 positive guard: a newline-containing /note yields exactly
+    # one EventChunk (event_index=0) holding the whole body verbatim — the
+    # interior newlines are content, not event separators.
     store = MockDomainStore()
     service = DomainService(store)
 
-    service.ingest(_note_message("2026-05-09\nFirst\nSecond\nThird"))
+    result = service.ingest(_note_message("2026-05-09\nFirst\nSecond\nThird"))
 
-    chunks_sorted = sorted(_all_chunks(store), key=lambda c: c.event_index)
-    assert [c.event_index for c in chunks_sorted] == [0, 1, 2]
-    assert [c.chunk_text for c in chunks_sorted] == ["First", "Second", "Third"]
+    chunks = _all_chunks(store)
+    assert len(chunks) == 1
+    assert result.events_count == 1
+    assert chunks[0].event_index == 0
+    assert chunks[0].chunk_text == "First\nSecond\nThird"
+    # note_text and the single chunk agree (the join site is reconciled).
+    assert next(iter(store._notes.values())).note_text == "First\nSecond\nThird"
 
 
 @pytest.mark.parametrize("payload", ["", "   ", "\n\n"])
@@ -136,7 +143,7 @@ def test_ingest_replay_short_circuits_and_does_not_duplicate() -> None:
     assert second.fallback is FallbackMode.NONE
     assert store.len_sources() == 1
     assert store.len_notes() == 1
-    assert store.len_chunks() == 2
+    assert store.len_chunks() == 1
 
 
 def test_ingest_replay_preserves_invalid_input_outcome() -> None:
@@ -170,7 +177,9 @@ def test_ingest_distinct_edit_seq_creates_separate_state() -> None:
     assert res_original.source_message_id != res_edited.source_message_id
     assert store.len_sources() == 2
     assert store.len_notes() == 2
-    assert store.len_chunks() == 5
+    # One chunk per note (I-5 / D-106): the "A\nB" and "A\nB\nC" bodies are
+    # two distinct single chunks.
+    assert store.len_chunks() == 2
 
 
 def _all_chunks(store: MockDomainStore) -> list[EventChunk]:
@@ -212,9 +221,9 @@ def test_ingest_with_embedding_client_persists_embeddings_and_flips_status() -> 
     result = service.ingest(_note_message("2026-05-09\nA\nB"))
 
     assert result.fallback is FallbackMode.NONE
-    assert store.len_embeddings() == 2
+    assert store.len_embeddings() == 1
     assert {c.embedding_status for c in _all_chunks(store)} == {EmbeddingStatus.READY}
-    assert store.count_embedding_records_for_source(result.source_message_id) == 2
+    assert store.count_embedding_records_for_source(result.source_message_id) == 1
     # The success path writes no dead-letter row (Slice 6.2).
     assert store.len_indexing_dead_letters() == 0
 
@@ -226,7 +235,7 @@ def test_ingest_embedding_failure_marks_chunks_failed_and_keeps_lineage() -> Non
     result = service.ingest(_note_message("2026-05-09\nA\nB"))
 
     assert result.fallback is FallbackMode.NONE  # raw + chunks survived (I-2, I-3)
-    assert result.events_count == 2
+    assert result.events_count == 1
     assert store.len_embeddings() == 0
     assert {c.embedding_status for c in _all_chunks(store)} == {EmbeddingStatus.FAILED}
     assert store.count_embedding_records_for_source(result.source_message_id) == 0
@@ -260,7 +269,7 @@ def test_ingest_dead_letter_write_failure_is_swallowed_and_chunks_stay_failed(
 
     # The dead-letter write failure is swallowed — ingest never raises.
     assert result.fallback is FallbackMode.NONE
-    assert result.events_count == 2
+    assert result.events_count == 1
     # embedding_status='failed' stays authoritative despite the write failure.
     assert {c.embedding_status for c in _all_chunks(store)} == {EmbeddingStatus.FAILED}
     assert store.len_indexing_dead_letters() == 0
@@ -287,7 +296,7 @@ def test_ingest_replay_does_not_call_embedding_client() -> None:
     service.ingest(msg)
 
     assert _CountingClient.calls == 1
-    assert store.len_embeddings() == 2
+    assert store.len_embeddings() == 1
 
 
 def test_ingest_with_invalid_payload_does_not_call_embedding_client() -> None:

@@ -3432,3 +3432,37 @@ The header duplicated information the user can already see: the per-block `[YYYY
 - Source-block body format, the `(i/N)` index, cited-only behavior, `_latest_sources` cache semantics, retrieval / answer-path, author resolution; schema / migrations / core domain models.
 - Subject scoping (H-2..H-4) and any other milestone.
 - The milestone Done-flip checkpoint and PR preparation (distinct acts after this packet).
+
+## D-106 — Single-chunk `/note` capture: one explicit note is one logical chunk
+
+### Context
+
+Packet 1 of the product-baseline-closure milestone **"Single-chunk `/note` capture — one explicit note is one logical chunk"** (`feat-note-capture-single-chunk`). A hidden product bug was observed in Telegram diary mode: an explicit `/note` whose payload contains newline characters is split into one `EventChunk` per non-empty line. This is the originally-decided behavior — **D-005 — Event-level chunking** ("Each event line after the date becomes a separate chunk."), enforced as invariant I-5 ("Event-per-chunk") and surfaced in code by `core/domain/parser.parse_note` (`events=lines[1:]`) and the per-line `EventChunk` loop in `services/domain_service.py`. For diary usage it is wrong: a multi-line dialogue or transcript must stay one logical note/chunk, not become one chunk per speaker line. The owner has confirmed the corrected contract. Changing a hard invariant requires a decision-log entry before any `src/` change (`docs/INVARIANTS.md` preamble), and the repo's docs-first discipline opens each milestone with a ratifying decision packet (cf. D-087, D-093) — so this packet is docs-only and the code change is deferred to Packet 2.
+
+### Decision
+
+- **One explicit `/note` = exactly one `EventChunk`,** even when the payload contains newline characters.
+- **Newlines inside `/note` are content structure** (a multi-line dialogue or transcript), **not** event separators, and never split the note across chunks.
+- **Per-line splitting is retired for explicit `/note`.** This supersedes the per-line half of **D-005**; D-005 is left as a historical record and is **not** rewritten.
+- **Batch / multi-event capture is out of scope.** If multi-event capture is ever needed it must arrive as a *separate* explicit command or a *separate* explicit separator contract — never by reinstating per-line splitting inside `/note`.
+- **I-5 is revised** in `docs/INVARIANTS.md` (retitled "One explicit `/note` is one chunk") and the matching **CLAUDE.md preserved-rule #5** wording is revised to the single-chunk contract.
+
+### Why
+
+The diary's primary use case is capturing a dated entry that is frequently multi-line (a dialogue, a transcript, a paragraph). Treating each line as its own retrieval unit fragments one logical note into many chunks, degrading both authorship-as-a-unit and grounded retrieval. One chunk per explicit `/note` matches the user's mental model — "this message is one note" — and keeps a multi-line entry intact through ingestion, retrieval, and answer grounding. Deferring batch capture to a distinct command keeps the `/note` contract simple and unambiguous.
+
+### Consequence
+
+- **`src/`:** none in this packet (docs-only). Packet 2 will retire per-line splitting in `core/domain/parser.parse_note` and the per-line `EventChunk` creation in `services/domain_service.py` (and reconcile the `note_text="\n".join(parsed.events)` join site), with the corresponding parser / dispatcher / end-to-end test updates and the user-facing RUNBOOK / QUICKSTART wording.
+- **`tests/`:** none in this packet.
+- **Docs:** this D-106 entry; `docs/INVARIANTS.md` I-5 revised (I-12 reviewed — replayability is granularity-independent, **no change**); `CLAUDE.md` preserved-rule #5 revised; `docs/product/TechSpec.md` §6 Chunking Contract and `docs/product/PRD.md` §5 note-capture shape + §6 MVP functional scope revised to the single-chunk contract; `docs/execution-map.md` milestone row + `docs/todo.md` milestone section/Packet-1 entry added. `docs/RUNTIME-INVARIANTS.md` and `docs/RUNBOOK.md` are **not** touched — neither asserts the per-line contract, so no sentence there is made false (the RUNBOOK eval-handle `{external_message_id}#{event_index}` format is eval-harness mechanics, not the `/note` chunking contract). No schema / DDL / migration / config change; no new I-/R- number.
+- **Forward note (not an action here):** notes already ingested under the per-line contract are not retroactively re-chunked by this decision; any re-chunking is a separate consideration for the code packet, bounded by I-12 determinism for a given `parse_version`.
+- **Status: Done** (docs-only ratification). `[[feedback_minimal_packet_docs]]`, `[[feedback_doc_state_truthfulness]]`, `[[feedback_full_gate_and_doc_truthfulness]]`.
+
+### Out of scope (per packet boundaries)
+
+- Any `src/` or `tests/` change (Packet 2).
+- Any batch / multi-event capture command or separator contract design.
+- Rewriting the historical D-005 entry; touching docs outside the I-5 contour.
+- Eval corpus / gold `event_index` reconciliation; retroactive re-chunking of historical notes.
+- The milestone Done-flip checkpoint and PR preparation (distinct acts after the milestone's packets land).

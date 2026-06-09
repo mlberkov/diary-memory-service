@@ -53,7 +53,7 @@ You must preserve these architectural rules:
 2. The system core is a standalone, portable memory/journal core — currently surfaced as a Diary Memory Service.
 3. PostgreSQL is the durable source of truth.
 4. Raw source messages are persisted before enrichment.
-5. Each diary event line becomes its own chunk.
+5. Each explicit `/note` becomes exactly one chunk; newlines inside a `/note` are content, not event separators (D-106).
 6. Hybrid retrieval is a required capability.
 7. Every answer must be grounded in retrieved evidence.
 8. Shared diary mode must preserve authorship.

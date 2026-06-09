@@ -98,8 +98,8 @@ def test_note_then_ask_returns_grounded_reply_with_date() -> None:
         _update("/note 2026-05-09\nHad a calm morning\nTried a new book", update_id=1),
     )
     assert note_resp.status_code == 200
-    assert note_resp.json()["text"] == "Saved 2 events for 2026-05-09."
-    assert store.len_chunks() == 2
+    assert note_resp.json()["text"] == "Saved your note for 2026-05-09."
+    assert store.len_chunks() == 1
 
     ask_resp = _post(client, _update("/ask book", update_id=2, message_id=2))
     assert ask_resp.status_code == 200
@@ -165,16 +165,17 @@ def test_ask_with_no_match_returns_no_evidence_fallback() -> None:
 
 def test_note_with_dateless_first_line_defaults_to_today_and_saves() -> None:
     # D-085: an explicit /note whose first line is not a date defaults to the
-    # received_at date; the previously-first line and the rest become events.
+    # received_at date; the previously-first line and the rest become the body
+    # of the single note chunk (I-5 / D-106).
     client, store = _client_with_fresh_store()
 
     resp = _post(client, _update("/note not-a-date\nfoo", update_id=1))
 
     assert resp.status_code == 200
-    assert resp.json()["text"] == f"Saved 2 events for {_today_iso(1)}."
+    assert resp.json()["text"] == f"Saved your note for {_today_iso(1)}."
     assert store.len_sources() == 1
     assert store.len_notes() == 1
-    assert store.len_chunks() == 2
+    assert store.len_chunks() == 1
 
 
 def test_empty_note_returns_invalid_input_and_persists_source() -> None:
@@ -203,7 +204,7 @@ def test_explicit_note_with_slash_separated_yyyy_first_is_normalized_and_saved()
     resp = _post(client, _update("/note 2026/05/09\nfoo", update_id=1))
 
     assert resp.status_code == 200
-    assert resp.json()["text"] == "Saved 1 event for 2026-05-09."
+    assert resp.json()["text"] == "Saved your note for 2026-05-09."
     assert store.len_chunks() == 1
 
 
@@ -218,7 +219,7 @@ def test_explicit_note_with_dd_first_uses_dd_mm_yyyy_convention_pin() -> None:
     resp = _post(client, _update("/note 05/09/2026\nfoo", update_id=1))
 
     assert resp.status_code == 200
-    assert resp.json()["text"] == "Saved 1 event for 2026-09-05."
+    assert resp.json()["text"] == "Saved your note for 2026-09-05."
     assert store.len_chunks() == 1
 
 
@@ -228,22 +229,22 @@ def test_explicit_note_with_dot_separated_date_is_normalized_and_saved() -> None
     resp = _post(client, _update("/note 09.05.2026\nfoo", update_id=1))
 
     assert resp.status_code == 200
-    assert resp.json()["text"] == "Saved 1 event for 2026-05-09."
+    assert resp.json()["text"] == "Saved your note for 2026-05-09."
     assert store.len_chunks() == 1
 
 
 def test_explicit_note_with_unpadded_date_defaults_to_today() -> None:
     # The near-ISO whitelist is exact (D-070): 2026-5-9 is not a recognized
     # date, so under D-085 it is a non-date first line that defaults to today
-    # and becomes an event line rather than being rejected.
+    # and becomes part of the note body rather than being rejected.
     client, store = _client_with_fresh_store()
 
     resp = _post(client, _update("/note 2026-5-9\nfoo", update_id=1))
 
     assert resp.status_code == 200
-    assert resp.json()["text"] == f"Saved 2 events for {_today_iso(1)}."
+    assert resp.json()["text"] == f"Saved your note for {_today_iso(1)}."
     assert store.len_notes() == 1
-    assert store.len_chunks() == 2
+    assert store.len_chunks() == 1
 
 
 def test_command_less_dated_plain_text_routes_to_draft_floor() -> None:
@@ -370,10 +371,10 @@ def test_replayed_note_returns_same_reply_and_does_not_duplicate(
     assert first.status_code == 200
     assert second.status_code == 200
     assert first.json() == second.json()
-    assert second.json()["text"] == "Saved 2 events for 2026-05-09."
+    assert second.json()["text"] == "Saved your note for 2026-05-09."
     assert store.len_sources() == 1
     assert store.len_notes() == 1
-    assert store.len_chunks() == 2
+    assert store.len_chunks() == 1
 
     paths = [line for line in caplog.text.splitlines() if "telegram.webhook" in line]
     assert any("effective_path=fresh" in line for line in paths)
@@ -401,7 +402,9 @@ def test_edited_message_is_distinct_state_from_original() -> None:
     assert edited.status_code == 200
     assert store.len_sources() == 2
     assert store.len_notes() == 2
-    assert store.len_chunks() == 5
+    # Each note is one chunk now (I-5 / D-106): the original body "A\nB" and
+    # the edited body "A\nB\nC" are distinct single chunks.
+    assert store.len_chunks() == 2
 
 
 class _WeakEvidenceChatClient:

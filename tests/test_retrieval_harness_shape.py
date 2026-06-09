@@ -317,7 +317,8 @@ def test_first_relevant_rank_pure() -> None:
 
 
 def test_ingest_fixture_corpus_resolves_handles() -> None:
-    """``event_index`` is the 0-based EventChunk ordinal within the source message."""
+    """One explicit /note is one chunk (I-5 / D-106), so a multi-line corpus
+    message resolves to a single ``#0`` handle — ``event_index`` is always 0."""
     store = MockDomainStore()
     embedding_client = MockEmbeddingClient()
     corpus = (
@@ -330,7 +331,7 @@ def test_ingest_fixture_corpus_resolves_handles() -> None:
     )
     chunks_for_source = _build_chunks_for_source(store)
     handles = ingest_fixture_corpus(store, chunks_for_source, embedding_client, corpus)
-    assert set(handles.keys()) == {"t-1#0", "t-1#1"}
+    assert set(handles.keys()) == {"t-1#0"}
     for chunk_id in handles.values():
         assert store.get_event_chunk(chunk_id, community_id="fam-x") is not None
 

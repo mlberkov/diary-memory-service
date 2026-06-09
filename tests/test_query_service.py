@@ -75,8 +75,12 @@ def test_empty_store_returns_no_evidence() -> None:
 
 
 def test_sparse_leg_recovers_keyword_match() -> None:
+    # One /note is one chunk (I-5 / D-106), so distinct chunks come from
+    # distinct notes — each line is its own /note here.
     store = MockDomainStore()
-    _ingest(store, "2026-05-09\nMorning routine\nTried a new book\nAnother book chapter")
+    _ingest(store, "2026-05-09\nMorning routine", msg_id="100")
+    _ingest(store, "2026-05-09\nTried a new book", msg_id="101")
+    _ingest(store, "2026-05-09\nAnother book chapter", msg_id="102")
     query = _wire(store)
 
     result = query.answer(_ask("book"))
@@ -124,8 +128,12 @@ def test_cross_chat_isolation() -> None:
 
 
 def test_top_k_caps_evidence_count() -> None:
+    # One /note is one chunk (I-5 / D-106): four chunks need four notes.
     store = MockDomainStore()
-    _ingest(store, "2026-05-09\nbook one\nbook two\nbook three\nbook four")
+    _ingest(store, "2026-05-09\nbook one", msg_id="100")
+    _ingest(store, "2026-05-09\nbook two", msg_id="101")
+    _ingest(store, "2026-05-09\nbook three", msg_id="102")
+    _ingest(store, "2026-05-09\nbook four", msg_id="103")
     query = _wire(store, top_k=2)
 
     result = query.answer(_ask("book"))
@@ -715,7 +723,9 @@ def test_cited_chunk_ids_mirror_full_context_when_model_cites_all() -> None:
 def test_cited_chunk_ids_carry_llm_subset_not_full_retrieved() -> None:
     """The milestone core: the seam carries the LLM's actual subset, not all retrieved."""
     store = MockDomainStore()
-    _ingest(store, "2026-05-09\nTried a new book\nAnother book chapter")
+    # Two retrieved chunks require two notes (one /note is one chunk — I-5 / D-106).
+    _ingest(store, "2026-05-09\nTried a new book", msg_id="100")
+    _ingest(store, "2026-05-09\nAnother book chapter", msg_id="101")
     query = _wire_with_chat(store, _MarkerChatClient("confident", cited_subset_size=1))
 
     result = query.answer(_ask("book"))
