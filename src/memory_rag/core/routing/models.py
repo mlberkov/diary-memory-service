@@ -66,6 +66,14 @@ class InboundMessage:
     ``edit_seq`` carries the Telegram-derived edit-state marker (D-023):
     ``0`` for an original delivery, the ``edit_date`` epoch seconds for an
     edited state.
+
+    ``subject_id`` is the resolved opaque subject scope, set by the
+    event-source adapter via its community→subject resolver (H-2; D-097;
+    D-026 axis 5). It is subordinate to ``community_id`` — it never widens
+    or crosses community scope (I-7 / R-3 / R-8). ``None`` = community-wide
+    (the default single-subject mapping), so the field is behavior-preserving
+    today; the core scopes on it and never derives a subject from a host
+    identity field (I-1).
     """
 
     external_message_id: str
@@ -78,6 +86,7 @@ class InboundMessage:
     route_source: RouteSource
     payload: str = ""
     edit_seq: int = 0
+    subject_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

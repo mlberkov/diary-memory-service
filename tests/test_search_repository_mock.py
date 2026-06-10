@@ -38,6 +38,7 @@ def _seed(
     status: EmbeddingStatus = EmbeddingStatus.READY,
     embed_with: MockEmbeddingClient | None = None,
     note_date: date = _DATE,
+    subject_id: str | None = None,
 ) -> EventChunk:
     sid = f"src-{cid}"
     eid = f"ent-{cid}"
@@ -64,6 +65,7 @@ def _seed(
             note_date=note_date,
             note_text=text,
             created_at=_NOW,
+            subject_id=subject_id,
         )
     )
     chunk = EventChunk(
@@ -76,6 +78,7 @@ def _seed(
         event_index=0,
         chunk_text=text,
         created_at=_NOW,
+        subject_id=subject_id,
     )
     store.save_event_chunks([chunk])
 
@@ -310,3 +313,149 @@ def test_date_range_all_none_equals_no_filter() -> None:
     no_filter = store.sparse_candidates("fam-A", "book chapter", 10, date_range=None)
     all_none = store.sparse_candidates("fam-A", "book chapter", 10, date_range=DateRange())
     assert [h.chunk_id for h in all_none] == [h.chunk_id for h in no_filter]
+
+
+# --- H-3: optional subject retrieval filter (D-107) ---
+
+
+def _seed_three_subjects(store: MockDomainStore, client: MockEmbeddingClient, *, text: str) -> None:
+    """Seed identical-text chunks under two subjects plus one community-wide."""
+    _seed(store, cid="c-s1", text=text, embed_with=client, subject_id="subj-1")
+    _seed(store, cid="c-s2", text=text, embed_with=client, subject_id="subj-2")
+    _seed(store, cid="c-wide", text=text, embed_with=client, subject_id=None)
+
+
+def test_sparse_subject_scope_strict_match() -> None:
+    """A non-None scope returns only same-subject chunks; community-wide
+    (``subject_id is None``) chunks are excluded (strict match, D-107)."""
+    store = MockDomainStore()
+    _seed_three_subjects(store, MockEmbeddingClient(), text="book chapter")
+
+    hits = store.sparse_candidates("fam-A", "book chapter", 10, subject_scope="subj-1")
+    assert {h.chunk_id for h in hits} == {"c-s1"}
+
+
+def test_dense_subject_scope_strict_match() -> None:
+    store = MockDomainStore()
+    client = MockEmbeddingClient()
+    _seed_three_subjects(store, client, text="Walked the dog")
+
+    query = client.embed(["Walked the dog"])[0]
+    hits = store.dense_candidates("fam-A", query, client.model_name, 10, subject_scope="subj-1")
+    assert {h.chunk_id for h in hits} == {"c-s1"}
+
+
+def test_subject_scope_excludes_community_wide_even_when_nothing_matches() -> None:
+    """A scope no chunk carries returns nothing — community-wide chunks do not
+    leak in as a fallback (fail-closed strict match)."""
+    store = MockDomainStore()
+    client = MockEmbeddingClient()
+    _seed(store, cid="c-wide", text="book chapter", embed_with=client, subject_id=None)
+
+    sparse = store.sparse_candidates("fam-A", "book chapter", 10, subject_scope="subj-1")
+    dense = store.dense_candidates(
+        "fam-A", client.embed(["book chapter"])[0], client.model_name, 10, subject_scope="subj-1"
+    )
+    assert sparse == []
+    assert dense == []
+
+
+def test_subject_scope_none_is_unchanged() -> None:
+    """Explicit ``None`` and an omitted arg return the same set (shape preservation)."""
+    store = MockDomainStore()
+    client = MockEmbeddingClient()
+    _seed_three_subjects(store, client, text="book chapter")
+
+    omitted = store.sparse_candidates("fam-A", "book chapter", 10)
+    explicit_none = store.sparse_candidates("fam-A", "book chapter", 10, subject_scope=None)
+    assert [h.chunk_id for h in omitted] == [h.chunk_id for h in explicit_none]
+    assert {h.chunk_id for h in omitted} == {"c-s1", "c-s2", "c-wide"}
+
+    query = client.embed(["book chapter"])[0]
+    dense_omitted = store.dense_candidates("fam-A", query, client.model_name, 10)
+    dense_none = store.dense_candidates("fam-A", query, client.model_name, 10, subject_scope=None)
+    assert [h.chunk_id for h in dense_omitted] == [h.chunk_id for h in dense_none]
+    assert {h.chunk_id for h in dense_omitted} == {"c-s1", "c-s2", "c-wide"}
+
+
+def test_subject_scope_composes_with_date_range() -> None:
+    """Both filters apply as a conjunction on both legs."""
+    store = MockDomainStore()
+    client = MockEmbeddingClient()
+    _seed(
+        store,
+        cid="c-s1-mid",
+        text="book chapter",
+        embed_with=client,
+        subject_id="subj-1",
+        note_date=_MID,
+    )
+    _seed(
+        store,
+        cid="c-s1-late",
+        text="book chapter",
+        embed_with=client,
+        subject_id="subj-1",
+        note_date=_LATE,
+    )
+    _seed(
+        store,
+        cid="c-s2-mid",
+        text="book chapter",
+        embed_with=client,
+        subject_id="subj-2",
+        note_date=_MID,
+    )
+    _seed(
+        store,
+        cid="c-wide-mid",
+        text="book chapter",
+        embed_with=client,
+        subject_id=None,
+        note_date=_MID,
+    )
+
+    window = DateRange(start=_MID, end=_MID)
+    sparse = store.sparse_candidates(
+        "fam-A", "book chapter", 10, date_range=window, subject_scope="subj-1"
+    )
+    dense = store.dense_candidates(
+        "fam-A",
+        client.embed(["book chapter"])[0],
+        client.model_name,
+        10,
+        date_range=window,
+        subject_scope="subj-1",
+    )
+    assert {h.chunk_id for h in sparse} == {"c-s1-mid"}
+    assert {h.chunk_id for h in dense} == {"c-s1-mid"}
+
+
+def test_subject_scope_never_widens_community_scope() -> None:
+    """The same subject_id in another community is not returned (I-7 outer
+    boundary; subject is subordinate to community)."""
+    store = MockDomainStore()
+    client = MockEmbeddingClient()
+    _seed(
+        store,
+        cid="cA",
+        text="book chapter",
+        community_id="fam-A",
+        embed_with=client,
+        subject_id="subj-1",
+    )
+    _seed(
+        store,
+        cid="cB",
+        text="book chapter",
+        community_id="fam-B",
+        embed_with=client,
+        subject_id="subj-1",
+    )
+
+    sparse = store.sparse_candidates("fam-A", "book chapter", 10, subject_scope="subj-1")
+    dense = store.dense_candidates(
+        "fam-A", client.embed(["book chapter"])[0], client.model_name, 10, subject_scope="subj-1"
+    )
+    assert {h.chunk_id for h in sparse} == {"cA"}
+    assert {h.chunk_id for h in dense} == {"cA"}

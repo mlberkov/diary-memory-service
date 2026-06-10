@@ -10,18 +10,28 @@ surface against **D-026 (adapter axes)**, **D-041 (community / subject
 vocabulary)**, and **I-7 / R-3 / R-8** (community scoping stays the outer
 boundary).
 
-**Status: in progress — Packets H-0 (D-097, docs) and H-1 (data model) landed;
-H-2..H-4 pending.** `subject_id` now exists as a nullable, opaque field on `Note` /
-`EventChunk` and in the durable schema (H-1); host→subject assignment (H-2) and the
-retrieval path (H-3) do not exist yet, so every record is still community-wide
-(`subject_id` is `null` everywhere). H-0 ratifies the
+**Status: closed — Packets H-0 (D-097, docs), H-1 (data model), H-2
+(adapter-axis assignment), H-3 (retrieval filter, D-107), and H-4
+(characterization suite + operator/product docs) landed; the milestone is
+closed by H-4.** `subject_id` exists as a
+nullable, opaque field on `Note` / `EventChunk` and in the durable schema (H-1), and
+host→subject assignment is a single adapter-owned seam (H-2). Under the default
+single-subject mapping the seam assigns `null` (community-wide), so every record is
+still community-wide today; the optional retrieval filter (H-3, D-107) is a
+keyword-only `subject_scope` on both search legs with **strict-match** semantics
+(`null` rows excluded under a non-`None` scope; `None` = no constraint, the
+unchanged default); the cross-seam behavior is pinned by
+`tests/test_subject_scoping.py` and documented operator-facing in
+`docs/RUNBOOK.md` (H-4). H-0 ratifies the
 contract (an opaque / community-scoped / **nullable** `subject_id` on `Note` /
 `EventChunk`; assignment is an adapter-axis function with a default single-subject
 mapping; `null` = community-wide; **no** core subject registry/entity; an
 optional retrieval filter mirroring the D-040 `date_range` seam; orthogonal to
-A-15 visibility). The remaining packets put `subject_id` in the data model (H-1),
+A-15 visibility). The packets put `subject_id` in the data model (H-1),
 make assignment a single adapter-owned seam (H-2), add the optional retrieval
-filter (H-3), and pin + document the behavior and close the milestone (H-4).
+filter (H-3, D-107), and pin + document the behavior and close the milestone
+(H-4, landed — `tests/test_subject_scoping.py` + the RUNBOOK / TechSpec §5 /
+ARCHITECTURE reconciliation).
 
 This mirrors the **D-093 / `docs/GROUPED-MULTI-DIARY-ROADMAP.md`**, **D-087 /
 `docs/READ-ACCESS-ENFORCEMENT-ROADMAP.md`**, and **D-044 /
@@ -71,8 +81,8 @@ code moves.
 | Surface | As-built today | Verdict |
 | --- | --- | --- |
 | Subject scope on records | **present** — nullable, opaque `subject_id` on `Note` / `EventChunk` + durable schema (H-1); `null` = community-wide, so unpopulated until H-2 | landed — H-1 |
-| Subject assignment | **absent** — no host→subject mapping; every note is community-wide | gap — added by H-2 (default single-subject) |
-| Subject retrieval filter | **absent** — only the D-040 `date_range` keyword-only filter exists on the search legs | gap — added by H-3 (optional, mirrors D-040) |
+| Subject assignment | **present** — single adapter-owned `resolve_subject_id` seam carried on `InboundMessage` → `Note` / `EventChunk` (H-2); default single-subject mapping assigns `null` (community-wide) | landed — H-2 |
+| Subject retrieval filter | **present** — optional keyword-only `subject_scope` on both search legs, mirroring D-040 and composing with `date_range` (H-3, D-107); strict match — `null` (community-wide) rows are excluded under a non-`None` scope and reachable only via the default `None` = no constraint; recorded on the persisted `Query` row (`0006.query-subject-scope` migration) | landed — H-3 (D-107) |
 | Subject registry / entity | **absent** (and intentionally so) | intentional — no entity this milestone |
 | Community scoping | every record `community_id`-keyed; every read scoped + fail-closed (I-7 / R-3 / R-8; Slice 8.1; D-094) | unchanged outer boundary |
 | A-15 visibility | community-level scoping is the access model; per-note visibility deferred | unchanged — separate from this milestone |
@@ -118,9 +128,9 @@ contract. C = core, A = adapter, Cfg = config (D-026 classification).
 | --- | --- | --- | --- |
 | **H-0 — subject-scoping contract + A-45 resolution + roadmap** | `docs/decision-log.md` (D-097); this roadmap doc (new); `docs/assumptions.md` + `docs/assumption-audit.md` (close A-45 → D-097; A-15 clarified, stays open); `docs/execution-map.md` (Milestone H block); cross-ref-only touches to `docs/product/TechSpec.md` §5, `docs/GLOSSARY.md`, `docs/RUNBOOK.md`. Docs-only — no `src/` / `tests/` / schema change. | docs-only | **Landed (D-097).** |
 | **H-1 — `subject_id` in the data model** | Add a nullable, opaque `subject_id` to `Note` / `EventChunk` (`core/domain/models.py`) + a non-destructive migration (nullable column, default `null`; community scoping unchanged). No assignment, no retrieval change yet. | **C** (+ schema) | Landed (H-1; `0005.subject-id-columns` migration). |
-| **H-2 — adapter-axis subject assignment** | One adapter-owned host→subject mapping (default single-subject per community, parallel to `adapters/telegram/community.py` `resolve_community_id`); the resolved opaque `subject_id` crosses the boundary on `InboundMessage`; the domain service carries it through to `Note` / `EventChunk`. Behavior-preserving under the default mapping. | **A** (+ core call sites) | Pending. |
-| **H-3 — optional subject retrieval filter** | `Query.subject_scope` + a keyword-only optional subject filter on `storage/search_repository.py` both legs (and the postgres/mock stores), mirroring the D-040 `date_range` seam; `None` = no constraint (preserves the current shape + RRF inputs); composes with `date_range`. | **C** | Pending. |
-| **H-4 — regression suite + operator/product docs + closure** | Subject-scoping characterization suite (mock + PG-gated parity); reconcile `docs/RUNBOOK.md` / `docs/product/TechSpec.md` §5 / `docs/ARCHITECTURE.md`; flip this roadmap `Status:` / §6 / the execution-map rows to milestone-closed (conditional on this packet landing). | tests + docs | Pending. |
+| **H-2 — adapter-axis subject assignment** | One adapter-owned host→subject mapping (default single-subject per community, parallel to `adapters/telegram/community.py` `resolve_community_id`); the resolved opaque `subject_id` crosses the boundary on `InboundMessage`; the domain service carries it through to `Note` / `EventChunk`. Behavior-preserving under the default mapping. | **A** (+ core call sites) | Landed (H-2; `adapters/telegram/subject.py` `resolve_subject_id`, default `None`). |
+| **H-3 — optional subject retrieval filter** | `Query.subject_scope` + a keyword-only optional subject filter on `storage/search_repository.py` both legs (and the postgres/mock stores), mirroring the D-040 `date_range` seam; `None` = no constraint (preserves the current shape + RRF inputs); composes with `date_range`. **Strict match** (D-107): `null` rows excluded under a non-`None` scope; the requested scope is recorded on the persisted `Query` row (`0006.query-subject-scope` migration — the one schema touch the persistence requirement forces). | **C** (+ schema) | Landed (H-3 / D-107). |
+| **H-4 — regression suite + operator/product docs + closure** | Subject-scoping characterization suite (mock + PG-gated parity); reconcile `docs/RUNBOOK.md` / `docs/product/TechSpec.md` §5 / `docs/ARCHITECTURE.md`; flip this roadmap `Status:` / §6 / the execution-map rows to milestone-closed (conditional on this packet landing). | tests + docs | Landed (H-4 — `tests/test_subject_scoping.py`, end-to-end through both adapter seams, parametrized mock + PG-gated postgres; RUNBOOK operator section; TechSpec §5 supported + `subject_id` / `subject_scope` field-list reconciliation; ARCHITECTURE Axis-5 names `resolve_subject_id`). Closes the milestone. |
 
 *(A-15 visibility is **not** an H packet — it stays Slice 8.2 / G-4, separate.)*
 
@@ -152,9 +162,12 @@ The milestone exits when `subject_id` is in the `Note` / `EventChunk` data model
 single-subject mapping (H-2), subject-scoped retrieval is an optional keyword-only
 filter that composes with the D-040 date filter (H-3), and a regression suite +
 operator/product docs pin and record the behavior (H-4) — all while preserving the
-§3 contract and the existing community-scoping invariants (I-7 / R-3 / R-8). **H-1
-has landed** (`subject_id` in the `Note` / `EventChunk` data model + durable schema);
-H-2..H-4 remain, so the milestone is still in progress. The
+§3 contract and the existing community-scoping invariants (I-7 / R-3 / R-8). **All
+four have landed** (H-1 data model + durable schema; H-2 adapter-owned assignment
+seam with the default single-subject mapping; H-3 / D-107 optional strict-match
+retrieval filter; H-4 cross-seam characterization suite
+`tests/test_subject_scoping.py` + operator/product docs), **so the exit criterion
+is met and the milestone is closed.** The
 visibility model (A-15 / Slice 8.2 / G-4) and any core subject registry/entity are
 separate and **not** part of this exit criterion — they remain outside the
 milestone.

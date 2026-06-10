@@ -105,7 +105,7 @@ The safety floor for ambiguous input is **preserve as draft**, not **clarify and
 - `IndexingDeadLetter`
 - `FeedbackEvent`
 
-> `Family` and `Child` are the first-use-case entity names for the canonical core concepts `community` and `subject` (D-041; see `docs/GLOSSARY.md`). The realized scope identifier in code and schema is `community_id`; child scoping is not yet in code and is born directly as `subject_id` when it lands (Milestone H; see the subject-scoping note below). Community bootstrap is **implicit-on-first-message** and the chat→community mapping is the tenant/auth adapter axis (default Telegram: 1:1 from `external_chat_id`), ratified by D-093 and realized by the single adapter-owned `resolve_community_id` resolver (D-094, see `docs/GROUPED-MULTI-DIARY-ROADMAP.md`); membership is inherited from host-chat membership. **Grouped diaries (a shared chat is one community with preserved per-sender authorship) and multiple diaries on one instance (many communities coexist without leakage) are supported** (G-1/G-2; D-094/D-095; operator how-to in `docs/RUNBOOK.md`, D-096). Per-note visibility remains deferred (A-15 / Slice 8.2). Subject scoping is the second scoping dimension: its contract is ratified by D-097 (A-45 **closed → D-097**) — `subject_id` is an opaque, community-scoped, **nullable** identifier on `Note` / `EventChunk` (born directly as `subject_id`; the data-model field is listed below under its first-use-case label `child_id` / `child_scope`), assigned by an adapter-axis function with a default single-subject mapping, `null` = community-wide, with **no** core subject registry/entity and an **optional** retrieval filter mirroring the D-040 `date_range` seam; it is separate from A-15 visibility. The code realization is sequenced as Milestone H / H-1..H-4 (`docs/SUBJECT-SCOPING-ROADMAP.md`); H-1 has landed the nullable `subject_id` field on `Note` / `EventChunk` (`core/domain/models.py`) and the durable schema (the `0005.subject-id-columns` migration), defaulting to `null` = community-wide — adapter-axis assignment (H-2) and the optional retrieval filter (H-3) remain pending, and the §5 field lists below still carry the first-use-case label `child_id` pending the H-4 reconciliation. No `Family` / `Child` / `Community` / `Participant` / `Subject` table exists yet.
+> `Family` and `Child` are the first-use-case entity names for the canonical core concepts `community` and `subject` (D-041; see `docs/GLOSSARY.md`). The realized scope identifiers in code and schema are `community_id` and the nullable `subject_id` (Milestone H; see the subject-scoping note below). Community bootstrap is **implicit-on-first-message** and the chat→community mapping is the tenant/auth adapter axis (default Telegram: 1:1 from `external_chat_id`), ratified by D-093 and realized by the single adapter-owned `resolve_community_id` resolver (D-094, see `docs/GROUPED-MULTI-DIARY-ROADMAP.md`); membership is inherited from host-chat membership. **Grouped diaries (a shared chat is one community with preserved per-sender authorship) and multiple diaries on one instance (many communities coexist without leakage) are supported** (G-1/G-2; D-094/D-095; operator how-to in `docs/RUNBOOK.md`, D-096). Per-note visibility remains deferred (A-15 / Slice 8.2). Subject scoping is the second scoping dimension and is **supported** (Milestone H, D-097/D-107): its contract is ratified by D-097 (A-45 **closed → D-097**) — `subject_id` is an opaque, community-scoped, **nullable** identifier on `Note` / `EventChunk`, assigned by an adapter-axis function with a default single-subject mapping, `null` = community-wide, with **no** core subject registry/entity and an **optional** strict-match retrieval filter mirroring the D-040 `date_range` seam; it is separate from A-15 visibility. The code realization landed as Milestone H / H-1..H-4 (`docs/SUBJECT-SCOPING-ROADMAP.md`): the nullable `subject_id` field on `Note` / `EventChunk` (`core/domain/models.py`) plus the durable schema (the `0005.subject-id-columns` migration) (H-1); adapter-axis assignment via the single adapter-owned `resolve_subject_id` resolver (H-2); the optional keyword-only `subject_scope` retrieval filter, recorded on the persisted `Query` row (H-3, D-107; the `0006.query-subject-scope` migration); and the cross-seam regression suite `tests/test_subject_scoping.py` plus docs reconciliation (H-4) — the §5 field lists below carry the canonical `subject_id` / `subject_scope` names. There is no inbound `/ask` subject syntax and no subject-selection UX (deferred; operator how-to in `docs/RUNBOOK.md`). No `Family` / `Child` / `Community` / `Participant` / `Subject` table exists yet.
 
 ### SourceMessage
 Fields:
@@ -145,7 +145,7 @@ milestone is `/sources`; answer-reply attribution is deferred (D-081, A-44). The
 Fields:
 - note_id
 - community_id
-- child_id
+- subject_id
 - note_date
 - source_message_id
 - author_user_id
@@ -159,7 +159,7 @@ Fields:
 - note_id
 - source_message_id
 - community_id
-- child_id
+- subject_id
 - author_user_id
 - note_date
 - event_index
@@ -176,7 +176,7 @@ Fields:
 - source_message_id
 - community_id
 - author_user_id
-- child_scope
+- subject_scope
 - query_text
 - normalized_query_text
 - rewrite_text
@@ -249,7 +249,7 @@ This creates replayability and provenance.
 
 Minimum metadata per chunk:
 - community_id
-- child_id
+- subject_id
 - author_user_id
 - source_message_id
 - note_id

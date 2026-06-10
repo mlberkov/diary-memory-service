@@ -21,6 +21,7 @@ def _note_message(
     user: str = "7",
     message_id: str = "100",
     edit_seq: int = 0,
+    subject_id: str | None = None,
 ) -> InboundMessage:
     return InboundMessage(
         external_message_id=message_id,
@@ -33,6 +34,7 @@ def _note_message(
         route_source="command",
         payload=payload,
         edit_seq=edit_seq,
+        subject_id=subject_id,
     )
 
 
@@ -96,6 +98,33 @@ def test_chunks_carry_lineage_back_to_source_and_note() -> None:
     note_ids = {c.note_id for c in chunks}
     assert len(note_ids) == 1
     assert next(iter(note_ids)) in store._notes
+
+
+def test_subject_id_defaults_to_none_through_ingest() -> None:
+    # H-2 behavior-preserving guard: under the default single-subject mapping
+    # the adapter supplies subject_id=None, so the persisted Note and every
+    # EventChunk carry subject_id=None (community-wide; D-097), byte-identical
+    # to pre-H-2 data.
+    store = MockDomainStore()
+    service = DomainService(store)
+
+    service.ingest(_note_message("2026-05-09\nMorning routine"))
+
+    assert {n.subject_id for n in store._notes.values()} == {None}
+    assert {c.subject_id for c in _all_chunks(store)} == {None}
+
+
+def test_subject_id_threads_from_inbound_to_note_and_chunks() -> None:
+    # H-2 seam guard: a non-None subject_id assigned by a (future) non-default
+    # adapter mapping crosses on InboundMessage and is carried onto the
+    # persisted Note and EventChunk without further plumbing.
+    store = MockDomainStore()
+    service = DomainService(store)
+
+    service.ingest(_note_message("2026-05-09\nMorning routine", subject_id="subj-1"))
+
+    assert {n.subject_id for n in store._notes.values()} == {"subj-1"}
+    assert {c.subject_id for c in _all_chunks(store)} == {"subj-1"}
 
 
 def test_multiline_note_is_a_single_chunk() -> None:

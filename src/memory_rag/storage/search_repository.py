@@ -38,6 +38,7 @@ class SearchRepository(Protocol):
         limit: int,
         *,
         date_range: DateRange | None = None,
+        subject_scope: str | None = None,
     ) -> list[EventChunk]:
         """Return up to ``limit`` chunks ranked by vector similarity.
 
@@ -51,6 +52,13 @@ class SearchRepository(Protocol):
         falls within its inclusive bounds participate; ``None`` (the
         default) applies no date constraint and preserves the D-025
         retrieval shape (Slice 3.4, D-040).
+
+        When ``subject_scope`` is given, only chunks whose ``subject_id``
+        equals it participate — strict match: chunks with a ``None``
+        (community-wide) ``subject_id`` are excluded and remain reachable
+        only via ``subject_scope=None`` (the default, no subject
+        constraint). Composes with ``date_range`` as a conjunction and
+        never widens community scope (H-3, D-107).
         """
 
     def sparse_candidates(
@@ -60,6 +68,7 @@ class SearchRepository(Protocol):
         limit: int,
         *,
         date_range: DateRange | None = None,
+        subject_scope: str | None = None,
     ) -> list[EventChunk]:
         """Return up to ``limit`` chunks ranked by PostgreSQL FTS baseline.
 
@@ -71,6 +80,13 @@ class SearchRepository(Protocol):
         falls within its inclusive bounds participate; ``None`` (the
         default) applies no date constraint and preserves the D-025
         retrieval shape (Slice 3.4, D-040).
+
+        When ``subject_scope`` is given, only chunks whose ``subject_id``
+        equals it participate — strict match: chunks with a ``None``
+        (community-wide) ``subject_id`` are excluded and remain reachable
+        only via ``subject_scope=None`` (the default, no subject
+        constraint). Composes with ``date_range`` as a conjunction and
+        never widens community scope (H-3, D-107).
         """
 
 

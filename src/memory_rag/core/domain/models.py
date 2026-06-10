@@ -237,6 +237,11 @@ class Query:
     ``model_name`` at call time. ``fallback`` mirrors the ``AnswerResult``
     outcome — ``NO_EVIDENCE`` when the query was empty after normalization
     or when both retrieval legs returned no chunks.
+
+    ``subject_scope`` records the optional subject filter the call was made
+    with (H-3, D-107): the opaque, community-subordinate ``subject_id`` value
+    both retrieval legs were restricted to, or ``None`` (the default) when no
+    subject constraint was requested.
     """
 
     query_id: str
@@ -245,6 +250,7 @@ class Query:
     model_name: str
     fallback: FallbackMode
     created_at: datetime
+    subject_scope: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -135,7 +135,11 @@ class QueryService:
         self._candidate_k = candidate_k
 
     def answer(
-        self, message: InboundMessage, *, date_range: DateRange | None = None
+        self,
+        message: InboundMessage,
+        *,
+        date_range: DateRange | None = None,
+        subject_scope: str | None = None,
     ) -> AnswerResult:
         """Answer an ``/ask`` payload via baseline hybrid retrieval.
 
@@ -144,6 +148,15 @@ class QueryService:
         (Slice 3.4, D-040); ``None`` (the default) applies no date
         constraint. There is no inbound date syntax yet — the Telegram
         webhook passes no ``date_range``.
+
+        When ``subject_scope`` is given, both retrieval legs are
+        restricted to chunks whose ``subject_id`` equals it — strict
+        match, so community-wide chunks (``subject_id`` ``None``) are
+        excluded (H-3, D-107); ``None`` (the default) applies no subject
+        constraint. The scope composes with ``date_range`` and is
+        recorded on the persisted ``Query`` row. There is no inbound
+        subject syntax yet — the Telegram webhook passes no
+        ``subject_scope``.
         """
         # Opaque community scope resolved by the adapter at the edge (D-093 /
         # G-1); the core never re-derives it from external_chat_id (I-1).
@@ -164,6 +177,7 @@ class QueryService:
                 model_name=model_name,
                 created_at=created_at,
                 fallback=FallbackMode.NO_EVIDENCE,
+                subject_scope=subject_scope,
                 dense_hits=[],
                 sparse_hits=[],
                 merged=[],
@@ -187,10 +201,19 @@ class QueryService:
         query_embedding = self._embed.embed([query_text])[0]
 
         dense_hits = self._search.dense_candidates(
-            community_id, query_embedding, model_name, self._candidate_k, date_range=date_range
+            community_id,
+            query_embedding,
+            model_name,
+            self._candidate_k,
+            date_range=date_range,
+            subject_scope=subject_scope,
         )
         sparse_hits = self._search.sparse_candidates(
-            community_id, query_text, self._candidate_k, date_range=date_range
+            community_id,
+            query_text,
+            self._candidate_k,
+            date_range=date_range,
+            subject_scope=subject_scope,
         )
         merged = reciprocal_rank_fusion([dense_hits, sparse_hits], top_k=self._top_k)
 
@@ -206,6 +229,7 @@ class QueryService:
             model_name=model_name,
             fallback=FallbackMode.NONE,
             created_at=created_at,
+            subject_scope=subject_scope,
         )
         context = assemble_answer_context(provisional_query, merged)
         context_chunk_ids = tuple(c.chunk_id for c in context.ordered_chunks)
@@ -226,6 +250,7 @@ class QueryService:
                 model_name=model_name,
                 created_at=created_at,
                 fallback=FallbackMode.NO_EVIDENCE,
+                subject_scope=subject_scope,
                 dense_hits=dense_hits,
                 sparse_hits=sparse_hits,
                 merged=merged,
@@ -252,6 +277,7 @@ class QueryService:
                 model_name=model_name,
                 created_at=created_at,
                 fallback=FallbackMode.PROVIDER_UNAVAILABLE,
+                subject_scope=subject_scope,
                 dense_hits=dense_hits,
                 sparse_hits=sparse_hits,
                 merged=merged,
@@ -276,6 +302,7 @@ class QueryService:
                 model_name=model_name,
                 created_at=created_at,
                 fallback=FallbackMode.PARSE_FAILURE,
+                subject_scope=subject_scope,
                 dense_hits=dense_hits,
                 sparse_hits=sparse_hits,
                 merged=merged,
@@ -298,6 +325,7 @@ class QueryService:
             model_name=model_name,
             created_at=created_at,
             fallback=graded,
+            subject_scope=subject_scope,
             dense_hits=dense_hits,
             sparse_hits=sparse_hits,
             merged=merged,
@@ -321,6 +349,7 @@ class QueryService:
         model_name: str,
         created_at: datetime,
         fallback: FallbackMode,
+        subject_scope: str | None,
         dense_hits: list[EventChunk],
         sparse_hits: list[EventChunk],
         merged: list[FusedHit],
@@ -347,6 +376,7 @@ class QueryService:
             model_name=model_name,
             fallback=fallback,
             created_at=created_at,
+            subject_scope=subject_scope,
         )
         self._persist_trace(
             query=query, dense_hits=dense_hits, sparse_hits=sparse_hits, merged=merged
