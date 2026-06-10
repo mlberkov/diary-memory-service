@@ -49,7 +49,7 @@ The D-042 renaming roadmap (`docs/RENAMING-ROADMAP.md`) renamed the diary-shaped
 | `core/diary/` module | `core/domain/` module |
 | `diary_rag` package | `memory_rag` package |
 
-`child_id` was never present in code; child scoping, when introduced, is born directly as `subject_id` — an opaque, community-scoped, nullable identifier whose contract is ratified by D-097 (Milestone H; see `docs/SUBJECT-SCOPING-ROADMAP.md`) and whose code realization is sequenced there. `docs/INVARIANTS.md` and `docs/RUNTIME-INVARIANTS.md` describe the live identifier names — their wording matches what code enforces today. Naming the canonical terms here does not rename anything in code or schema.
+`child_id` was never present in code; child scoping was born directly as `subject_id` — an opaque, community-scoped, nullable identifier whose contract is ratified by D-097 and whose code realization landed as Milestone H (see `docs/SUBJECT-SCOPING-ROADMAP.md`). `docs/INVARIANTS.md` and `docs/RUNTIME-INVARIANTS.md` describe the live identifier names — their wording matches what code enforces today. Naming the canonical terms here does not rename anything in code or schema.
 
 ## See also
 
