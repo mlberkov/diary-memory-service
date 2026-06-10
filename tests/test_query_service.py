@@ -38,7 +38,12 @@ def _ask(query: str, *, chat: str = "42", user: str = "7") -> InboundMessage:
 
 
 def _note(
-    payload: str, *, chat: str = "42", user: str = "7", msg_id: str = "100"
+    payload: str,
+    *,
+    chat: str = "42",
+    user: str = "7",
+    msg_id: str = "100",
+    subject_id: str | None = None,
 ) -> InboundMessage:
     return InboundMessage(
         external_message_id=msg_id,
@@ -50,6 +55,7 @@ def _note(
         received_at=datetime.now(tz=UTC),
         route_source="command",
         payload=payload,
+        subject_id=subject_id,
     )
 
 
@@ -57,9 +63,16 @@ def _wire(store: MockDomainStore, *, top_k: int = 5) -> QueryService:
     return QueryService(store, store, MockEmbeddingClient(), MockChatClient(), top_k=top_k)
 
 
-def _ingest(store: MockDomainStore, payload: str, *, chat: str = "42", msg_id: str = "100") -> None:
+def _ingest(
+    store: MockDomainStore,
+    payload: str,
+    *,
+    chat: str = "42",
+    msg_id: str = "100",
+    subject_id: str | None = None,
+) -> None:
     DomainService(store, embedding_client=MockEmbeddingClient()).ingest(
-        _note(payload, chat=chat, msg_id=msg_id)
+        _note(payload, chat=chat, msg_id=msg_id, subject_id=subject_id)
     )
 
 
@@ -410,6 +423,81 @@ def test_answer_without_date_range_is_unchanged() -> None:
         "Read a book in May",
         "Read a book in June",
     }
+
+
+# --- H-3: optional subject retrieval filter (D-107) ---------------------------
+
+
+def test_answer_honors_subject_scope() -> None:
+    """A per-call ``subject_scope`` narrows both legs to same-subject chunks
+    (strict match — community-wide chunks excluded) and is recorded on the
+    persisted ``Query`` row."""
+    store = MockDomainStore()
+    _ingest(store, "2026-05-09\nRead a book about subject one", msg_id="100", subject_id="subj-1")
+    _ingest(store, "2026-05-09\nRead a book about subject two", msg_id="101", subject_id="subj-2")
+    _ingest(store, "2026-05-09\nRead a book community wide", msg_id="102", subject_id=None)
+    query = _wire(store)
+
+    result = query.answer(_ask("book"), subject_scope="subj-1")
+
+    assert result.fallback is FallbackMode.NONE
+    assert [e.chunk_text for e in result.evidence] == ["Read a book about subject one"]
+    persisted = next(iter(store._queries.values()))
+    assert persisted.subject_scope == "subj-1"
+
+
+def test_answer_without_subject_scope_is_unchanged() -> None:
+    """Omitting ``subject_scope`` retrieves across all subjects (the current
+    no-filter shape) and persists ``subject_scope=None``."""
+    store = MockDomainStore()
+    _ingest(store, "2026-05-09\nRead a book about subject one", msg_id="100", subject_id="subj-1")
+    _ingest(store, "2026-05-09\nRead a book community wide", msg_id="102", subject_id=None)
+    query = _wire(store)
+
+    result = query.answer(_ask("book"))
+
+    assert result.fallback is FallbackMode.NONE
+    assert {e.chunk_text for e in result.evidence} == {
+        "Read a book about subject one",
+        "Read a book community wide",
+    }
+    persisted = next(iter(store._queries.values()))
+    assert persisted.subject_scope is None
+
+
+def test_subject_scope_over_community_wide_corpus_is_no_evidence() -> None:
+    """Under the default single-subject mapping every chunk is community-wide,
+    so a non-None scope fails closed to NO_EVIDENCE — and the persisted
+    ``Query`` row still records the requested scope (fallback contour)."""
+    store = MockDomainStore()
+    _ingest(store, "2026-05-09\nRead a book community wide", msg_id="100", subject_id=None)
+    query = _wire(store)
+
+    result = query.answer(_ask("book"), subject_scope="subj-1")
+
+    assert result.fallback is FallbackMode.NO_EVIDENCE
+    assert result.evidence == []
+    persisted = next(iter(store._queries.values()))
+    assert persisted.fallback is FallbackMode.NO_EVIDENCE
+    assert persisted.subject_scope == "subj-1"
+
+
+def test_answer_composes_subject_scope_with_date_range() -> None:
+    """Both per-call filters apply together as a conjunction."""
+    store = MockDomainStore()
+    _ingest(store, "2026-05-09\nRead a book in May", msg_id="100", subject_id="subj-1")
+    _ingest(store, "2026-06-15\nRead a book in June", msg_id="101", subject_id="subj-1")
+    _ingest(store, "2026-06-15\nRead a book in June too", msg_id="102", subject_id=None)
+    query = _wire(store)
+
+    result = query.answer(
+        _ask("book"),
+        date_range=DateRange(start=date(2026, 6, 1)),
+        subject_scope="subj-1",
+    )
+
+    assert result.fallback is FallbackMode.NONE
+    assert [e.chunk_text for e in result.evidence] == ["Read a book in June"]
 
 
 # --- Slice 4.3b: stub chat clients for the four new contours -----------------

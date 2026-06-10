@@ -126,7 +126,8 @@ CREATE TABLE IF NOT EXISTS queries (
             'none','no_evidence','invalid_input',
             'weak_evidence','ambiguous','provider_unavailable','parse_failure'
         )),
-    created_at   TEXT NOT NULL
+    created_at   TEXT NOT NULL,
+    subject_scope TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_queries_community_id ON queries(community_id);
@@ -420,6 +421,7 @@ class SqliteDomainStore:
         limit: int,
         *,
         date_range: DateRange | None = None,
+        subject_scope: str | None = None,
     ) -> list[EventChunk]:
         raise NotImplementedError(
             "sqlite hybrid retrieval not supported; "
@@ -433,6 +435,7 @@ class SqliteDomainStore:
         limit: int,
         *,
         date_range: DateRange | None = None,
+        subject_scope: str | None = None,
     ) -> list[EventChunk]:
         raise NotImplementedError(
             "sqlite hybrid retrieval not supported; "
@@ -512,8 +515,9 @@ class SqliteDomainStore:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO queries "
-                "(query_id, community_id, query_text, model_name, fallback, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "(query_id, community_id, query_text, model_name, fallback, "
+                " created_at, subject_scope) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     query.query_id,
                     query.community_id,
@@ -521,6 +525,7 @@ class SqliteDomainStore:
                     query.model_name,
                     query.fallback.value,
                     query.created_at.isoformat(),
+                    query.subject_scope,
                 ),
             )
             conn.commit()
@@ -557,7 +562,7 @@ class SqliteDomainStore:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT query_id, community_id, query_text, model_name, fallback, "
-                "       created_at "
+                "       created_at, subject_scope "
                 "  FROM queries "
                 " WHERE query_id = ? AND community_id = ?",
                 (query_id, community_id),
@@ -571,6 +576,7 @@ class SqliteDomainStore:
             model_name=row["model_name"],
             fallback=FallbackMode(row["fallback"]),
             created_at=datetime.fromisoformat(row["created_at"]),
+            subject_scope=row["subject_scope"],
         )
 
     def get_retrieval_hits_for_query(

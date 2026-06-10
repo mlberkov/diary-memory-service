@@ -45,6 +45,7 @@ def _query(
     text: str = "book",
     model_name: str = "mock",
     fallback: FallbackMode = FallbackMode.NONE,
+    subject_scope: str | None = None,
 ) -> Query:
     return Query(
         query_id=qid,
@@ -53,6 +54,7 @@ def _query(
         model_name=model_name,
         fallback=fallback,
         created_at=_now(),
+        subject_scope=subject_scope,
     )
 
 
@@ -134,6 +136,17 @@ def test_mock_save_and_get_query_round_trip() -> None:
     assert fetched.fallback is FallbackMode.NONE
 
 
+def test_mock_query_subject_scope_round_trip() -> None:
+    """``Query.subject_scope`` round-trips (H-3, D-107); default stays None."""
+    store = MockDomainStore()
+    store.save_query(_query(qid="q1", subject_scope="subj-1"))
+    store.save_query(_query(qid="q2"))
+    scoped = store.get_query("q1", community_id="fam-A")
+    unscoped = store.get_query("q2", community_id="fam-A")
+    assert scoped is not None and scoped.subject_scope == "subj-1"
+    assert unscoped is not None and unscoped.subject_scope is None
+
+
 def test_mock_get_query_missing_returns_none() -> None:
     store = MockDomainStore()
     assert store.get_query("missing", community_id="fam-A") is None
@@ -203,6 +216,17 @@ def test_sqlite_save_and_get_query_round_trip(tmp_path: Path) -> None:
     assert fetched.query_id == "q1"
     assert fetched.query_text == "book"
     assert fetched.fallback is FallbackMode.NONE
+
+
+def test_sqlite_query_subject_scope_round_trip(tmp_path: Path) -> None:
+    """``Query.subject_scope`` round-trips (H-3, D-107); default stays None."""
+    store = _sqlite_store(tmp_path)
+    store.save_query(_query(qid="q1", subject_scope="subj-1"))
+    store.save_query(_query(qid="q2"))
+    scoped = store.get_query("q1", community_id="fam-A")
+    unscoped = store.get_query("q2", community_id="fam-A")
+    assert scoped is not None and scoped.subject_scope == "subj-1"
+    assert unscoped is not None and unscoped.subject_scope is None
 
 
 def test_sqlite_save_retrieval_hits_round_trip_orders_by_leg_then_rank(tmp_path: Path) -> None:
@@ -291,6 +315,17 @@ def test_pg_save_and_get_query_round_trip(pg_store: PostgresDomainStore) -> None
     assert fetched.query_id == "q1"
     assert fetched.query_text == "book"
     assert fetched.fallback is FallbackMode.NONE
+
+
+@pgmark
+def test_pg_query_subject_scope_round_trip(pg_store: PostgresDomainStore) -> None:
+    """``Query.subject_scope`` round-trips (H-3, D-107); default stays None."""
+    pg_store.save_query(_query(qid="q1", subject_scope="subj-1"))
+    pg_store.save_query(_query(qid="q2"))
+    scoped = pg_store.get_query("q1", community_id="fam-A")
+    unscoped = pg_store.get_query("q2", community_id="fam-A")
+    assert scoped is not None and scoped.subject_scope == "subj-1"
+    assert unscoped is not None and unscoped.subject_scope is None
 
 
 @pgmark

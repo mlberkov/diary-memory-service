@@ -47,11 +47,14 @@ AUTHOR_DISPLAY_MIGRATION_ID = "0004.author-display-inputs"
 #: Id of the H-1 / D-097 subject_id-columns migration (filename stem).
 SUBJECT_ID_MIGRATION_ID = "0005.subject-id-columns"
 
+#: Id of the H-3 / D-107 query-subject-scope migration (filename stem).
+QUERY_SUBJECT_SCOPE_MIGRATION_ID = "0006.query-subject-scope"
+
 #: Index added by the OP-1.2 upgrade migration on ``event_chunks``.
 EMBEDDING_STATUS_INDEX = "idx_event_chunks_embedding_status"
 
-#: Number of versioned migrations in the history (baseline + four upgrades).
-MIGRATION_COUNT = 5
+#: Number of versioned migrations in the history (baseline + five upgrades).
+MIGRATION_COUNT = 6
 
 PG_DSN = os.environ.get("MEMORY_RAG_PG_TEST_DSN")
 
@@ -72,13 +75,14 @@ if PG_DSN is not None:
 
 
 def test_migrations_discoverable() -> None:
-    """The migration set is the baseline plus the three upgrades, in order."""
+    """The migration set is the baseline plus the five upgrades, in order."""
     assert migration_ids() == [
         BASELINE_MIGRATION_ID,
         UPGRADE_MIGRATION_ID,
         DEAD_LETTER_MIGRATION_ID,
         AUTHOR_DISPLAY_MIGRATION_ID,
         SUBJECT_ID_MIGRATION_ID,
+        QUERY_SUBJECT_SCOPE_MIGRATION_ID,
     ]
 
 
@@ -92,6 +96,7 @@ def test_migrations_dir_is_packaged() -> None:
         "0003.indexing-dead-letter-table.sql",
         "0004.author-display-inputs.sql",
         "0005.subject-id-columns.sql",
+        "0006.query-subject-scope.sql",
     ]
 
 
@@ -240,17 +245,35 @@ def _apply_through_0002(dsn: str) -> None:
 
 
 def _apply_through_0004(dsn: str) -> None:
-    """Apply every migration except the 0005 tail, leaving it pending.
+    """Apply 0001..0004, leaving the 0005 and 0006 tail pending.
 
-    Stages a genuine prior schema version (no ``subject_id`` columns) so a later
-    ``apply_migrations`` runs the 0005 subject_id migration as a real
-    non-destructive upgrade over populated data."""
+    Stages a genuine prior schema version (no ``subject_id`` columns, no
+    ``queries.subject_scope``) so a later ``apply_migrations`` runs the
+    pending tail as a real non-destructive upgrade over populated data."""
     from yoyo import get_backend, read_migrations
 
     backend = get_backend(mr._yoyo_uri(dsn))
     with migrations_dir() as path:
         migrations = read_migrations(str(path))
-        prior = migrations.filter(lambda m: m.id != SUBJECT_ID_MIGRATION_ID)
+        prior = migrations.filter(
+            lambda m: m.id not in {SUBJECT_ID_MIGRATION_ID, QUERY_SUBJECT_SCOPE_MIGRATION_ID}
+        )
+        with backend.lock():
+            backend.apply_migrations(backend.to_apply(prior))
+
+
+def _apply_through_0005(dsn: str) -> None:
+    """Apply every migration except the 0006 tail, leaving it pending.
+
+    Stages a genuine prior schema version (no ``queries.subject_scope``
+    column) so a later ``apply_migrations`` runs the 0006 query-subject-scope
+    migration as a real non-destructive upgrade over populated data."""
+    from yoyo import get_backend, read_migrations
+
+    backend = get_backend(mr._yoyo_uri(dsn))
+    with migrations_dir() as path:
+        migrations = read_migrations(str(path))
+        prior = migrations.filter(lambda m: m.id != QUERY_SUBJECT_SCOPE_MIGRATION_ID)
         with backend.lock():
             backend.apply_migrations(backend.to_apply(prior))
 
@@ -293,6 +316,24 @@ def _insert_chunk_row(dsn: str, chunk_id: str, note_id: str, source_message_id: 
                 "Walked the dog",
                 datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC),
                 "failed",
+            ),
+        )
+
+
+def _insert_query_row(dsn: str, query_id: str) -> None:
+    """Insert a queries row using the pre-0006 column list (no subject_scope)."""
+    with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO queries "
+            "(query_id, community_id, query_text, model_name, fallback, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s)",
+            (
+                query_id,
+                "fam-A",
+                "what happened",
+                "mock-embedding",
+                "none",
+                datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC),
             ),
         )
 
@@ -385,9 +426,10 @@ def test_upgrade_0005_preserves_data(clean_db: str) -> None:
     _insert_chunk_row(clean_db, "chunk-1", "note-1", "src-1")
     assert not _column_exists(clean_db, "notes", "subject_id")
     assert not _column_exists(clean_db, "event_chunks", "subject_id")
-    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 1
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 2
 
-    # The real upgrade: 0005 applies on top of the populated database.
+    # The real upgrade: the pending tail (0005, then 0006) applies on top
+    # of the populated database.
     apply_migrations(clean_db)
 
     assert _column_exists(clean_db, "notes", "subject_id")
@@ -398,6 +440,27 @@ def test_upgrade_0005_preserves_data(clean_db: str) -> None:
     assert _count_rows(clean_db, "event_chunks") == 1
     assert _column_all_null(clean_db, "notes", "subject_id")
     assert _column_all_null(clean_db, "event_chunks", "subject_id")
+
+
+@pgmark
+def test_upgrade_0006_preserves_data(clean_db: str) -> None:
+    """Applying 0006 over a populated 0001..0005 database is a non-destructive
+    upgrade: the nullable ``queries.subject_scope`` column appears, every
+    pre-existing row survives, and those rows are ``subject_scope IS NULL``
+    (no subject constraint)."""
+    # Stage a prior schema version (0001..0005) with realistic data.
+    _apply_through_0005(clean_db)
+    _insert_query_row(clean_db, "q-1")
+    assert not _column_exists(clean_db, "queries", "subject_scope")
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 1
+
+    # The real upgrade: 0006 applies on top of the populated database.
+    apply_migrations(clean_db)
+
+    assert _column_exists(clean_db, "queries", "subject_scope")
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT
+    assert _count_rows(clean_db, "queries") == 1
+    assert _column_all_null(clean_db, "queries", "subject_scope")
 
 
 @pgmark

@@ -83,6 +83,20 @@ def _date_range_sql(date_range: DateRange | None) -> tuple[str, list[date]]:
     return fragment, params
 
 
+def _subject_scope_sql(subject_scope: str | None) -> tuple[str, list[str]]:
+    """Build the optional ``subject_id`` predicate for a hybrid leg query.
+
+    Strict match (H-3, D-107): a non-``None`` scope emits
+    ``AND ec.subject_id = %s``, so community-wide chunks
+    (``subject_id IS NULL``) are excluded. ``None`` emits nothing, so
+    the placeholder count always matches the params list, mirroring
+    ``_date_range_sql``.
+    """
+    if subject_scope is None:
+        return "", []
+    return " AND ec.subject_id = %s", [subject_scope]
+
+
 def _configure_connection(conn: Connection[Any]) -> None:
     """Register the pgvector codec on every pooled connection."""
     register_vector(conn)
@@ -350,12 +364,14 @@ class PostgresDomainStore:
         limit: int,
         *,
         date_range: DateRange | None = None,
+        subject_scope: str | None = None,
     ) -> list[EventChunk]:
         if not community_id:
             raise ValueError("community_id is required (Runtime invariant R-3)")
         if limit <= 0:
             return []
         date_sql, date_params = _date_range_sql(date_range)
+        subject_sql, subject_params = _subject_scope_sql(subject_scope)
         # Bare list[float] is encoded by psycopg as ``double precision[]``;
         # pgvector's ``<=>`` operator only accepts ``vector``. The
         # ``::vector`` cast bridges that without forcing callers to wrap
@@ -370,10 +386,10 @@ class PostgresDomainStore:
                 "  JOIN embedding_records er "
                 "    ON er.chunk_id = ec.chunk_id AND er.model_name = %s "
                 " WHERE ec.community_id = %s "
-                "   AND ec.embedding_status = 'ready'" + date_sql + " "
+                "   AND ec.embedding_status = 'ready'" + date_sql + subject_sql + " "
                 " ORDER BY er.embedding <=> %s::vector "
                 " LIMIT %s",
-                (model_name, community_id, *date_params, query_embedding, limit),
+                (model_name, community_id, *date_params, *subject_params, query_embedding, limit),
             )
             rows = cur.fetchall()
         return [_row_to_chunk(r) for r in rows]
@@ -385,6 +401,7 @@ class PostgresDomainStore:
         limit: int,
         *,
         date_range: DateRange | None = None,
+        subject_scope: str | None = None,
     ) -> list[EventChunk]:
         if not community_id:
             raise ValueError("community_id is required (Runtime invariant R-3)")
@@ -393,6 +410,7 @@ class PostgresDomainStore:
         if not query_text.strip():
             return []
         date_sql, date_params = _date_range_sql(date_range)
+        subject_sql, subject_params = _subject_scope_sql(subject_scope)
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "WITH q AS (SELECT websearch_to_tsquery('simple', %s) AS tsq) "
@@ -402,11 +420,11 @@ class PostgresDomainStore:
                 "       ec.embedding_status, ec.subject_id "
                 "  FROM event_chunks ec, q "
                 " WHERE ec.community_id = %s "
-                "   AND ec.chunk_text_tsv @@ q.tsq" + date_sql + " "
+                "   AND ec.chunk_text_tsv @@ q.tsq" + date_sql + subject_sql + " "
                 " ORDER BY ts_rank_cd(ec.chunk_text_tsv, q.tsq) DESC, "
                 "          ec.created_at, ec.event_index "
                 " LIMIT %s",
-                (query_text, community_id, *date_params, limit),
+                (query_text, community_id, *date_params, *subject_params, limit),
             )
             rows = cur.fetchall()
         return [_row_to_chunk(r) for r in rows]
@@ -486,8 +504,9 @@ class PostgresDomainStore:
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO queries "
-                "(query_id, community_id, query_text, model_name, fallback, created_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s)",
+                "(query_id, community_id, query_text, model_name, fallback, "
+                " created_at, subject_scope) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
                 (
                     query.query_id,
                     query.community_id,
@@ -495,6 +514,7 @@ class PostgresDomainStore:
                     query.model_name,
                     query.fallback.value,
                     query.created_at,
+                    query.subject_scope,
                 ),
             )
             conn.commit()
@@ -531,7 +551,7 @@ class PostgresDomainStore:
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT query_id, community_id, query_text, model_name, fallback, "
-                "       created_at "
+                "       created_at, subject_scope "
                 "  FROM queries "
                 " WHERE query_id = %s AND community_id = %s",
                 (query_id, community_id),
@@ -546,6 +566,7 @@ class PostgresDomainStore:
             model_name=row["model_name"],
             fallback=FallbackMode(row["fallback"]),
             created_at=row["created_at"],
+            subject_scope=row["subject_scope"],
         )
 
     def get_retrieval_hits_for_query(

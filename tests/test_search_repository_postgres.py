@@ -70,6 +70,7 @@ def _seed(
     embed_with: MockEmbeddingClient | None = None,
     event_index: int = 0,
     note_date: date = _DATE,
+    subject_id: str | None = None,
 ) -> None:
     sid = f"src-{cid}"
     eid = f"ent-{cid}"
@@ -96,6 +97,7 @@ def _seed(
             note_date=note_date,
             note_text=text,
             created_at=_NOW,
+            subject_id=subject_id,
         )
     )
     store.save_event_chunks(
@@ -110,6 +112,7 @@ def _seed(
                 event_index=event_index,
                 chunk_text=text,
                 created_at=_NOW,
+                subject_id=subject_id,
             )
         ]
     )
@@ -326,3 +329,146 @@ def test_date_range_none_unchanged(store: PostgresDomainStore) -> None:
     query = client.embed(["book chapter"])[0]
     dense = store.dense_candidates("fam-A", query, client.model_name, 10, date_range=None)
     assert {h.chunk_id for h in dense} == {"c-early", "c-mid", "c-late"}
+
+
+# --- H-3: optional subject retrieval filter (D-107) ---
+
+
+def _seed_three_subjects(
+    store: PostgresDomainStore, client: MockEmbeddingClient, *, text: str
+) -> None:
+    """Seed identical-text chunks under two subjects plus one community-wide."""
+    _seed(store, cid="c-s1", text=text, embed_with=client, subject_id="subj-1")
+    _seed(store, cid="c-s2", text=text, embed_with=client, subject_id="subj-2", event_index=1)
+    _seed(store, cid="c-wide", text=text, embed_with=client, subject_id=None, event_index=2)
+
+
+def test_sparse_subject_scope_strict_match(store: PostgresDomainStore) -> None:
+    """A non-None scope returns only same-subject chunks; community-wide
+    (``subject_id IS NULL``) chunks are excluded (strict match, D-107)."""
+    _seed_three_subjects(store, MockEmbeddingClient(), text="book chapter")
+
+    hits = store.sparse_candidates("fam-A", "book chapter", 10, subject_scope="subj-1")
+    assert {h.chunk_id for h in hits} == {"c-s1"}
+
+
+def test_dense_subject_scope_strict_match(store: PostgresDomainStore) -> None:
+    client = MockEmbeddingClient()
+    _seed_three_subjects(store, client, text="Walked the dog")
+
+    query = client.embed(["Walked the dog"])[0]
+    hits = store.dense_candidates("fam-A", query, client.model_name, 10, subject_scope="subj-1")
+    assert {h.chunk_id for h in hits} == {"c-s1"}
+
+
+def test_subject_scope_excludes_community_wide_even_when_nothing_matches(
+    store: PostgresDomainStore,
+) -> None:
+    """A scope no chunk carries returns nothing — NULL rows do not leak in as
+    a fallback (fail-closed strict match)."""
+    client = MockEmbeddingClient()
+    _seed(store, cid="c-wide", text="book chapter", embed_with=client, subject_id=None)
+
+    sparse = store.sparse_candidates("fam-A", "book chapter", 10, subject_scope="subj-1")
+    dense = store.dense_candidates(
+        "fam-A", client.embed(["book chapter"])[0], client.model_name, 10, subject_scope="subj-1"
+    )
+    assert sparse == []
+    assert dense == []
+
+
+def test_subject_scope_none_unchanged(store: PostgresDomainStore) -> None:
+    """``subject_scope=None`` returns the unfiltered result set on both legs."""
+    client = MockEmbeddingClient()
+    _seed_three_subjects(store, client, text="book chapter")
+
+    sparse = store.sparse_candidates("fam-A", "book chapter", 10, subject_scope=None)
+    assert {h.chunk_id for h in sparse} == {"c-s1", "c-s2", "c-wide"}
+
+    query = client.embed(["book chapter"])[0]
+    dense = store.dense_candidates("fam-A", query, client.model_name, 10, subject_scope=None)
+    assert {h.chunk_id for h in dense} == {"c-s1", "c-s2", "c-wide"}
+
+
+def test_subject_scope_composes_with_date_range(store: PostgresDomainStore) -> None:
+    """Both filters apply as a conjunction on both legs."""
+    client = MockEmbeddingClient()
+    _seed(
+        store,
+        cid="c-s1-mid",
+        text="book chapter",
+        embed_with=client,
+        subject_id="subj-1",
+        note_date=_MID,
+    )
+    _seed(
+        store,
+        cid="c-s1-late",
+        text="book chapter",
+        embed_with=client,
+        subject_id="subj-1",
+        note_date=_LATE,
+        event_index=1,
+    )
+    _seed(
+        store,
+        cid="c-s2-mid",
+        text="book chapter",
+        embed_with=client,
+        subject_id="subj-2",
+        note_date=_MID,
+        event_index=2,
+    )
+    _seed(
+        store,
+        cid="c-wide-mid",
+        text="book chapter",
+        embed_with=client,
+        subject_id=None,
+        note_date=_MID,
+        event_index=3,
+    )
+
+    window = DateRange(start=_MID, end=_MID)
+    sparse = store.sparse_candidates(
+        "fam-A", "book chapter", 10, date_range=window, subject_scope="subj-1"
+    )
+    dense = store.dense_candidates(
+        "fam-A",
+        client.embed(["book chapter"])[0],
+        client.model_name,
+        10,
+        date_range=window,
+        subject_scope="subj-1",
+    )
+    assert {h.chunk_id for h in sparse} == {"c-s1-mid"}
+    assert {h.chunk_id for h in dense} == {"c-s1-mid"}
+
+
+def test_subject_scope_never_widens_community_scope(store: PostgresDomainStore) -> None:
+    """The same subject_id in another community is not returned (I-7 outer
+    boundary; subject is subordinate to community)."""
+    client = MockEmbeddingClient()
+    _seed(
+        store,
+        cid="cA",
+        text="book chapter",
+        community_id="fam-A",
+        embed_with=client,
+        subject_id="subj-1",
+    )
+    _seed(
+        store,
+        cid="cB",
+        text="book chapter",
+        community_id="fam-B",
+        embed_with=client,
+        subject_id="subj-1",
+    )
+
+    sparse = store.sparse_candidates("fam-A", "book chapter", 10, subject_scope="subj-1")
+    dense = store.dense_candidates(
+        "fam-A", client.embed(["book chapter"])[0], client.model_name, 10, subject_scope="subj-1"
+    )
+    assert {h.chunk_id for h in sparse} == {"cA"}
+    assert {h.chunk_id for h in dense} == {"cA"}

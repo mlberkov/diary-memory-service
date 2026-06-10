@@ -63,6 +63,16 @@ def _chunk_in_date_range(chunk: EventChunk, date_range: DateRange | None) -> boo
     return not (date_range.end is not None and chunk.note_date > date_range.end)
 
 
+def _chunk_in_subject_scope(chunk: EventChunk, subject_scope: str | None) -> bool:
+    """Strict ``subject_id`` filter mirroring the Postgres predicate.
+
+    ``None`` imposes no constraint. A non-``None`` scope matches only
+    chunks whose ``subject_id`` equals it: community-wide chunks
+    (``subject_id is None``) are excluded (H-3, D-107).
+    """
+    return subject_scope is None or chunk.subject_id == subject_scope
+
+
 class MockDomainStore:
     """Process-local store for ``SourceMessage``, ``Note``, ``EventChunk``."""
 
@@ -170,6 +180,7 @@ class MockDomainStore:
         limit: int,
         *,
         date_range: DateRange | None = None,
+        subject_scope: str | None = None,
     ) -> list[EventChunk]:
         if not community_id:
             raise ValueError("community_id is required (Runtime invariant R-3)")
@@ -188,6 +199,8 @@ class MockDomainStore:
             if chunk.community_id != community_id:
                 continue
             if not _chunk_in_date_range(chunk, date_range):
+                continue
+            if not _chunk_in_subject_scope(chunk, subject_scope):
                 continue
             if chunk.embedding_status is not EmbeddingStatus.READY:
                 continue
@@ -208,6 +221,7 @@ class MockDomainStore:
         limit: int,
         *,
         date_range: DateRange | None = None,
+        subject_scope: str | None = None,
     ) -> list[EventChunk]:
         if not community_id:
             raise ValueError("community_id is required (Runtime invariant R-3)")
@@ -222,6 +236,8 @@ class MockDomainStore:
             if chunk.community_id != community_id:
                 continue
             if not _chunk_in_date_range(chunk, date_range):
+                continue
+            if not _chunk_in_subject_scope(chunk, subject_scope):
                 continue
             chunk_tokens = set(_tokenize(chunk.chunk_text))
             overlap = len(query_tokens & chunk_tokens)

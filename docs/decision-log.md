@@ -3466,3 +3466,36 @@ The diary's primary use case is capturing a dated entry that is frequently multi
 - Rewriting the historical D-005 entry; touching docs outside the I-5 contour.
 - Eval corpus / gold `event_index` reconciliation; retroactive re-chunking of historical notes.
 - The milestone Done-flip checkpoint and PR preparation (distinct acts after the milestone's packets land).
+
+## D-107 — H-3: optional subject retrieval filter (`Query.subject_scope`, strict match)
+
+### Context
+
+Packet H-3 of the subject-scoping milestone (`docs/SUBJECT-SCOPING-ROADMAP.md`, contract ratified by **D-097**). H-1 put a nullable, opaque `subject_id` on `Note` / `EventChunk` and the durable schema; H-2 made host→subject assignment a single adapter-owned seam (default single-subject mapping assigns `null` = community-wide). The seam was therefore write-only: nothing could retrieve by subject. D-097 ratified the shape of the missing piece — an **optional keyword-only filter mirroring the D-040 `date_range` seam**, `Query.subject_scope`, default `None` = no constraint, composing with `date_range` — but left one semantic open: how a non-`None` scope treats rows whose `subject_id` is `NULL`.
+
+### Decision
+
+- **Strict match; `NULL` excluded.** `subject_scope=X` returns only chunks with `subject_id = X`. Community-wide chunks (`subject_id IS NULL`) are **excluded** under any non-`None` scope and remain reachable only via `subject_scope=None` (the default, the unchanged no-filter shape). Under the current H-2 default mapping (every row `NULL`), a non-`None` scope therefore yields zero candidates and fails closed to the existing `NO_EVIDENCE` contour.
+- **Seam shape (mirrors D-040).** `SearchRepository.dense_candidates` / `sparse_candidates` each gain one keyword-only `subject_scope: str | None = None` parameter; `None` emits no predicate, so the existing retrieval shape, the RRF inputs, and every current call site are unchanged. The filter composes with `date_range` as a conjunction and never widens community scope (I-7 / R-3 — `subject_id` stays subordinate to `community_id`).
+- **Service threading + persistence.** `QueryService.answer` gains a per-call keyword-only `subject_scope` threaded to both legs and recorded on the persisted `Query` row via a new nullable `Query.subject_scope` field (default `None`). The `queries` table gains a nullable `subject_scope` column — the packet's "persisted on the Query row" requirement forces this one non-destructive schema touch (`0006.query-subject-scope` migration; existing rows read back as `NULL` = no constraint).
+- **Backends.** Postgres composes a conditional `AND ec.subject_id = %s` fragment on both leg queries (spliced after the D-040 date fragment); the mock backend applies the identical strict predicate for behavioral parity. SQLite updates both signatures for Protocol parity but still raises `NotImplementedError` (D-022 / D-025); its `queries` DDL gains the column with the same upgrade asymmetry H-1 established — SQLite has no migration runner, so pre-existing local database files do not gain the column (`CREATE TABLE IF NOT EXISTS` no-ops) and would fail on the widened `save_query` insert; Postgres is the canonical durable backend and upgrades via the migration.
+- **No inbound syntax.** There is no `/ask` subject syntax, no natural-language subject parsing, and no dispatcher/webhook change — `answer(message)` keeps passing no `subject_scope`, exactly as D-040 landed with no inbound date syntax. A future inbound-expression or scope-selection packet supplies the value here.
+
+### Why
+
+A retrieval filter is a pure narrowing predicate, and the repo's read posture is fail-closed (I-7 / R-3): a scoped read should never silently widen to rows the caller did not name. Strict match keeps `subject_scope=X` meaning exactly "chunks about subject X". The alternative — treating `NULL` as matching every scope ("community-wide is visible in every subject scope") — is a product policy about blended results that no caller needs yet (no inbound syntax exists); starting strict keeps that door open, because adding `NULL`-inclusion later only widens results, while removing it later would silently narrow them. Recording the requested scope on the `Query` row keeps requested-vs-effective retrieval inspectable via plain SQL next to the rest of the trace (R-5 provenance discipline).
+
+### Consequence
+
+- **`src/`:** `core/domain/models.py` (`Query.subject_scope`), `storage/search_repository.py` (both leg signatures), `storage/mock/store.py` (`_chunk_in_subject_scope` + both legs), `storage/postgres/store.py` (`_subject_scope_sql`, both legs, `save_query` / `get_query`), `storage/postgres/migrations/0006.query-subject-scope.sql` (new), `storage/sqlite/store.py` (DDL + `save_query` / `get_query` + signature-only leg parity), `services/query_service.py` (`answer` kwarg, threading, persisted + provisional `Query`).
+- **`tests/`:** strict-match / `NULL`-excluded / `None`-unchanged / composes-with-`date_range` / community-isolation blocks in `test_search_repository_mock.py` and (PG-gated) `test_search_repository_postgres.py`; service threading + persisted-row + fail-closed-`NO_EVIDENCE` cases in `test_query_service.py`; cross-store `subject_scope` round-trips in `test_storage_query_traces.py`; migration discovery + non-destructive `0006` upgrade in `test_postgres_migrations.py`.
+- **Docs:** this entry; `docs/execution-map.md` H-3 row; `docs/SUBJECT-SCOPING-ROADMAP.md` status / audit / packet-table rows. `RUNBOOK.md` / `TechSpec.md` §5 / `ARCHITECTURE.md` reconciliation stays with H-4 per the packet boundary.
+- **Assumption (implementation-level):** an empty-string `subject_scope` is treated as an ordinary opaque value (it matches nothing under strict equality); no validation or normalization is added — no caller can produce it today. If a future inbound-syntax packet can, it owns the normalization at its edge.
+
+### Out of scope (per packet boundaries)
+
+- Inbound `/ask` subject syntax, natural-language subject parsing, subject-selection UX or operator controls.
+- Any change to outer community-scoping semantics, the subject registry/entity stance, or A-15 visibility.
+- Index/DDL tuning beyond the forced nullable column (no index on `event_chunks.subject_id`).
+- A `NULL`-inclusive ("subject X plus community-wide") filter policy — a future decision packet if the product wants blended scopes.
+- H-4: the subject-scoping characterization suite, operator/product docs reconciliation, and milestone closure.
