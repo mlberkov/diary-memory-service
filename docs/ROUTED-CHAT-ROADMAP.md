@@ -10,10 +10,14 @@ provenance labeling — into an ordered set of bounded packets, and carries the
 as-built audit of the surfaces the milestone builds on.
 
 **Status: in progress — Packet RC-1 (D-108, docs-first contract +
-owner-override recording) landed; RC-2..RC-4 are planned.** No `src/` surface
-of this milestone exists yet: there is no `/chat` command, route enum,
-classifier, dispatcher extension, web adapter, or trace field until the code
-packets make each true (D-108, mirroring D-097's "no `src/` claim until H-1").
+owner-override recording) and Packet RC-2 (D-109, classifier + dispatcher +
+two routes) landed; RC-3..RC-4 are planned.** As of RC-2 the `/chat` command,
+the core route enum, the `gpt-4.1-mini` classifier contour, the routed
+dispatch at the service seam, and the `chat_route_decisions` trace table are
+real; `diary_plus_llm` / `diary_plus_web` exist only as enum members that
+fall back to `diary_lookup` — no enrichment, rewriting, web adapter, or
+knowledge-source port exists until RC-3 / RC-4 make each true (mirroring
+D-097's "no `src/` claim until H-1").
 
 The milestone is an **explicit owner override of the default pick-next
 sequencing**: the edit/delete milestone (**A-10**, TechSpec §12, Slice 2.5) is
@@ -143,7 +147,7 @@ contract. C = core, A = adapter, Cfg = config (D-026 classification).
 | Packet | Surfaces it touches | Class | Status |
 | --- | --- | --- | --- |
 | **RC-1 — docs-first contract + owner-override recording** | `docs/decision-log.md` (D-108); this roadmap doc (new); `docs/INVARIANTS.md` (I-9 appended provenance-class clause); `docs/product/PRD.md` (§6 medical bullet amended); `docs/product/TechSpec.md` §4 (`/chat` target line); `docs/GLOSSARY.md` (route mapping); `docs/assumptions.md` + `docs/assumption-audit.md` (A-10 re-queue annotations); `docs/execution-map.md`; `docs/todo.md`. Docs-only — no `src/` / `tests/` / schema change. | docs-only | **Landed (D-108).** |
-| **RC-2 — classifier + dispatcher + two routes** | Routed entry at the service seam: classifier provider adapter (`gpt-4.1-mini` pin + `Settings` knob + boot-gate clause, D-047/D-049 hardening), hand-rolled dispatch over the core route enum (`notes_lookup` / `notes_plus_model` / `notes_plus_knowledge` / `model_only`); `notes_lookup` (`diary_lookup`) delegates to the existing grounded ask unchanged; `model_only` (`general_llm`) adds direct LLM with explicit model labeling; Telegram `/chat` wiring; routing + classifier output captured in traces (additive migration); classification-failure → `diary_lookup` fallback. | C + A (+ Cfg, schema) | Planned. |
+| **RC-2 — classifier + dispatcher + two routes** | Routed entry at the service seam: classifier provider adapter (`gpt-4.1-mini` pin + `Settings` knob + boot-gate clause, D-047/D-049 hardening), hand-rolled dispatch over the core route enum (`notes_lookup` / `notes_plus_model` / `notes_plus_knowledge` / `model_only`); `notes_lookup` (`diary_lookup`) delegates to the existing grounded ask unchanged; `model_only` (`general_llm`) adds direct LLM with explicit model labeling; Telegram `/chat` wiring; routing + classifier output captured in traces (additive migration); classification-failure → `diary_lookup` fallback. | C + A (+ Cfg, schema) | **Landed (D-109).** |
 | **RC-3 — enrichment + rewriting + `diary_plus_llm`** | Enrichment retrieval (personal context first), rewrite-to-kwargs onto the landed `date_range` / `subject_scope` seam, `notes_plus_model` (`diary_plus_llm`) generation with mixed notes+model provenance labeling; honest-degradation wording on empty/weak diary evidence; regression coverage asserting R-3 / R-8 scoping inside enrichment retrievals. | C | Planned. |
 | **RC-4 — `diary_plus_web` + closure** | Narrow knowledge-source port + hardened Tavily adapter (R-7 / R-9); `notes_plus_knowledge` (`diary_plus_web`) full pipeline (enrich → rewrite → search → synthesize, citing both planes — notes citations + web URLs); escalation invariant verified on red-flag-style prompts (mock provider); consolidated regression suite (mock + PG-gated); `docs/RUNBOOK.md` operator section; doc reconciliation + milestone-closed flips (this doc, execution-map, todo). | C + A (+ Cfg) | Planned. |
 

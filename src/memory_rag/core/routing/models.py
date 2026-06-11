@@ -24,6 +24,7 @@ class RouteKind(StrEnum):
     HELP = "help"
     NOTE = "note"
     ASK = "ask"
+    CHAT = "chat"
     DRAFT = "draft"
     DRAFTS = "drafts"
     EXPORT = "export"

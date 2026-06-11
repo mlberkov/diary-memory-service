@@ -24,6 +24,7 @@ from fastapi import FastAPI
 
 from memory_rag import __version__
 from memory_rag.adapters.answers import build_chat_client
+from memory_rag.adapters.chat_routing import build_route_classifier
 from memory_rag.adapters.embeddings import build_embedding_client
 from memory_rag.adapters.telegram import register_telegram_webhook
 from memory_rag.config import Settings, get_settings
@@ -41,6 +42,7 @@ class BootHealthError(RuntimeError):
 _CANONICAL_DIMENSION = 3072
 _CANONICAL_OPENAI_MODEL = "text-embedding-3-large"
 _CANONICAL_OPENAI_CHAT_MODEL = "gpt-4.1"
+_CANONICAL_OPENAI_CLASSIFIER_MODEL = "gpt-4.1-mini"
 
 
 def _verify_embedding_contour(settings: Settings) -> None:
@@ -85,6 +87,24 @@ def _verify_chat_contour(settings: Settings) -> None:
         raise BootHealthError("chat client reported an empty model_name")
 
 
+def _verify_classifier_contour(settings: Settings) -> None:
+    if (
+        settings.classifier_backend == "openai"
+        and settings.classifier_model != _CANONICAL_OPENAI_CLASSIFIER_MODEL
+    ):
+        raise BootHealthError(
+            "classifier model mismatch: "
+            f"settings={settings.classifier_model!r} "
+            f"canonical={_CANONICAL_OPENAI_CLASSIFIER_MODEL!r}"
+        )
+    try:
+        client = build_route_classifier(settings)
+    except ValueError as exc:
+        raise BootHealthError(f"classifier client build failed: {exc}") from exc
+    if not client.model_name:
+        raise BootHealthError("classifier client reported an empty model_name")
+
+
 def _verify_pgvector(settings: Settings) -> None:
     if settings.storage_backend != "postgres":
         return
@@ -114,6 +134,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     _verify_embedding_contour(effective_settings)
     _verify_chat_contour(effective_settings)
+    _verify_classifier_contour(effective_settings)
     _verify_pgvector(effective_settings)
 
     app = FastAPI(
@@ -137,13 +158,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     log.info(
         "app.created env=%s version=%s embedding_backend=%s embedding_dim=%d "
-        "chat_backend=%s chat_model=%s",
+        "chat_backend=%s chat_model=%s classifier_backend=%s classifier_model=%s",
         effective_settings.app_env,
         __version__,
         effective_settings.embedding_backend,
         effective_settings.embedding_dimension,
         effective_settings.chat_backend,
         effective_settings.chat_model,
+        effective_settings.classifier_backend,
+        effective_settings.classifier_model,
     )
     return app
 

@@ -74,9 +74,15 @@ class Settings(BaseSettings):
     # ``chat_backend == "openai"`` and ``chat_model`` is not the canonical
     # value. The mock backend ignores it.
     chat_model: str = Field(default="")
+    classifier_backend: Literal["mock", "openai"] = Field(default="mock")
+    # Load-bearing for the openai backend (RC-2, D-108): boot aborts when
+    # ``classifier_backend == "openai"`` and ``classifier_model`` is not the
+    # canonical pin — a separate pin alongside (not a change to) the D-037
+    # ``chat_model`` gate. The mock backend ignores it.
+    classifier_model: str = Field(default="")
 
-    # Provider-resilience knobs (R-9), shared by both OpenAI adapters via their
-    # factories. ``provider_timeout_seconds`` is the per-attempt wall-clock
+    # Provider-resilience knobs (R-9), shared by every OpenAI adapter via its
+    # factory. ``provider_timeout_seconds`` is the per-attempt wall-clock
     # budget; ``provider_max_attempts`` is the total attempt count including the
     # first (1 disables retries). ``provider_backoff_base_seconds`` /
     # ``provider_backoff_cap_seconds`` size the exponential-with-jitter wait

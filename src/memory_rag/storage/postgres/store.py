@@ -45,6 +45,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from memory_rag.core.chat.models import ChatRoute, ChatRouteDecision
 from memory_rag.core.domain.models import (
     AnswerTrace,
     DateRange,
@@ -657,6 +658,59 @@ class PostgresDomainStore:
             model_name=row["model_name"],
             token_counts=token_counts,
             latency_ms=int(row["latency_ms"]),
+            created_at=row["created_at"],
+        )
+
+    def save_chat_route_decision(self, decision: ChatRouteDecision) -> None:
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO chat_route_decisions "
+                "(decision_id, community_id, question_text, requested_route, "
+                " effective_route, classifier_model_name, classifier_raw_output, "
+                " classifier_latency_ms, query_id, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    decision.decision_id,
+                    decision.community_id,
+                    decision.question_text,
+                    decision.requested_route.value if decision.requested_route else None,
+                    decision.effective_route.value,
+                    decision.classifier_model_name,
+                    decision.classifier_raw_output,
+                    decision.classifier_latency_ms,
+                    decision.query_id,
+                    decision.created_at,
+                ),
+            )
+            conn.commit()
+
+    def get_chat_route_decision(
+        self, decision_id: str, *, community_id: str
+    ) -> ChatRouteDecision | None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                "SELECT decision_id, community_id, question_text, requested_route, "
+                "       effective_route, classifier_model_name, classifier_raw_output, "
+                "       classifier_latency_ms, query_id, created_at "
+                "  FROM chat_route_decisions "
+                " WHERE decision_id = %s AND community_id = %s",
+                (decision_id, community_id),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return ChatRouteDecision(
+            decision_id=row["decision_id"],
+            community_id=row["community_id"],
+            question_text=row["question_text"],
+            requested_route=(ChatRoute(row["requested_route"]) if row["requested_route"] else None),
+            effective_route=ChatRoute(row["effective_route"]),
+            classifier_model_name=row["classifier_model_name"],
+            classifier_raw_output=row["classifier_raw_output"],
+            classifier_latency_ms=int(row["classifier_latency_ms"]),
+            query_id=row["query_id"],
             created_at=row["created_at"],
         )
 

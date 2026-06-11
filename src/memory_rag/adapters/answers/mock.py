@@ -17,6 +17,13 @@ attribute; reporting anything else would be dishonest provenance.
 ``token_counts`` is a deterministic character-count approximation, not a
 real tokenizer; it exists so ``AnswerTrace.token_counts`` has a stable
 non-empty shape on the success contour.
+
+RC-2 (D-108) adds an additive branch keyed on
+``prompt.prompt_version == MODEL_ONLY_PROMPT_VERSION``: model-only
+prompts get a deterministic ``{"answer_text": …}`` object that
+round-trips through
+:func:`~memory_rag.core.chat.model_prompt.parse_model_only_answer`. The
+v1 structured-answer behavior is byte-unchanged.
 """
 
 from __future__ import annotations
@@ -24,7 +31,10 @@ from __future__ import annotations
 import json
 
 from memory_rag.core.answers.client import ChatResponse
+from memory_rag.core.chat.model_prompt import MODEL_ONLY_PROMPT_VERSION
 from memory_rag.core.domain.answer_prompt import AnswerPrompt
+
+_MOCK_MODEL_ONLY_ANSWER = "Mock model-knowledge answer (no notes consulted)."
 
 
 class MockChatClient:
@@ -38,6 +48,8 @@ class MockChatClient:
         return self._model_name
 
     def complete(self, prompt: AnswerPrompt) -> ChatResponse:
+        if prompt.prompt_version == MODEL_ONLY_PROMPT_VERSION:
+            return self._complete_model_only(prompt)
         cited = prompt.cited_chunk_ids
         if cited:
             answer_text = f"Mock answer grounded in {len(cited)} diary chunk(s): " + ", ".join(
@@ -54,6 +66,21 @@ class MockChatClient:
             "uncertainty": uncertainty,
         }
         raw_text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        token_counts = {
+            "prompt": len(prompt.system_text) + len(prompt.user_text),
+            "completion": len(raw_text),
+        }
+        return ChatResponse(
+            raw_text=raw_text,
+            model_name=self._model_name,
+            token_counts=token_counts,
+            latency_ms=0,
+        )
+
+    def _complete_model_only(self, prompt: AnswerPrompt) -> ChatResponse:
+        raw_text = json.dumps(
+            {"answer_text": _MOCK_MODEL_ONLY_ANSWER}, ensure_ascii=False, sort_keys=True
+        )
         token_counts = {
             "prompt": len(prompt.system_text) + len(prompt.user_text),
             "completion": len(raw_text),

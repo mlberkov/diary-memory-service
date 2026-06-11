@@ -15,6 +15,7 @@ from memory_rag.core.routing import RouteKind
         ("/help", RouteKind.HELP),
         ("/note", RouteKind.NOTE),
         ("/ask", RouteKind.ASK),
+        ("/chat", RouteKind.CHAT),
         ("/drafts", RouteKind.DRAFTS),
         ("/sources", RouteKind.SOURCES),
     ],
@@ -61,6 +62,18 @@ def test_parse_command_strips_bot_username_suffix() -> None:
     route, payload = parse_command("/ask@DiaryBot what did we do?")
     assert route is RouteKind.ASK
     assert payload == "what did we do?"
+
+
+def test_parse_command_chat_returns_question_payload() -> None:
+    route, payload = parse_command("/chat why does he skip the letter r?")
+    assert route is RouteKind.CHAT
+    assert payload == "why does he skip the letter r?"
+
+
+def test_parse_command_chat_strips_bot_username_suffix() -> None:
+    route, payload = parse_command("/chat@DiaryBot what is phonemic awareness")
+    assert route is RouteKind.CHAT
+    assert payload == "what is phonemic awareness"
 
 
 def test_parse_command_handles_newline_after_command() -> None:

@@ -33,6 +33,7 @@ import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
+from memory_rag.core.chat.models import ChatRoute, ChatRouteDecision
 from memory_rag.core.domain.models import (
     AnswerTrace,
     DateRange,
@@ -164,6 +165,28 @@ CREATE TABLE IF NOT EXISTS answer_traces (
 );
 
 CREATE INDEX IF NOT EXISTS idx_answer_traces_query_id ON answer_traces(query_id);
+
+CREATE TABLE IF NOT EXISTS chat_route_decisions (
+    decision_id           TEXT PRIMARY KEY,
+    community_id          TEXT NOT NULL,
+    question_text         TEXT NOT NULL,
+    requested_route       TEXT
+        CHECK (requested_route IS NULL OR requested_route IN (
+            'notes_lookup','notes_plus_model','notes_plus_knowledge','model_only'
+        )),
+    effective_route       TEXT NOT NULL
+        CHECK (effective_route IN (
+            'notes_lookup','notes_plus_model','notes_plus_knowledge','model_only'
+        )),
+    classifier_model_name TEXT NOT NULL,
+    classifier_raw_output TEXT NOT NULL,
+    classifier_latency_ms INTEGER NOT NULL CHECK (classifier_latency_ms >= 0),
+    query_id              TEXT REFERENCES queries(query_id),
+    created_at            TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_route_decisions_community_id
+    ON chat_route_decisions(community_id);
 
 CREATE TABLE IF NOT EXISTS indexing_dead_letters (
     dead_letter_id    TEXT PRIMARY KEY,
@@ -660,6 +683,58 @@ class SqliteDomainStore:
             model_name=row["model_name"],
             token_counts=json.loads(row["token_counts"]),
             latency_ms=int(row["latency_ms"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
+
+    def save_chat_route_decision(self, decision: ChatRouteDecision) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO chat_route_decisions "
+                "(decision_id, community_id, question_text, requested_route, "
+                " effective_route, classifier_model_name, classifier_raw_output, "
+                " classifier_latency_ms, query_id, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    decision.decision_id,
+                    decision.community_id,
+                    decision.question_text,
+                    decision.requested_route.value if decision.requested_route else None,
+                    decision.effective_route.value,
+                    decision.classifier_model_name,
+                    decision.classifier_raw_output,
+                    decision.classifier_latency_ms,
+                    decision.query_id,
+                    decision.created_at.isoformat(),
+                ),
+            )
+            conn.commit()
+
+    def get_chat_route_decision(
+        self, decision_id: str, *, community_id: str
+    ) -> ChatRouteDecision | None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT decision_id, community_id, question_text, requested_route, "
+                "       effective_route, classifier_model_name, classifier_raw_output, "
+                "       classifier_latency_ms, query_id, created_at "
+                "  FROM chat_route_decisions "
+                " WHERE decision_id = ? AND community_id = ?",
+                (decision_id, community_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return ChatRouteDecision(
+            decision_id=row["decision_id"],
+            community_id=row["community_id"],
+            question_text=row["question_text"],
+            requested_route=(ChatRoute(row["requested_route"]) if row["requested_route"] else None),
+            effective_route=ChatRoute(row["effective_route"]),
+            classifier_model_name=row["classifier_model_name"],
+            classifier_raw_output=row["classifier_raw_output"],
+            classifier_latency_ms=int(row["classifier_latency_ms"]),
+            query_id=row["query_id"],
             created_at=datetime.fromisoformat(row["created_at"]),
         )
 

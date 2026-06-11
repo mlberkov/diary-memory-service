@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from memory_rag.core.chat.models import ChatRouteDecision
 from memory_rag.core.domain.models import (
     AnswerTrace,
     EventChunk,
@@ -210,6 +211,27 @@ class DomainRepository(Protocol):
         different community reads as ``None``. ``community_id`` is
         keyword-only to prevent a silent positional swap between two
         ``str`` identifiers (D-088).
+        """
+
+    def save_chat_route_decision(self, decision: ChatRouteDecision) -> None:
+        """Persist one routing-decision row per ``/chat`` call (RC-2, D-108).
+
+        The caller is ``RoutedChatService.chat`` on every contour — the
+        decision row is the R-6 requested-vs-effective record for the
+        routed surface. Append-only: backends never update or delete it.
+        """
+
+    def get_chat_route_decision(
+        self, decision_id: str, *, community_id: str
+    ) -> ChatRouteDecision | None:
+        """Fetch a routing decision by id within a community, or ``None`` (RC-2).
+
+        Community scoping is mandatory and fail-closed (I-7, R-3): a
+        null/empty ``community_id`` raises; a decision owned by a
+        different community reads as ``None`` — the row carries its own
+        ``community_id`` column, so no parent join is needed.
+        ``community_id`` is keyword-only to prevent a silent positional
+        swap between two ``str`` identifiers (D-088).
         """
 
     def save_indexing_dead_letter(self, record: IndexingDeadLetter) -> None:

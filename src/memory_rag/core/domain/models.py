@@ -234,7 +234,10 @@ class Query:
 
     ``query_text`` is the normalized payload (whitespace stripped, trailing
     ``?.!,;:`` removed). ``model_name`` is the embedding client's
-    ``model_name`` at call time. ``fallback`` mirrors the ``AnswerResult``
+    ``model_name`` at call time on retrieval-backed rows; rows written by
+    the routed ``model_only`` path (RC-2, D-108) carry the generation chat
+    client's ``model_name`` since no embedding call ran. ``fallback``
+    mirrors the ``AnswerResult``
     outcome — ``NO_EVIDENCE`` when the query was empty after normalization
     or when both retrieval legs returned no chunks.
 
