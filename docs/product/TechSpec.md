@@ -74,6 +74,7 @@ Inbound messages enter one of three lifecycle states — **draft**, **note**, or
 - `/ask <text>` → query / retrieval.
 - `/drafts [N]` → recall the most recent full raw drafts back into chat (D-030). Action, not a lifecycle state.
 - `/export <json|txt>` → raw export (D-029).
+- `/chat <text>` → routed conversational question (D-108): classified into one of four routes and answered under per-segment provenance labels. Decided docs-first; lands with RC-2 (`docs/ROUTED-CHAT-ROADMAP.md`) — not yet exposed by the adapter.
 - **No command** → defaults to **draft**. The raw text is persisted as a `SourceMessage` with `detected_route='draft'`. No path silently discards an inbound message. Drafts are not note-candidates and have no promotion path (D-030).
 
 ### Current command surface

@@ -30,6 +30,19 @@ The first implemented use case is a family/child diary in Telegram. Its use-case
 
 Use-case nouns (`family`, `child`, `parent`) stay in use-case-facing prose. They are not the core's definition — see D-026 and `docs/product/PRD.md` §1.
 
+## Routed-chat route names (D-108)
+
+The routed-chat milestone (D-108; `docs/ROUTED-CHAT-ROADMAP.md`) fixes its four routes in two registers: the owner-spec **product-register labels** (use-case-facing prose, product docs) and the **canonical core identifiers** the code packets are born with (D-026 / D-041 — `diary` is use-case vocabulary and never a core identifier):
+
+| Product-register route | Core identifier |
+| --- | --- |
+| `diary_lookup` | `notes_lookup` |
+| `diary_plus_llm` | `notes_plus_model` |
+| `diary_plus_web` | `notes_plus_knowledge` |
+| `general_llm` | `model_only` |
+
+`notes_plus_knowledge` is named for the knowledge-source seam, not welded to "web" — a curated domain-knowledge provider is expected later behind the same port (D-108). No core route identifier exists in code until RC-2 lands; naming the mapping here renames nothing.
+
 ## Identifiers
 
 The D-042 renaming roadmap (`docs/RENAMING-ROADMAP.md`) renamed the diary-shaped internal identifiers to the canonical vocabulary. The legacy names below are historical; code, schema, and tests now use the live names:

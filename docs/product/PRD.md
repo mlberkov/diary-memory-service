@@ -129,7 +129,7 @@ The Telegram command surface is `/note`, `/ask`, `/drafts`, `/export` (D-031). T
 ### Out of scope for MVP
 - voice/photo/video ingestion,
 - automatic developmental coaching,
-- medical recommendations,
+- medical diagnosis or symptom interpretation (amended by D-108 — routed-chat answers may include general developmental information and activity suggestions in response to a user's question, must never offer a diagnosis or interpret symptoms, and must recommend consulting a specialist whenever the question or the retrieved diary context suggests a potential developmental/medical red flag; this escalation rule is a system-prompt invariant of the `diary_plus_llm` / `diary_plus_web` routes and does not relax the adjacent coaching/proactive exclusions),
 - graph updates into full TheyGrow knowledge graphs,
 - multi-agent orchestration,
 - rich web UI,

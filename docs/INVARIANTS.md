@@ -41,6 +41,8 @@ Answer-side trace persistence is enforced on every `/ask` reply as of Slice 4.3b
 
 Ratified as a named product guardrail in D-099: when `cited_chunk_ids` is empty, `/ask` returns an explicit technical no-evidence response and never surfaces free-form `answer_text` (cited-empty reading only; semantic-groundedness of present citations is a separate Phase 7 concern). This is a cross-reference to existing behavior — no new invariant, no semantic change to I-9.
 
+Generalized for routed answers in D-108 (routed-chat milestone): every answer segment carries an explicit provenance class — **notes** (cited through the existing cited-only evidence surface; this clause changes nothing for the notes-grounded class, whose contract above stands verbatim), **web** (cited URLs), or **model** (explicitly labeled as model knowledge). No segment may present model- or web-sourced content as if it came from the diary. Ratified docs-first; enforced in code by the routed-chat packets RC-2..RC-4 (`docs/ROUTED-CHAT-ROADMAP.md`) — until then the only live answer surface is the notes-grounded `/ask` flow above.
+
 ## I-10. Optional AI is optional
 Query rewriting, semantic expansion, reranking, and answer-style modes are feature-flagged. The base ingestion → retrieval → answer flow must work end-to-end with all enhancements disabled.
 
