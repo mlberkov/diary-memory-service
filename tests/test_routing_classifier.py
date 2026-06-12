@@ -103,3 +103,19 @@ def test_payload_preserves_original_text_for_dated_draft() -> None:
     text = "2026-05-10\nLearned a new recipe"
     result = classify_plain_text(text)
     assert result.payload == text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "what is phonemic awareness",
+        "why doesn't he pronounce r?",
+        "chat with me about books",
+        "2026-05-10\nLearned a new recipe",
+    ],
+)
+def test_plain_text_never_routes_to_chat(text: str) -> None:
+    """RC-2 (D-108): routed chat is command-only — the heuristic
+    plain-text classifier must never yield ``RouteKind.CHAT``."""
+    result = classify_plain_text(text)
+    assert result.route is not RouteKind.CHAT

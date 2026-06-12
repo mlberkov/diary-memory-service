@@ -165,9 +165,11 @@ def test_draft_reply_wording_and_sibling_literals_are_pinned() -> None:
     for literal in (first.reply_text, _REPLY_START, _REPLY_HELP, _REPLY_UNKNOWN, _REPLY_CLARIFY):
         assert removed_hint not in literal
 
-    # Sibling reply literals — byte-equality pins (must not change under this milestone).
+    # Sibling reply literals — byte-equality pins. The /help inventory gained
+    # the /chat entry as RC-2's one deliberate literal change (D-108); the
+    # other siblings must stay byte-identical.
     assert _REPLY_HELP == (
-        "Commands: /start, /help, /note, /ask, /sources, /drafts, /export. Plain text "
+        "Commands: /start, /help, /note, /ask, /chat, /sources, /drafts, /export. Plain text "
         "without a command is stored as a draft."
     )
     assert _REPLY_UNKNOWN == (

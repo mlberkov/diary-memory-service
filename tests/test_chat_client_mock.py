@@ -12,6 +12,15 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 
 from memory_rag.adapters.answers import MockChatClient
+from memory_rag.core.chat import (
+    KnowledgeExcerpt,
+    build_model_only_prompt,
+    build_notes_plus_knowledge_prompt,
+    build_notes_plus_model_prompt,
+    parse_model_only_answer,
+    parse_notes_plus_knowledge_answer,
+    parse_notes_plus_model_answer,
+)
 from memory_rag.core.domain import build_answer_prompt, parse_structured_answer
 from memory_rag.core.domain.models import AnswerContext, EventChunk
 from memory_rag.core.embeddings import EmbeddingStatus
@@ -96,3 +105,152 @@ def test_mock_client_no_evidence_path_round_trips() -> None:
     structured = parse_structured_answer(response.raw_text, context=context)
     assert structured.uncertainty == "no_evidence"
     assert structured.cited_chunk_ids == ()
+
+
+# ---------------------------------------------------------------------------
+# Model-only branch (RC-2, D-108) — additive, keyed on prompt_version;
+# the v1 structured-answer behavior above is byte-unchanged.
+# ---------------------------------------------------------------------------
+
+
+def test_mock_client_model_only_branch_round_trips() -> None:
+    client = MockChatClient()
+    prompt = build_model_only_prompt("what is phonemic awareness")
+    response = client.complete(prompt)
+    assert parse_model_only_answer(response.raw_text) == (
+        "Mock model-knowledge answer (no notes consulted)."
+    )
+    assert response.model_name == "mock"
+    assert response.latency_ms == 0
+    assert response.token_counts.keys() == {"prompt", "completion"}
+
+
+def test_mock_client_model_only_branch_is_deterministic() -> None:
+    client = MockChatClient()
+    prompt = build_model_only_prompt("q")
+    assert client.complete(prompt) == client.complete(prompt)
+
+
+def test_mock_client_v1_branch_unchanged_by_model_only_addition() -> None:
+    """An empty-citation v1 prompt still takes the structured-answer
+    branch — the model-only branch is keyed on prompt_version, not on
+    citation emptiness."""
+    client = MockChatClient()
+    context = _make_context()
+    prompt = build_answer_prompt(context)
+    assert prompt.prompt_version == "v1"
+    response = client.complete(prompt)
+    structured = parse_structured_answer(response.raw_text, context=context)
+    assert structured.uncertainty == "no_evidence"
+
+
+# ---------------------------------------------------------------------------
+# Notes-plus-model branch (RC-3, D-108) — additive, keyed on prompt_version;
+# the earlier branches are byte-unchanged.
+# ---------------------------------------------------------------------------
+
+
+def test_mock_client_notes_plus_model_branch_round_trips_with_chunks() -> None:
+    client = MockChatClient()
+    context = _make_context(_make_chunk("c1", "walked the dog"))
+    prompt = build_notes_plus_model_prompt(context)
+    response = client.complete(prompt)
+    parsed = parse_notes_plus_model_answer(response.raw_text, context=context)
+    assert parsed.notes_uncertainty == "confident"
+    assert parsed.cited_chunk_ids == ("c1",)
+    assert "c1" in parsed.notes_text
+    assert parsed.model_text == "Mock general-knowledge segment."
+    assert response.model_name == "mock"
+    assert response.latency_ms == 0
+
+
+def test_mock_client_notes_plus_model_branch_round_trips_empty_plane() -> None:
+    client = MockChatClient()
+    context = _make_context()
+    prompt = build_notes_plus_model_prompt(context)
+    response = client.complete(prompt)
+    parsed = parse_notes_plus_model_answer(response.raw_text, context=context)
+    assert parsed.notes_uncertainty == "no_evidence"
+    assert parsed.notes_text == ""
+    assert parsed.cited_chunk_ids == ()
+    assert parsed.model_text == "Mock general-knowledge segment."
+
+
+def test_mock_client_notes_plus_model_branch_is_deterministic() -> None:
+    client = MockChatClient()
+    prompt = build_notes_plus_model_prompt(_make_context(_make_chunk("c1", "walked the dog")))
+    assert client.complete(prompt) == client.complete(prompt)
+
+
+def test_mock_client_earlier_branches_unchanged_by_notes_plus_model_addition() -> None:
+    client = MockChatClient()
+    context = _make_context(_make_chunk("c1", "walked the dog"))
+    v1 = client.complete(build_answer_prompt(context))
+    assert parse_structured_answer(v1.raw_text, context=context).uncertainty == "confident"
+    model_only = client.complete(build_model_only_prompt("q"))
+    assert parse_model_only_answer(model_only.raw_text) == (
+        "Mock model-knowledge answer (no notes consulted)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Notes-plus-knowledge branch (RC-4, D-108) — additive, keyed on
+# prompt_version; the earlier branches are byte-unchanged.
+# ---------------------------------------------------------------------------
+
+
+_EXCERPTS = (KnowledgeExcerpt(ref="https://example.org/a", title="A", text="alpha facts"),)
+
+
+def test_mock_client_notes_plus_knowledge_branch_round_trips_with_both_planes() -> None:
+    client = MockChatClient()
+    context = _make_context(_make_chunk("c1", "walked the dog"))
+    prompt = build_notes_plus_knowledge_prompt(context, _EXCERPTS)
+    response = client.complete(prompt)
+    parsed = parse_notes_plus_knowledge_answer(
+        response.raw_text, context=context, knowledge_refs=prompt.knowledge_refs
+    )
+    assert parsed.notes_uncertainty == "confident"
+    assert parsed.cited_chunk_ids == ("c1",)
+    assert parsed.cited_knowledge_refs == ("https://example.org/a",)
+    assert "https://example.org/a" in parsed.knowledge_text
+    assert parsed.model_text == "Mock general-knowledge segment."
+    assert response.model_name == "mock"
+    assert response.latency_ms == 0
+
+
+def test_mock_client_notes_plus_knowledge_branch_round_trips_empty_planes() -> None:
+    client = MockChatClient()
+    context = _make_context()
+    prompt = build_notes_plus_knowledge_prompt(context, ())
+    response = client.complete(prompt)
+    parsed = parse_notes_plus_knowledge_answer(
+        response.raw_text, context=context, knowledge_refs=()
+    )
+    assert parsed.notes_uncertainty == "no_evidence"
+    assert parsed.notes_text == ""
+    assert parsed.knowledge_text == ""
+    assert parsed.cited_knowledge_refs == ()
+    assert parsed.model_text == "Mock general-knowledge segment."
+
+
+def test_mock_client_notes_plus_knowledge_branch_is_deterministic() -> None:
+    client = MockChatClient()
+    prompt = build_notes_plus_knowledge_prompt(
+        _make_context(_make_chunk("c1", "walked the dog")), _EXCERPTS
+    )
+    assert client.complete(prompt) == client.complete(prompt)
+
+
+def test_mock_client_earlier_branches_unchanged_by_notes_plus_knowledge_addition() -> None:
+    client = MockChatClient()
+    context = _make_context(_make_chunk("c1", "walked the dog"))
+    v1 = client.complete(build_answer_prompt(context))
+    assert parse_structured_answer(v1.raw_text, context=context).uncertainty == "confident"
+    model_only = client.complete(build_model_only_prompt("q"))
+    assert parse_model_only_answer(model_only.raw_text) == (
+        "Mock model-knowledge answer (no notes consulted)."
+    )
+    notes_plus_model = client.complete(build_notes_plus_model_prompt(context))
+    parsed = parse_notes_plus_model_answer(notes_plus_model.raw_text, context=context)
+    assert parsed.model_text == "Mock general-knowledge segment."

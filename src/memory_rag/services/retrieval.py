@@ -19,10 +19,16 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
+from uuid import uuid4
 
-from memory_rag.core.domain.models import EventChunk
+from memory_rag.core.domain.models import EventChunk, RetrievalHit, RetrievalLeg
 
 DEFAULT_RRF_K = 60
+
+# Sparse-leg rows carry the FTS dictionary name instead of an embedding
+# model so leg provenance stays honest (Slice 3.5).
+SPARSE_MODEL_NAME = "simple"
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,4 +76,89 @@ def reciprocal_rank_fusion(
     ]
 
 
-__all__ = ["DEFAULT_RRF_K", "FusedHit", "reciprocal_rank_fusion"]
+@dataclass(frozen=True, slots=True)
+class RetrievedCandidates:
+    """One hybrid-retrieval pass's raw outcome (RC-3).
+
+    Carries both per-leg candidate lists plus the RRF-merged top-k so a
+    caller can persist the full ``RetrievalHit`` trace (R-5) and build
+    an answer context without re-running the legs.
+    """
+
+    dense: list[EventChunk]
+    sparse: list[EventChunk]
+    merged: list[FusedHit]
+    embedding_model_name: str
+
+
+def rrf_leg_score(rank: int, k: int = DEFAULT_RRF_K) -> float:
+    """RRF contribution at a 1-based ``rank``."""
+    return 1.0 / (k + rank)
+
+
+def build_retrieval_hits(
+    *,
+    query_id: str,
+    model_name: str,
+    created_at: datetime,
+    candidates: RetrievedCandidates,
+) -> list[RetrievalHit]:
+    """Build the per-leg + merged ``RetrievalHit`` rows for one query (Slice 3.5).
+
+    Per-leg rows are written for every candidate (dense rows carry the
+    embedding model name, sparse rows the FTS dictionary name) plus
+    merged rows for every chunk that survived RRF, so an operator can
+    inspect what each leg saw and what survived via plain SQL.
+    """
+    hits: list[RetrievalHit] = []
+    for rank, chunk in enumerate(candidates.dense, start=1):
+        hits.append(
+            RetrievalHit(
+                retrieval_hit_id=str(uuid4()),
+                query_id=query_id,
+                chunk_id=chunk.chunk_id,
+                leg=RetrievalLeg.DENSE,
+                rank=rank,
+                score=rrf_leg_score(rank),
+                model_name=model_name,
+                created_at=created_at,
+            )
+        )
+    for rank, chunk in enumerate(candidates.sparse, start=1):
+        hits.append(
+            RetrievalHit(
+                retrieval_hit_id=str(uuid4()),
+                query_id=query_id,
+                chunk_id=chunk.chunk_id,
+                leg=RetrievalLeg.SPARSE,
+                rank=rank,
+                score=rrf_leg_score(rank),
+                model_name=SPARSE_MODEL_NAME,
+                created_at=created_at,
+            )
+        )
+    for rank, fused in enumerate(candidates.merged, start=1):
+        hits.append(
+            RetrievalHit(
+                retrieval_hit_id=str(uuid4()),
+                query_id=query_id,
+                chunk_id=fused.chunk.chunk_id,
+                leg=RetrievalLeg.MERGED,
+                rank=rank,
+                score=fused.score,
+                model_name=model_name,
+                created_at=created_at,
+            )
+        )
+    return hits
+
+
+__all__ = [
+    "DEFAULT_RRF_K",
+    "SPARSE_MODEL_NAME",
+    "FusedHit",
+    "RetrievedCandidates",
+    "build_retrieval_hits",
+    "reciprocal_rank_fusion",
+    "rrf_leg_score",
+]

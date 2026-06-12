@@ -31,6 +31,9 @@ DOMAIN_TABLES = (
     "queries",
     "retrieval_hits",
     "answer_traces",
+    "chat_route_decisions",
+    "chat_query_rewrites",
+    "chat_knowledge_searches",
     "indexing_dead_letters",
     "author_display_inputs",
 )
@@ -50,11 +53,20 @@ SUBJECT_ID_MIGRATION_ID = "0005.subject-id-columns"
 #: Id of the H-3 / D-107 query-subject-scope migration (filename stem).
 QUERY_SUBJECT_SCOPE_MIGRATION_ID = "0006.query-subject-scope"
 
+#: Id of the RC-2 / D-108 chat-route-decisions migration (filename stem).
+CHAT_ROUTE_DECISIONS_MIGRATION_ID = "0007.chat-route-decisions"
+
+#: Id of the RC-3 / D-108 chat-query-rewrites migration (filename stem).
+CHAT_QUERY_REWRITES_MIGRATION_ID = "0008.chat-query-rewrites"
+
+#: Id of the RC-4 / D-108 chat-knowledge-searches migration (filename stem).
+CHAT_KNOWLEDGE_SEARCHES_MIGRATION_ID = "0009.chat-knowledge-searches"
+
 #: Index added by the OP-1.2 upgrade migration on ``event_chunks``.
 EMBEDDING_STATUS_INDEX = "idx_event_chunks_embedding_status"
 
-#: Number of versioned migrations in the history (baseline + five upgrades).
-MIGRATION_COUNT = 6
+#: Number of versioned migrations in the history (baseline + eight upgrades).
+MIGRATION_COUNT = 9
 
 PG_DSN = os.environ.get("MEMORY_RAG_PG_TEST_DSN")
 
@@ -75,7 +87,7 @@ if PG_DSN is not None:
 
 
 def test_migrations_discoverable() -> None:
-    """The migration set is the baseline plus the five upgrades, in order."""
+    """The migration set is the baseline plus the eight upgrades, in order."""
     assert migration_ids() == [
         BASELINE_MIGRATION_ID,
         UPGRADE_MIGRATION_ID,
@@ -83,6 +95,9 @@ def test_migrations_discoverable() -> None:
         AUTHOR_DISPLAY_MIGRATION_ID,
         SUBJECT_ID_MIGRATION_ID,
         QUERY_SUBJECT_SCOPE_MIGRATION_ID,
+        CHAT_ROUTE_DECISIONS_MIGRATION_ID,
+        CHAT_QUERY_REWRITES_MIGRATION_ID,
+        CHAT_KNOWLEDGE_SEARCHES_MIGRATION_ID,
     ]
 
 
@@ -97,6 +112,9 @@ def test_migrations_dir_is_packaged() -> None:
         "0004.author-display-inputs.sql",
         "0005.subject-id-columns.sql",
         "0006.query-subject-scope.sql",
+        "0007.chat-route-decisions.sql",
+        "0008.chat-query-rewrites.sql",
+        "0009.chat-knowledge-searches.sql",
     ]
 
 
@@ -245,35 +263,115 @@ def _apply_through_0002(dsn: str) -> None:
 
 
 def _apply_through_0004(dsn: str) -> None:
-    """Apply 0001..0004, leaving the 0005 and 0006 tail pending.
+    """Apply 0001..0004, leaving the 0005..0009 tail pending.
 
     Stages a genuine prior schema version (no ``subject_id`` columns, no
-    ``queries.subject_scope``) so a later ``apply_migrations`` runs the
-    pending tail as a real non-destructive upgrade over populated data."""
+    ``queries.subject_scope``, no ``chat_route_decisions``, no
+    ``chat_query_rewrites``, no ``chat_knowledge_searches``) so a later
+    ``apply_migrations`` runs the pending tail as a real non-destructive
+    upgrade over populated data."""
     from yoyo import get_backend, read_migrations
 
     backend = get_backend(mr._yoyo_uri(dsn))
     with migrations_dir() as path:
         migrations = read_migrations(str(path))
         prior = migrations.filter(
-            lambda m: m.id not in {SUBJECT_ID_MIGRATION_ID, QUERY_SUBJECT_SCOPE_MIGRATION_ID}
+            lambda m: m.id
+            not in {
+                SUBJECT_ID_MIGRATION_ID,
+                QUERY_SUBJECT_SCOPE_MIGRATION_ID,
+                CHAT_ROUTE_DECISIONS_MIGRATION_ID,
+                CHAT_QUERY_REWRITES_MIGRATION_ID,
+                CHAT_KNOWLEDGE_SEARCHES_MIGRATION_ID,
+            }
         )
         with backend.lock():
             backend.apply_migrations(backend.to_apply(prior))
 
 
 def _apply_through_0005(dsn: str) -> None:
-    """Apply every migration except the 0006 tail, leaving it pending.
+    """Apply 0001..0005, leaving the 0006..0009 tail pending.
 
     Stages a genuine prior schema version (no ``queries.subject_scope``
-    column) so a later ``apply_migrations`` runs the 0006 query-subject-scope
-    migration as a real non-destructive upgrade over populated data."""
+    column, no ``chat_route_decisions``, no ``chat_query_rewrites``, no
+    ``chat_knowledge_searches``) so a later ``apply_migrations`` runs
+    the pending tail as a real non-destructive upgrade over populated
+    data."""
     from yoyo import get_backend, read_migrations
 
     backend = get_backend(mr._yoyo_uri(dsn))
     with migrations_dir() as path:
         migrations = read_migrations(str(path))
-        prior = migrations.filter(lambda m: m.id != QUERY_SUBJECT_SCOPE_MIGRATION_ID)
+        prior = migrations.filter(
+            lambda m: m.id
+            not in {
+                QUERY_SUBJECT_SCOPE_MIGRATION_ID,
+                CHAT_ROUTE_DECISIONS_MIGRATION_ID,
+                CHAT_QUERY_REWRITES_MIGRATION_ID,
+                CHAT_KNOWLEDGE_SEARCHES_MIGRATION_ID,
+            }
+        )
+        with backend.lock():
+            backend.apply_migrations(backend.to_apply(prior))
+
+
+def _apply_through_0006(dsn: str) -> None:
+    """Apply 0001..0006, leaving the 0007..0009 tail pending.
+
+    Stages a genuine prior schema version (no ``chat_route_decisions``
+    table, no ``chat_query_rewrites``, no ``chat_knowledge_searches``)
+    so a later ``apply_migrations`` runs the pending tail as a real
+    non-destructive upgrade over populated data."""
+    from yoyo import get_backend, read_migrations
+
+    backend = get_backend(mr._yoyo_uri(dsn))
+    with migrations_dir() as path:
+        migrations = read_migrations(str(path))
+        prior = migrations.filter(
+            lambda m: m.id
+            not in {
+                CHAT_ROUTE_DECISIONS_MIGRATION_ID,
+                CHAT_QUERY_REWRITES_MIGRATION_ID,
+                CHAT_KNOWLEDGE_SEARCHES_MIGRATION_ID,
+            }
+        )
+        with backend.lock():
+            backend.apply_migrations(backend.to_apply(prior))
+
+
+def _apply_through_0007(dsn: str) -> None:
+    """Apply 0001..0007, leaving the 0008..0009 tail pending.
+
+    Stages a genuine prior schema version (no ``chat_query_rewrites``
+    table, no ``chat_knowledge_searches``) so a later
+    ``apply_migrations`` runs the pending tail as a real non-destructive
+    upgrade over populated data."""
+    from yoyo import get_backend, read_migrations
+
+    backend = get_backend(mr._yoyo_uri(dsn))
+    with migrations_dir() as path:
+        migrations = read_migrations(str(path))
+        prior = migrations.filter(
+            lambda m: m.id
+            not in {CHAT_QUERY_REWRITES_MIGRATION_ID, CHAT_KNOWLEDGE_SEARCHES_MIGRATION_ID}
+        )
+        with backend.lock():
+            backend.apply_migrations(backend.to_apply(prior))
+
+
+def _apply_through_0008(dsn: str) -> None:
+    """Apply every migration except the 0009 tail, leaving it pending.
+
+    Stages a genuine prior schema version (no ``chat_knowledge_searches``
+    table) so a later ``apply_migrations`` runs the 0009
+    chat-knowledge-searches migration as a real non-destructive upgrade
+    over populated data."""
+    from yoyo import get_backend, read_migrations
+
+    backend = get_backend(mr._yoyo_uri(dsn))
+    with migrations_dir() as path:
+        migrations = read_migrations(str(path))
+        prior = migrations.filter(lambda m: m.id != CHAT_KNOWLEDGE_SEARCHES_MIGRATION_ID)
         with backend.lock():
             backend.apply_migrations(backend.to_apply(prior))
 
@@ -333,6 +431,30 @@ def _insert_query_row(dsn: str, query_id: str) -> None:
                 "what happened",
                 "mock-embedding",
                 "none",
+                datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC),
+            ),
+        )
+
+
+def _insert_decision_row(dsn: str, decision_id: str) -> None:
+    """Insert a chat_route_decisions row using the 0007 column list."""
+    with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO chat_route_decisions "
+            "(decision_id, community_id, question_text, requested_route, "
+            " effective_route, classifier_model_name, classifier_raw_output, "
+            " classifier_latency_ms, query_id, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (
+                decision_id,
+                "fam-A",
+                "what happened",
+                "notes_lookup",
+                "notes_lookup",
+                "mock",
+                '{"route": "notes_lookup"}',
+                0,
+                None,
                 datetime(2026, 5, 17, 12, 0, 0, tzinfo=UTC),
             ),
         )
@@ -426,9 +548,9 @@ def test_upgrade_0005_preserves_data(clean_db: str) -> None:
     _insert_chunk_row(clean_db, "chunk-1", "note-1", "src-1")
     assert not _column_exists(clean_db, "notes", "subject_id")
     assert not _column_exists(clean_db, "event_chunks", "subject_id")
-    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 2
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 5
 
-    # The real upgrade: the pending tail (0005, then 0006) applies on top
+    # The real upgrade: the pending tail (0005..0009) applies on top
     # of the populated database.
     apply_migrations(clean_db)
 
@@ -452,15 +574,82 @@ def test_upgrade_0006_preserves_data(clean_db: str) -> None:
     _apply_through_0005(clean_db)
     _insert_query_row(clean_db, "q-1")
     assert not _column_exists(clean_db, "queries", "subject_scope")
-    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 1
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 4
 
-    # The real upgrade: 0006 applies on top of the populated database.
+    # The real upgrade: the pending tail (0006..0009) applies on top
+    # of the populated database.
     apply_migrations(clean_db)
 
     assert _column_exists(clean_db, "queries", "subject_scope")
     assert _yoyo_row_count(clean_db) == MIGRATION_COUNT
     assert _count_rows(clean_db, "queries") == 1
     assert _column_all_null(clean_db, "queries", "subject_scope")
+
+
+@pgmark
+def test_upgrade_0007_preserves_data(clean_db: str) -> None:
+    """Applying 0007 over a populated 0001..0006 database is a non-destructive
+    upgrade: the ``chat_route_decisions`` table appears and every pre-existing
+    row survives."""
+    # Stage a prior schema version (0001..0006) with realistic data.
+    _apply_through_0006(clean_db)
+    _insert_query_row(clean_db, "q-1")
+    assert not _table_exists(clean_db, "chat_route_decisions")
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 3
+
+    # The real upgrade: the pending tail (0007..0009) applies on top
+    # of the populated database.
+    apply_migrations(clean_db)
+
+    assert _table_exists(clean_db, "chat_route_decisions")
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT
+    assert _count_rows(clean_db, "queries") == 1
+    assert _count_rows(clean_db, "chat_route_decisions") == 0
+
+
+@pgmark
+def test_upgrade_0008_preserves_data(clean_db: str) -> None:
+    """Applying 0008 over a populated 0001..0007 database is a non-destructive
+    upgrade: the ``chat_query_rewrites`` table appears and every pre-existing
+    row survives."""
+    # Stage a prior schema version (0001..0007) with realistic data.
+    _apply_through_0007(clean_db)
+    _insert_query_row(clean_db, "q-1")
+    _insert_decision_row(clean_db, "dec-1")
+    assert not _table_exists(clean_db, "chat_query_rewrites")
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 2
+
+    # The real upgrade: the pending tail (0008, then 0009) applies on top
+    # of the populated database.
+    apply_migrations(clean_db)
+
+    assert _table_exists(clean_db, "chat_query_rewrites")
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT
+    assert _count_rows(clean_db, "queries") == 1
+    assert _count_rows(clean_db, "chat_route_decisions") == 1
+    assert _count_rows(clean_db, "chat_query_rewrites") == 0
+
+
+@pgmark
+def test_upgrade_0009_preserves_data(clean_db: str) -> None:
+    """Applying 0009 over a populated 0001..0008 database is a non-destructive
+    upgrade: the ``chat_knowledge_searches`` table appears and every
+    pre-existing row survives."""
+    # Stage a prior schema version (0001..0008) with realistic data.
+    _apply_through_0008(clean_db)
+    _insert_query_row(clean_db, "q-1")
+    _insert_decision_row(clean_db, "dec-1")
+    assert not _table_exists(clean_db, "chat_knowledge_searches")
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 1
+
+    # The real upgrade: 0009 applies on top of the populated database.
+    apply_migrations(clean_db)
+
+    assert _table_exists(clean_db, "chat_knowledge_searches")
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT
+    assert _count_rows(clean_db, "queries") == 1
+    assert _count_rows(clean_db, "chat_route_decisions") == 1
+    assert _count_rows(clean_db, "chat_knowledge_searches") == 0
 
 
 @pgmark

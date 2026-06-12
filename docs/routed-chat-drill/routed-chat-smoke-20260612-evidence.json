@@ -1,0 +1,134 @@
+{
+  "drill": "RC closure — routed-chat real-backend smoke: all four /chat routes end-to-end with real OpenAI embeddings (D-024) + real OpenAI chat (D-037) + real gpt-4.1-mini classifier (D-109) + real Tavily knowledge source (D-111) (D-111 prep / operator capture)",
+  "metadata": {
+    "capture_date": "20260612",
+    "environment": "real backend — STORAGE_BACKEND=postgres (migrations 0001..0009 applied), EMBEDDING_BACKEND=openai, EMBEDDING_MODEL=text-embedding-3-large, EMBEDDING_DIMENSION=3072, CHAT_BACKEND=openai, CHAT_MODEL=gpt-4.1, CLASSIFIER_BACKEND=openai, CLASSIFIER_MODEL=gpt-4.1-mini, KNOWLEDGE_BACKEND=tavily, KNOWLEDGE_MAX_RESULTS=5 (knob unset — default per A-47); OP-2 bounded retry/backoff active at defaults; webhook secret set",
+    "host_redacted": true,
+    "notes": "Live operator evidence for the routed-chat milestone closure (roadmap section 6). Per the redaction rule (RUNBOOK 'Routed-chat real-backend smoke'), credential-bearing values (OPENAI_API_KEY, TAVILY_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, PUBLIC_HOSTNAME if used, webhook URL token) are replaced by <REDACTED> placeholders or a _redacted: true flag; structural outcomes (status strings, log-line shapes, row values, route names, prompt versions, latency_ms magnitudes, cited URLs) are preserved verbatim. Drill driven against a local app instance on 127.0.0.1 (loopback; PUBLIC_HOSTNAME not used) with one fresh isolated test community; per-route steering succeeded on the first attempt for every route — each entry below is that route's first green round trip."
+  },
+  "preflight_state": {
+    "env_knobs": {
+      "STORAGE_BACKEND": "postgres",
+      "EMBEDDING_BACKEND": "openai",
+      "EMBEDDING_MODEL": "text-embedding-3-large",
+      "EMBEDDING_DIMENSION": 3072,
+      "CHAT_BACKEND": "openai",
+      "CHAT_MODEL": "gpt-4.1",
+      "CLASSIFIER_BACKEND": "openai",
+      "CLASSIFIER_MODEL": "gpt-4.1-mini",
+      "KNOWLEDGE_BACKEND": "tavily",
+      "KNOWLEDGE_MAX_RESULTS": "5 (knob unset — default per A-47)",
+      "OPENAI_API_KEY": "<REDACTED>",
+      "TAVILY_API_KEY": "<REDACTED>",
+      "TELEGRAM_WEBHOOK_SECRET": "<REDACTED>",
+      "TELEGRAM_BOT_TOKEN": "<REDACTED>"
+    },
+    "boot_log_line_shape": "app.created env=<env> version=<version> embedding_backend=openai embedding_dim=3072 chat_backend=openai chat_model=gpt-4.1 classifier_backend=openai classifier_model=gpt-4.1-mini knowledge_backend=tavily",
+    "boot_log_line_verbatim": "2026-06-12 21:40:10,565 INFO memory_rag.app :: app.created env=local version=0.0.0 embedding_backend=openai embedding_dim=3072 chat_backend=openai chat_model=gpt-4.1 classifier_backend=openai classifier_model=gpt-4.1-mini knowledge_backend=tavily",
+    "boot_gate_outcome": "ok",
+    "migrations_at_head": "9 rows in the yoyo migration table, tail = 0009.chat-knowledge-searches"
+  },
+  "seed_note_round_trip": {
+    "note_text": "/note 2026-06-10\nMira built a 6-piece puzzle by herself today and said her first full sentence: I want the red ball. We also spent an hour at the park and she climbed the small ladder twice without help.",
+    "reply_text_verbatim": "Saved your note for 2026-06-10.",
+    "embedding_status_after": "ready (one chunk; embedding_records row model_name=text-embedding-3-large dimension=3072)"
+  },
+  "route_round_trips": {
+    "_note": "One entry per product-register route. The classifier is live: requested_route is recorded from the chat_route_decisions row, not pre-asserted; a reroute (effective != requested) is captured verbatim, not a defect.",
+    "diary_lookup": {
+      "question_verbatim": "What did I write in my notes about what Mira did on June 10?",
+      "reply_text_verbatim": "On June 10, you wrote that Mira built a 6-piece puzzle by herself and said her first full sentence: 'I want the red ball.' You also noted that you spent an hour at the park, where she climbed the small ladder twice without help.",
+      "decision_row": {
+        "requested_route": "notes_lookup",
+        "effective_route": "notes_lookup",
+        "classifier_model_name": "gpt-4.1-mini",
+        "query_id_present": true
+      },
+      "answer_trace_row": {
+        "prompt_version": "v1",
+        "fallback_mode": "none",
+        "latency_ms": 1472
+      }
+    },
+    "general_llm": {
+      "question_verbatim": "What is the capital of Australia?",
+      "reply_text_verbatim": "The capital of Australia is Canberra.\n\n(model knowledge — not from your saved notes)",
+      "decision_row": {
+        "requested_route": "model_only",
+        "effective_route": "model_only",
+        "classifier_model_name": "gpt-4.1-mini",
+        "query_id_present": true
+      },
+      "answer_trace_row": {
+        "prompt_version": "model-only-v1",
+        "fallback_mode": "none",
+        "latency_ms": 717
+      }
+    },
+    "diary_plus_llm": {
+      "question_verbatim": "Based on my notes about Mira, what activities could support her language development?",
+      "reply_text_verbatim": "From your saved notes:\nMira recently said her first full sentence: 'I want the red ball.' This milestone suggests she is beginning to combine words and express her needs in more complex ways. Activities that encourage her to use sentences, such as reading picture books together and prompting her to describe what she sees, or engaging in pretend play where she can request items or narrate actions, could further support her language development. Additionally, spending time together in interactive play, like building puzzles or playing at the park, provides natural opportunities for conversation and vocabulary building. (8f40ef68-dc4e-40db-bf23-7b1cdf7b9592)\n\n(model knowledge — not from your saved notes)\nTo support Mira's language development, you can engage her in daily conversations, read books aloud, sing songs, and play games that encourage her to name objects, describe actions, or make choices. Activities like storytelling, asking open-ended questions, and narrating your actions during play or routines can also help expand her vocabulary and sentence structure. Pretend play with dolls, animals, or toy figures is especially helpful for practicing new words and sentences in a fun, low-pressure way.",
+      "decision_row": {
+        "requested_route": "notes_plus_model",
+        "effective_route": "notes_plus_model",
+        "classifier_model_name": "gpt-4.1-mini",
+        "query_id_present": true
+      },
+      "rewrite_row": {
+        "rewritten_query": "Mira language development activities",
+        "date_bounds": null
+      },
+      "answer_trace_row": {
+        "prompt_version": "notes-plus-model-v1",
+        "fallback_mode": "none",
+        "latency_ms": 4339
+      }
+    },
+    "diary_plus_web": {
+      "question_verbatim": "Based on my notes about Mira, can you search the web for currently recommended puzzles or toys for toddlers at her stage?",
+      "reply_text_verbatim": "From your saved notes:\nMira was able to build a 6-piece puzzle by herself, which suggests she is ready for puzzles with a similar or slightly higher piece count. She is also showing emerging language skills and physical coordination, as seen by her climbing a small ladder independently and using her first full sentence. These observations indicate she is developing fine motor, problem-solving, and language skills appropriate for her age and stage (likely around 2 years old) (chunk_id=8f40ef68-dc4e-40db-bf23-7b1cdf7b9592).\n\nFrom the web:\nCurrent recommendations for toddlers at Mira's stage include chunky wooden jigsaw puzzles, which help practice fitting more complex shapes together. Once a toddler can complete these, they can move on to puzzles with more pieces or different shapes (ref=https://blog.lovevery.com/child-development/whats-the-best-type-of-puzzle-for-1-1-2-year-olds). Wooden puzzles, especially those with knobs or chunky pieces, are highly recommended for toddlers and are often used in speech therapy to support language development (ref=https://www.youtube.com/watch?v=60xzDDzZJqA). Additionally, toys such as balls, vehicles, and stacking toys are popular for 2-year-olds, supporting fine motor skills and manipulative play (ref=https://www.nytimes.com/wirecutter/gifts/best-gifts-toys-for-2-year-olds).\nhttps://blog.lovevery.com/child-development/whats-the-best-type-of-puzzle-for-1-1-2-year-olds\nhttps://www.youtube.com/watch?v=60xzDDzZJqA\nhttps://www.nytimes.com/wirecutter/gifts/best-gifts-toys-for-2-year-olds\n\n(model knowledge — not from your saved notes)\nFor a toddler who can complete a 6-piece puzzle, consider introducing puzzles with 6 to 12 pieces, especially those with large, easy-to-grasp pieces or knobs. Look for puzzles featuring familiar objects, animals, or vehicles to keep her engaged. Other recommended toys at this stage include stacking blocks, nesting cups, shape sorters, simple building sets, and balls for active play. These toys help develop fine motor skills, hand-eye coordination, problem-solving abilities, and language. Always supervise play and choose age-appropriate, safe materials.",
+      "decision_row": {
+        "requested_route": "notes_plus_knowledge",
+        "effective_route": "notes_plus_knowledge",
+        "classifier_model_name": "gpt-4.1-mini",
+        "query_id_present": true
+      },
+      "rewrite_row": {
+        "rewritten_query": "Mira toddler stage development age"
+      },
+      "knowledge_search_row": {
+        "outward_query_verbatim": "recommended puzzles and toys for toddlers who can complete 6-piece puzzles, speak simple full sentences, and climb small ladders independently",
+        "provider_name": "tavily",
+        "result_count": 5,
+        "latency_ms": 2442
+      },
+      "cited_urls_in_reply": "https://blog.lovevery.com/child-development/whats-the-best-type-of-puzzle-for-1-1-2-year-olds, https://www.youtube.com/watch?v=60xzDDzZJqA, https://www.nytimes.com/wirecutter/gifts/best-gifts-toys-for-2-year-olds",
+      "answer_trace_row": {
+        "prompt_version": "notes-plus-knowledge-v1",
+        "fallback_mode": "none",
+        "latency_ms": 3265
+      }
+    }
+  },
+  "provider_attempt_log_lines": {
+    "classifier_verbatim": "2026-06-12 21:41:09,982 INFO memory_rag.adapters.chat_routing.openai_client :: provider.attempt label=openai.route_classifier attempt=1/3 outcome=success latency_ms=2038",
+    "tavily_verbatim": "2026-06-12 21:41:53,075 INFO memory_rag.adapters.knowledge.tavily :: provider.attempt label=tavily.search attempt=1/3 outcome=success latency_ms=2442"
+  },
+  "out_of_scope_for_this_drill": [
+    "Any src/ / tests/ / schema / migration / config change.",
+    "Any live provider call inside make check or any new gated test.",
+    "Routing-accuracy measurement or thresholds (D-108: observed via traces, not gated).",
+    "Resilience-knob tuning beyond D-047 / D-049 defaults.",
+    "A-47 knowledge-default re-measurement (the drill observes the defaults as-is).",
+    "A-10 edit/delete; A-21 / Phase 9 host seams."
+  ],
+  "summary": {
+    "diary_lookup_round_trip_green": true,
+    "general_llm_round_trip_green": true,
+    "diary_plus_llm_round_trip_green": true,
+    "diary_plus_web_round_trip_green": true,
+    "provenance_labels_observed": true,
+    "closes_routed_chat_milestone": true,
+    "verdict": "All four /chat routes completed one green round trip each against the real backend on the first steering attempt: requested_route == effective_route in every chat_route_decisions row (notes_lookup / model_only / notes_plus_model / notes_plus_knowledge, classifier gpt-4.1-mini); every answer segment carried its provenance label — notes segments cited the grounding chunk id, the web segment cited three Tavily URLs verbatim, model segments rendered under the explicit model-knowledge label, and no model/web content was attributed to the diary; all answer traces recorded fallback_mode=none with positive latency and token counts; every provider call succeeded at attempt=1/3 under the D-047/D-049 defaults. Closes the routed-chat milestone per roadmap section 6."
+  }
+}

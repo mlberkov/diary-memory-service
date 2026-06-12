@@ -34,6 +34,7 @@ from __future__ import annotations
 import dataclasses
 
 from memory_rag.config import Settings
+from memory_rag.core.chat import ChatRoute, RoutedChatResult
 from memory_rag.core.domain import AnswerResult, FallbackMode, IngestResult
 from memory_rag.core.domain.models import EventChunk
 from memory_rag.core.domain.parser import normalize_iso_date_token
@@ -43,6 +44,7 @@ from memory_rag.logging import get_logger
 from memory_rag.services.domain_service import DomainService
 from memory_rag.services.export_service import ExportService
 from memory_rag.services.query_service import QueryService
+from memory_rag.services.routed_chat import RoutedChatService
 
 log = get_logger(__name__)
 
@@ -54,7 +56,7 @@ _REPLY_START = (
     "Plain text without a command is stored as a draft so nothing is lost."
 )
 _REPLY_HELP = (
-    "Commands: /start, /help, /note, /ask, /sources, /drafts, /export. Plain text "
+    "Commands: /start, /help, /note, /ask, /chat, /sources, /drafts, /export. Plain text "
     "without a command is stored as a draft."
 )
 _REPLY_UNKNOWN = (
@@ -143,6 +145,19 @@ _REPLY_NO_MATCHES_TEMPLATE = (
 )
 _REPLY_SOURCES_NONE = "No selected chunks available — ask a question with /ask first."
 _REPLY_SOURCES_NONE_CITED = "Your last /ask answer didn't cite any specific notes."
+_REPLY_CHAT_UNAVAILABLE = "Routed chat isn't available here — use /ask to query your saved notes."
+_TRAILER_MODEL_KNOWLEDGE = "(model knowledge — not from your saved notes)"
+_TRAILER_CHAT_REROUTED = "(answered from your saved notes)"
+_HEADER_CHAT_NO_NOTES = (
+    "Nothing in your saved notes covers this — here's general information instead."
+)
+_HEADER_CHAT_WEAK_NOTES = "Your saved notes only weakly cover this."
+_LABEL_CHAT_NOTES = "From your saved notes:"
+# RC-4: the user-facing label deliberately says "web" — the only live
+# knowledge provider is a web search; the core stays on the neutral
+# "knowledge" register and this literal can be revisited when a
+# non-web provider lands behind the same port (D-108).
+_LABEL_CHAT_WEB = "From the web:"
 
 
 def _format_answer_reply(result: AnswerResult) -> str:
@@ -193,6 +208,105 @@ def _format_answer_reply(result: AnswerResult) -> str:
     return _REPLY_UNKNOWN
 
 
+def _format_notes_plus_model_reply(answer: AnswerResult) -> str:
+    """Render a ``notes_plus_model`` reply (RC-3, D-108).
+
+    Per-segment provenance (generalized I-9): the notes segment renders
+    under the notes label with the LLM's grounded text; the model
+    segment renders under the existing model-knowledge label and is
+    omitted entirely when empty — no orphan label, no unlabeled model
+    content. Honest degradation comes first: empty diary evidence
+    states the no-notes header strictly before any model content, weak
+    evidence leads with the weak-notes header (D-108 fallback policy).
+    The provider/parse failure contours reuse the pinned literals via
+    the shared formatter.
+    """
+    fallback = answer.fallback
+
+    if fallback in (FallbackMode.PROVIDER_UNAVAILABLE, FallbackMode.PARSE_FAILURE):
+        return _format_answer_reply(answer)
+
+    parts: list[str] = []
+    if fallback is FallbackMode.NO_EVIDENCE:
+        parts.append(_HEADER_CHAT_NO_NOTES)
+    else:
+        if fallback is FallbackMode.WEAK_EVIDENCE:
+            parts.append(_HEADER_CHAT_WEAK_NOTES)
+        parts.append(f"{_LABEL_CHAT_NOTES}\n{answer.answer_text or ''}")
+    if answer.model_text:
+        parts.append(f"{_TRAILER_MODEL_KNOWLEDGE}\n{answer.model_text}")
+    return "\n\n".join(parts)
+
+
+def _format_notes_plus_knowledge_reply(answer: AnswerResult) -> str:
+    """Render a ``notes_plus_knowledge`` reply (RC-4, D-108).
+
+    Per-segment provenance (generalized I-9): the notes segment renders
+    under the notes label; the knowledge segment renders under the web
+    label with its cited refs (URLs) listed verbatim beneath the text;
+    the model segment renders under the existing model-knowledge label.
+    Each segment is omitted entirely when empty — no orphan label, no
+    unlabeled content. Honest degradation comes first: empty diary
+    evidence states the no-notes header strictly before any web or
+    model content, weak evidence leads with the weak-notes header
+    (D-108 fallback policy). The provider/parse failure contours reuse
+    the pinned literals via the shared formatter.
+    """
+    fallback = answer.fallback
+
+    if fallback in (FallbackMode.PROVIDER_UNAVAILABLE, FallbackMode.PARSE_FAILURE):
+        return _format_answer_reply(answer)
+
+    parts: list[str] = []
+    if fallback is FallbackMode.NO_EVIDENCE:
+        parts.append(_HEADER_CHAT_NO_NOTES)
+    else:
+        if fallback is FallbackMode.WEAK_EVIDENCE:
+            parts.append(_HEADER_CHAT_WEAK_NOTES)
+        parts.append(f"{_LABEL_CHAT_NOTES}\n{answer.answer_text or ''}")
+    if answer.knowledge_text:
+        refs_block = "".join(f"\n{ref}" for ref in answer.knowledge_refs)
+        parts.append(f"{_LABEL_CHAT_WEB}\n{answer.knowledge_text}{refs_block}")
+    if answer.model_text:
+        parts.append(f"{_TRAILER_MODEL_KNOWLEDGE}\n{answer.model_text}")
+    return "\n\n".join(parts)
+
+
+def _format_chat_reply(result: RoutedChatResult) -> str:
+    """Render a routed-chat reply (RC-2/RC-3/RC-4, D-108).
+
+    The body always goes through :func:`_format_answer_reply`, so an
+    effective ``notes_lookup`` answer is byte-identical to the ``/ask``
+    reply for the same outcome (one formatting surface, D-099 guardrail
+    inherited). A successful ``model_only`` answer appends the explicit
+    model-knowledge trailer (generalized I-9: model content is never
+    presented as note-grounded); its failure contours reuse the pinned
+    provider/parse literals via the shared formatter. An effective
+    ``notes_plus_model`` answer renders the segmented mixed shape via
+    :func:`_format_notes_plus_model_reply`, and an effective
+    ``notes_plus_knowledge`` answer via
+    :func:`_format_notes_plus_knowledge_reply` (only an exact requested
+    match dispatches to either, so neither carries the reroute
+    trailer). When the effective route differs from the requested one,
+    the reply carries one cause-neutral reroute trailer — classifier
+    failure, unusable output, a non-dispatchable route, and an empty
+    question all read the same (R-6 surfaces the distinction in
+    metadata and traces, not in cause-specific prose).
+    """
+    if result.effective_route is ChatRoute.NOTES_PLUS_MODEL:
+        return _format_notes_plus_model_reply(result.answer)
+    if result.effective_route is ChatRoute.NOTES_PLUS_KNOWLEDGE:
+        return _format_notes_plus_knowledge_reply(result.answer)
+    body = _format_answer_reply(result.answer)
+    if result.effective_route is ChatRoute.MODEL_ONLY:
+        if result.answer.fallback is FallbackMode.NONE:
+            return f"{body}\n\n{_TRAILER_MODEL_KNOWLEDGE}"
+        return body
+    if result.requested_route is not result.effective_route:
+        return f"{body}\n\n{_TRAILER_CHAT_REROUTED}"
+    return body
+
+
 def _format_drafts_header(*, returned: int, requested: int, explicit: bool, max_limit: int) -> str:
     plural = "draft" if returned == 1 else "drafts"
     if not explicit:
@@ -239,11 +353,17 @@ class Dispatcher:
         query: QueryService,
         export: ExportService,
         settings: Settings,
+        *,
+        routed_chat: RoutedChatService | None = None,
     ) -> None:
+        # ``routed_chat`` is keyword-only with a ``None`` default: routed chat
+        # is an explicit, disableable surface (I-10) — the base /note → /ask
+        # flow works end-to-end with it absent (D-108).
         self._domain = domain
         self._query = query
         self._export = export
         self._settings = settings
+        self._routed_chat = routed_chat
         self._latest_sources: dict[str, tuple[EventChunk, ...]] = {}
 
     def dispatch(self, message: InboundMessage) -> DispatchResult:
@@ -301,6 +421,8 @@ class Dispatcher:
                     "route_source": message.route_source,
                 },
             )
+        if route is RouteKind.CHAT:
+            return self._dispatch_chat(message)
         if route is RouteKind.SOURCES:
             return self._dispatch_sources(message)
         if route is RouteKind.DRAFTS:
@@ -314,6 +436,30 @@ class Dispatcher:
                 metadata={"route_source": message.route_source},
             )
         return DispatchResult(reply_text=_REPLY_UNKNOWN, route=RouteKind.UNKNOWN)
+
+    def _dispatch_chat(self, message: InboundMessage) -> DispatchResult:
+        # The /sources cache is deliberately untouched: it remains the
+        # /ask-only surface its replies and pins describe (D-036 / D-099).
+        if self._routed_chat is None:
+            return DispatchResult(
+                reply_text=_REPLY_CHAT_UNAVAILABLE,
+                route=RouteKind.CHAT,
+                metadata={"route_source": message.route_source},
+            )
+        result = self._routed_chat.chat(message)
+        reply = _format_chat_reply(result)
+        return DispatchResult(
+            reply_text=reply,
+            route=RouteKind.CHAT,
+            metadata={
+                "fallback": result.answer.fallback.value,
+                "route_source": message.route_source,
+                "requested_route": (
+                    result.requested_route.value if result.requested_route else "unclassified"
+                ),
+                "effective_route": result.effective_route.value,
+            },
+        )
 
     def _dispatch_drafts(self, message: InboundMessage) -> DispatchResult:
         payload = message.payload.strip()

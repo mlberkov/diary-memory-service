@@ -29,6 +29,7 @@ import math
 import re
 from dataclasses import replace
 
+from memory_rag.core.chat.models import ChatKnowledgeSearch, ChatQueryRewrite, ChatRouteDecision
 from memory_rag.core.domain.models import (
     AnswerTrace,
     DateRange,
@@ -85,6 +86,12 @@ class MockDomainStore:
         self._queries: dict[str, Query] = {}
         self._retrieval_hits: dict[str, RetrievalHit] = {}
         self._answer_traces: dict[str, AnswerTrace] = {}
+        self._chat_route_decisions: dict[str, ChatRouteDecision] = {}
+        # Rewrite traces keyed by decision_id — at most one per decision (RC-3).
+        self._chat_query_rewrites: dict[str, ChatQueryRewrite] = {}
+        # Knowledge-search traces keyed by decision_id — at most one per
+        # decision (RC-4).
+        self._chat_knowledge_searches: dict[str, ChatKnowledgeSearch] = {}
         self._dead_letters: dict[str, IndexingDeadLetter] = {}
         # Adapter-owned author display-input snapshots (D-084), keyed by the
         # message idempotency tuple, holding the raw (username, first_name).
@@ -337,6 +344,55 @@ class MockDomainStore:
             return None
         return self._answer_traces.get(query_id)
 
+    def save_chat_route_decision(self, decision: ChatRouteDecision) -> None:
+        if decision.decision_id in self._chat_route_decisions:
+            raise ValueError(f"duplicate decision_id={decision.decision_id}")
+        self._chat_route_decisions[decision.decision_id] = decision
+
+    def get_chat_route_decision(
+        self, decision_id: str, *, community_id: str
+    ) -> ChatRouteDecision | None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        decision = self._chat_route_decisions.get(decision_id)
+        if decision is None or decision.community_id != community_id:
+            return None
+        return decision
+
+    def save_chat_query_rewrite(self, rewrite: ChatQueryRewrite) -> None:
+        if rewrite.decision_id in self._chat_query_rewrites:
+            raise ValueError(f"duplicate rewrite for decision_id={rewrite.decision_id}")
+        if rewrite.decision_id not in self._chat_route_decisions:
+            raise ValueError(f"unknown decision_id={rewrite.decision_id}")
+        self._chat_query_rewrites[rewrite.decision_id] = rewrite
+
+    def get_chat_query_rewrite_for_decision(
+        self, decision_id: str, *, community_id: str
+    ) -> ChatQueryRewrite | None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        rewrite = self._chat_query_rewrites.get(decision_id)
+        if rewrite is None or rewrite.community_id != community_id:
+            return None
+        return rewrite
+
+    def save_chat_knowledge_search(self, search: ChatKnowledgeSearch) -> None:
+        if search.decision_id in self._chat_knowledge_searches:
+            raise ValueError(f"duplicate knowledge search for decision_id={search.decision_id}")
+        if search.decision_id not in self._chat_route_decisions:
+            raise ValueError(f"unknown decision_id={search.decision_id}")
+        self._chat_knowledge_searches[search.decision_id] = search
+
+    def get_chat_knowledge_search_for_decision(
+        self, decision_id: str, *, community_id: str
+    ) -> ChatKnowledgeSearch | None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        search = self._chat_knowledge_searches.get(decision_id)
+        if search is None or search.community_id != community_id:
+            return None
+        return search
+
     def save_indexing_dead_letter(self, record: IndexingDeadLetter) -> None:
         if record.dead_letter_id in self._dead_letters:
             raise ValueError(f"duplicate dead_letter_id={record.dead_letter_id}")
@@ -404,6 +460,15 @@ class MockDomainStore:
     def len_answer_traces(self) -> int:
         return len(self._answer_traces)
 
+    def len_chat_route_decisions(self) -> int:
+        return len(self._chat_route_decisions)
+
+    def len_chat_query_rewrites(self) -> int:
+        return len(self._chat_query_rewrites)
+
+    def len_chat_knowledge_searches(self) -> int:
+        return len(self._chat_knowledge_searches)
+
     def len_indexing_dead_letters(self) -> int:
         return len(self._dead_letters)
 
@@ -416,6 +481,9 @@ class MockDomainStore:
         self._queries.clear()
         self._retrieval_hits.clear()
         self._answer_traces.clear()
+        self._chat_route_decisions.clear()
+        self._chat_query_rewrites.clear()
+        self._chat_knowledge_searches.clear()
         self._dead_letters.clear()
         self._author_display_inputs.clear()
 

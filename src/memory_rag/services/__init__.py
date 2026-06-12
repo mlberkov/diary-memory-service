@@ -14,6 +14,7 @@ from memory_rag.services.reconciliation import (
     ReconciliationService,
     RetryOutcomeReport,
 )
+from memory_rag.services.routed_chat import RoutedChatService
 
 __all__ = [
     "Dispatcher",
@@ -23,4 +24,5 @@ __all__ = [
     "QueryService",
     "ReconciliationService",
     "RetryOutcomeReport",
+    "RoutedChatService",
 ]

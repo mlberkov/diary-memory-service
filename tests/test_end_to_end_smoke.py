@@ -19,14 +19,26 @@ import pytest
 from fastapi.testclient import TestClient
 
 from memory_rag.adapters.answers import MockChatClient
+from memory_rag.adapters.chat_routing import (
+    MockOutwardRewriter,
+    MockQueryRewriter,
+    MockRouteClassifier,
+)
 from memory_rag.adapters.embeddings import MockEmbeddingClient
+from memory_rag.adapters.knowledge import MockKnowledgeSource
 from memory_rag.adapters.telegram.webhook import get_dispatcher
 from memory_rag.app import create_app
 from memory_rag.config import Settings
 from memory_rag.core.answers import ChatClient, ChatResponse
 from memory_rag.core.domain import FallbackMode
 from memory_rag.core.domain.answer_prompt import AnswerPrompt
-from memory_rag.services import Dispatcher, DomainService, ExportService, QueryService
+from memory_rag.services import (
+    Dispatcher,
+    DomainService,
+    ExportService,
+    QueryService,
+    RoutedChatService,
+)
 from memory_rag.storage.mock import MockDomainStore
 
 
@@ -35,17 +47,29 @@ def _settings() -> Settings:
 
 
 def _client_with_fresh_store(
-    *, chat_client: ChatClient | None = None
+    *,
+    chat_client: ChatClient | None = None,
+    knowledge_source: MockKnowledgeSource | None = None,
 ) -> tuple[TestClient, MockDomainStore]:
     store = MockDomainStore()
     embed = MockEmbeddingClient()
     chat: ChatClient = chat_client if chat_client is not None else MockChatClient()
     settings = _settings()
+    query = QueryService(store, store, embed, chat)
     dispatcher = Dispatcher(
         DomainService(store, embedding_client=embed),
-        QueryService(store, store, embed, chat),
+        query,
         ExportService(store),
         settings,
+        routed_chat=RoutedChatService(
+            MockRouteClassifier(),
+            query,
+            chat,
+            store,
+            rewriter=MockQueryRewriter(),
+            knowledge_source=knowledge_source,
+            outward_rewriter=(MockOutwardRewriter() if knowledge_source is not None else None),
+        ),
     )
     app = create_app(settings)
     app.dependency_overrides[get_dispatcher] = lambda: dispatcher
@@ -491,3 +515,107 @@ def test_sources_without_prior_ask_returns_fail_closed_reply() -> None:
     assert resp.status_code == 200
     text = resp.json()["text"]
     assert text == "No selected chunks available — ask a question with /ask first."
+
+
+def test_chat_model_only_round_trip_returns_labeled_reply() -> None:
+    """RC-2 (D-108): a /chat question classified model_only (in-band mock
+    steering) answers from model knowledge with the explicit provenance
+    trailer, persisting its own Query + AnswerTrace + decision row."""
+    client, store = _client_with_fresh_store()
+
+    resp = _post(client, _update("/chat what is model_only awareness", update_id=1))
+
+    assert resp.status_code == 200
+    assert resp.json()["text"] == (
+        "Mock model-knowledge answer (no notes consulted)."
+        "\n\n(model knowledge — not from your saved notes)"
+    )
+    assert store.len_queries() == 1
+    assert store.len_answer_traces() == 1
+    assert store.len_chat_route_decisions() == 1
+    assert store.len_retrieval_hits() == 0
+
+
+def test_chat_notes_lookup_round_trip_matches_the_ask_reply() -> None:
+    """RC-2 (D-108): a /chat question classified notes_lookup answers
+    byte-identically to /ask for the same store, and the new wiring leaves
+    the /ask reply itself unchanged."""
+    client, store = _client_with_fresh_store()
+
+    _post(client, _update("/note 2026-05-09\nTried a new book", update_id=1))
+    chat_resp = _post(client, _update("/chat book", update_id=2, message_id=2))
+    ask_resp = _post(client, _update("/ask book", update_id=3, message_id=3))
+
+    assert chat_resp.status_code == 200
+    assert ask_resp.status_code == 200
+    assert chat_resp.json()["text"] == ask_resp.json()["text"]
+    assert ask_resp.json()["text"].startswith("Mock answer grounded in 1 diary chunk(s):")
+    # One decision row for the /chat call; none for the /ask call.
+    assert store.len_chat_route_decisions() == 1
+
+
+def test_chat_notes_plus_model_round_trip_returns_segmented_reply() -> None:
+    """RC-3 (D-108): a /chat question classified notes_plus_model (in-band
+    mock steering) answers with both labeled segments, persisting Query +
+    hits + AnswerTrace + decision row + rewrite row."""
+    client, store = _client_with_fresh_store()
+
+    _post(client, _update("/note 2026-05-09\nTried a notes_plus_model book", update_id=1))
+    resp = _post(client, _update("/chat notes_plus_model book", update_id=2, message_id=2))
+
+    assert resp.status_code == 200
+    text = resp.json()["text"]
+    assert text.startswith("From your saved notes:\n")
+    assert "(model knowledge — not from your saved notes)" in text
+    assert text.endswith("Mock general-knowledge segment.")
+    assert store.len_queries() == 1
+    assert store.len_answer_traces() == 1
+    assert store.len_chat_route_decisions() == 1
+    assert store.len_chat_query_rewrites() == 1
+    assert store.len_retrieval_hits() > 0
+
+
+def test_chat_notes_plus_knowledge_round_trip_returns_three_segment_reply() -> None:
+    """RC-4 (D-108): a /chat question classified notes_plus_knowledge
+    (in-band mock steering) answers with all three labeled segments —
+    the web segment citing its refs verbatim — persisting Query + hits +
+    AnswerTrace + decision row + rewrite row + knowledge-search row."""
+    from memory_rag.core.chat import KnowledgeExcerpt
+
+    knowledge = MockKnowledgeSource(
+        excerpts=(KnowledgeExcerpt(ref="https://example.org/naps", title="Naps", text="nap facts"),)
+    )
+    client, store = _client_with_fresh_store(knowledge_source=knowledge)
+
+    _post(client, _update("/note 2026-05-09\nTried a notes_plus_knowledge nap", update_id=1))
+    resp = _post(client, _update("/chat notes_plus_knowledge nap", update_id=2, message_id=2))
+
+    assert resp.status_code == 200
+    text = resp.json()["text"]
+    assert text.startswith("From your saved notes:\n")
+    assert "From the web:" in text
+    assert "https://example.org/naps" in text
+    assert "(model knowledge — not from your saved notes)" in text
+    assert text.endswith("Mock general-knowledge segment.")
+    assert store.len_queries() == 1
+    assert store.len_answer_traces() == 1
+    assert store.len_chat_route_decisions() == 1
+    assert store.len_chat_query_rewrites() == 1
+    assert store.len_chat_knowledge_searches() == 1
+    assert store.len_retrieval_hits() > 0
+
+
+def test_chat_notes_plus_model_round_trip_degrades_honestly_on_empty_corpus() -> None:
+    """RC-3 (D-108): with nothing ingested, the reply states the empty
+    diary evidence strictly before any model content."""
+    client, store = _client_with_fresh_store()
+
+    resp = _post(client, _update("/chat notes_plus_model what games suit him", update_id=1))
+
+    assert resp.status_code == 200
+    assert resp.json()["text"] == (
+        "Nothing in your saved notes covers this — here's general information instead."
+        "\n\n(model knowledge — not from your saved notes)"
+        "\nMock general-knowledge segment."
+    )
+    assert store.len_chat_query_rewrites() == 1
