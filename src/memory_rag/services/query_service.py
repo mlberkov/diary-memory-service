@@ -67,7 +67,6 @@ from memory_rag.core.domain import (
     FallbackMode,
     Query,
     RetrievalHit,
-    RetrievalLeg,
 )
 from memory_rag.core.domain.answer_prompt import PROMPT_VERSION, build_answer_prompt
 from memory_rag.core.domain.answer_schema import (
@@ -80,7 +79,12 @@ from memory_rag.core.embeddings import EmbeddingClient
 from memory_rag.core.routing import InboundMessage
 from memory_rag.logging import get_logger
 from memory_rag.services.context_assembler import assemble_answer_context
-from memory_rag.services.retrieval import DEFAULT_RRF_K, FusedHit, reciprocal_rank_fusion
+from memory_rag.services.retrieval import (
+    FusedHit,
+    RetrievedCandidates,
+    build_retrieval_hits,
+    reciprocal_rank_fusion,
+)
 from memory_rag.storage.repository import DomainRepository
 from memory_rag.storage.search_repository import SearchRepository
 
@@ -90,7 +94,6 @@ DEFAULT_TOP_K = 5
 DEFAULT_CANDIDATE_K = 20
 
 _TRAILING_QUERY_PUNCT = "?.!,;:"
-_SPARSE_MODEL_NAME = "simple"
 
 _MARKER_TO_FALLBACK: dict[UncertaintyMarker, FallbackMode] = {
     "confident": FallbackMode.NONE,
@@ -100,14 +103,9 @@ _MARKER_TO_FALLBACK: dict[UncertaintyMarker, FallbackMode] = {
 }
 
 
-def _normalize_query(payload: str) -> str:
+def normalize_query(payload: str) -> str:
     """Trim whitespace and terminal punctuation so plain questions match cleanly."""
     return payload.strip().rstrip(_TRAILING_QUERY_PUNCT).strip()
-
-
-def _per_leg_score(rank: int, k: int = DEFAULT_RRF_K) -> float:
-    """RRF contribution at a 1-based ``rank``."""
-    return 1.0 / (k + rank)
 
 
 class QueryService:
@@ -133,6 +131,50 @@ class QueryService:
         self._chat = chat_client
         self._top_k = top_k
         self._candidate_k = candidate_k
+
+    def retrieve(
+        self,
+        community_id: str,
+        query_text: str,
+        *,
+        date_range: DateRange | None = None,
+        subject_scope: str | None = None,
+    ) -> RetrievedCandidates:
+        """Run one pure hybrid-retrieval pass (RC-3).
+
+        Embeds ``query_text``, runs both legs with the same community
+        scoping and optional ``date_range`` / ``subject_scope`` kwargs
+        (R-3 / R-8; D-040 / D-107), and fuses them with RRF. Writes no
+        rows — persistence stays with the caller so ``Query.fallback``
+        remains a single post-generation decision (D-035). Callers pass
+        a non-empty, already-normalized ``query_text``.
+        """
+        if not community_id:
+            raise ValueError("community_id is required (R-3)")
+        query_embedding = self._embed.embed([query_text])[0]
+        model_name = self._embed.model_name
+        dense_hits = self._search.dense_candidates(
+            community_id,
+            query_embedding,
+            model_name,
+            self._candidate_k,
+            date_range=date_range,
+            subject_scope=subject_scope,
+        )
+        sparse_hits = self._search.sparse_candidates(
+            community_id,
+            query_text,
+            self._candidate_k,
+            date_range=date_range,
+            subject_scope=subject_scope,
+        )
+        merged = reciprocal_rank_fusion([dense_hits, sparse_hits], top_k=self._top_k)
+        return RetrievedCandidates(
+            dense=dense_hits,
+            sparse=sparse_hits,
+            merged=merged,
+            embedding_model_name=model_name,
+        )
 
     def answer(
         self,
@@ -164,7 +206,7 @@ class QueryService:
         if not community_id:
             raise ValueError("InboundMessage.community_id is required (R-3)")
 
-        query_text = _normalize_query(message.payload)
+        query_text = normalize_query(message.payload)
         created_at = datetime.now(tz=UTC)
         query_id = str(uuid4())
         model_name = self._embed.model_name
@@ -198,24 +240,15 @@ class QueryService:
                 cited_chunk_ids=(),
             )
 
-        query_embedding = self._embed.embed([query_text])[0]
-
-        dense_hits = self._search.dense_candidates(
-            community_id,
-            query_embedding,
-            model_name,
-            self._candidate_k,
-            date_range=date_range,
-            subject_scope=subject_scope,
-        )
-        sparse_hits = self._search.sparse_candidates(
+        candidates = self.retrieve(
             community_id,
             query_text,
-            self._candidate_k,
             date_range=date_range,
             subject_scope=subject_scope,
         )
-        merged = reciprocal_rank_fusion([dense_hits, sparse_hits], top_k=self._top_k)
+        dense_hits = candidates.dense
+        sparse_hits = candidates.sparse
+        merged = candidates.merged
 
         # The persisted Query is constructed inside `_finalize` so its
         # `fallback` matches the AnswerTrace's `fallback_mode` by construction
@@ -477,50 +510,17 @@ class QueryService:
         sparse_hits: list[EventChunk],
         merged: list[FusedHit],
     ) -> None:
-        query_id = query.query_id
-        model_name = query.model_name
-        created_at = query.created_at
         self._repo.save_query(query)
-
-        hits: list[RetrievalHit] = []
-        for rank, chunk in enumerate(dense_hits, start=1):
-            hits.append(
-                RetrievalHit(
-                    retrieval_hit_id=str(uuid4()),
-                    query_id=query_id,
-                    chunk_id=chunk.chunk_id,
-                    leg=RetrievalLeg.DENSE,
-                    rank=rank,
-                    score=_per_leg_score(rank),
-                    model_name=model_name,
-                    created_at=created_at,
-                )
-            )
-        for rank, chunk in enumerate(sparse_hits, start=1):
-            hits.append(
-                RetrievalHit(
-                    retrieval_hit_id=str(uuid4()),
-                    query_id=query_id,
-                    chunk_id=chunk.chunk_id,
-                    leg=RetrievalLeg.SPARSE,
-                    rank=rank,
-                    score=_per_leg_score(rank),
-                    model_name=_SPARSE_MODEL_NAME,
-                    created_at=created_at,
-                )
-            )
-        for rank, fused in enumerate(merged, start=1):
-            hits.append(
-                RetrievalHit(
-                    retrieval_hit_id=str(uuid4()),
-                    query_id=query_id,
-                    chunk_id=fused.chunk.chunk_id,
-                    leg=RetrievalLeg.MERGED,
-                    rank=rank,
-                    score=fused.score,
-                    model_name=model_name,
-                    created_at=created_at,
-                )
-            )
+        hits: list[RetrievalHit] = build_retrieval_hits(
+            query_id=query.query_id,
+            model_name=query.model_name,
+            created_at=query.created_at,
+            candidates=RetrievedCandidates(
+                dense=dense_hits,
+                sparse=sparse_hits,
+                merged=merged,
+                embedding_model_name=query.model_name,
+            ),
+        )
         if hits:
             self._repo.save_retrieval_hits(hits)

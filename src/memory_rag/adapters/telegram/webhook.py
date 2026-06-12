@@ -21,7 +21,7 @@ from typing import Annotated, Any
 from fastapi import Depends, FastAPI, Header, HTTPException
 
 from memory_rag.adapters.answers import build_chat_client
-from memory_rag.adapters.chat_routing import build_route_classifier
+from memory_rag.adapters.chat_routing import build_query_rewriter, build_route_classifier
 from memory_rag.adapters.embeddings import build_embedding_client
 from memory_rag.adapters.telegram.author_display import (
     AuthorDisplayInputStore,
@@ -91,6 +91,7 @@ def get_dispatcher() -> Dispatcher:
         embedding_client = build_embedding_client(settings)
         chat_client = build_chat_client(settings)
         route_classifier = build_route_classifier(settings)
+        query_rewriter = build_query_rewriter(settings)
         query_service = QueryService(
             store,
             store,
@@ -109,6 +110,7 @@ def get_dispatcher() -> Dispatcher:
                 query_service,
                 chat_client,
                 store,
+                rewriter=query_rewriter,
             ),
         )
         log.info(

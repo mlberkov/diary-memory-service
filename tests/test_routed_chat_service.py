@@ -321,10 +321,11 @@ def test_unusable_classifier_output_preserves_raw_output() -> None:
     assert decision.classifier_raw_output == '{"route": "web_only"}'
 
 
-@pytest.mark.parametrize("route", [ChatRoute.NOTES_PLUS_MODEL, ChatRoute.NOTES_PLUS_KNOWLEDGE])
-def test_not_yet_dispatchable_routes_fall_back_with_requested_recorded(
-    route: ChatRoute,
-) -> None:
+def test_not_yet_dispatchable_route_falls_back_with_requested_recorded() -> None:
+    """RC-3 narrowed the funnel: ``notes_plus_model`` now dispatches (covered
+    in ``test_routed_chat_notes_plus_model.py``); ``notes_plus_knowledge``
+    stays funnelled until RC-4."""
+    route = ChatRoute.NOTES_PLUS_KNOWLEDGE
     store = MockDomainStore()
     service = _wire(store, classifier=MockRouteClassifier(default_route=route))
 

@@ -13,7 +13,7 @@ the mapping.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 
 from memory_rag.core.domain.models import AnswerResult
@@ -75,6 +75,37 @@ class ChatRouteDecision:
     classifier_raw_output: str
     classifier_latency_ms: int
     query_id: str | None
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ChatQueryRewrite:
+    """Persisted rewrite trace for one ``notes_plus_model`` execution (RC-3).
+
+    One row per execution of the route, written after the
+    :class:`ChatRouteDecision` row it links to. ``rewritten_query`` is
+    ``None`` when no usable rewrite existed (rewriter unavailable or
+    unusable output — the route degraded to the original question with
+    no date constraint). ``rewriter_raw_output`` is ``""`` when no
+    provider output existed and the verbatim output otherwise —
+    including on the unusable-output contour (the D-035
+    truthful-provenance rule applied to the rewriter seam).
+    ``subject_scope`` is the rewriter-emitted value — seam-ready, never
+    emitted in this packet (see ``docs/assumptions.md``) — not the
+    caller-provided scope the retrieval ran with (that one is recorded
+    on the ``Query`` row).
+    """
+
+    rewrite_id: str
+    decision_id: str
+    community_id: str
+    rewritten_query: str | None
+    date_start: date | None
+    date_end: date | None
+    subject_scope: str | None
+    rewriter_model_name: str
+    rewriter_raw_output: str
+    rewriter_latency_ms: int
     created_at: datetime
 
 

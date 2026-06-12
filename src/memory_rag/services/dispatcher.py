@@ -148,6 +148,11 @@ _REPLY_SOURCES_NONE_CITED = "Your last /ask answer didn't cite any specific note
 _REPLY_CHAT_UNAVAILABLE = "Routed chat isn't available here — use /ask to query your saved notes."
 _TRAILER_MODEL_KNOWLEDGE = "(model knowledge — not from your saved notes)"
 _TRAILER_CHAT_REROUTED = "(answered from your saved notes)"
+_HEADER_CHAT_NO_NOTES = (
+    "Nothing in your saved notes covers this — here's general information instead."
+)
+_HEADER_CHAT_WEAK_NOTES = "Your saved notes only weakly cover this."
+_LABEL_CHAT_NOTES = "From your saved notes:"
 
 
 def _format_answer_reply(result: AnswerResult) -> str:
@@ -198,8 +203,38 @@ def _format_answer_reply(result: AnswerResult) -> str:
     return _REPLY_UNKNOWN
 
 
+def _format_notes_plus_model_reply(answer: AnswerResult) -> str:
+    """Render a ``notes_plus_model`` reply (RC-3, D-108).
+
+    Per-segment provenance (generalized I-9): the notes segment renders
+    under the notes label with the LLM's grounded text; the model
+    segment renders under the existing model-knowledge label and is
+    omitted entirely when empty — no orphan label, no unlabeled model
+    content. Honest degradation comes first: empty diary evidence
+    states the no-notes header strictly before any model content, weak
+    evidence leads with the weak-notes header (D-108 fallback policy).
+    The provider/parse failure contours reuse the pinned literals via
+    the shared formatter.
+    """
+    fallback = answer.fallback
+
+    if fallback in (FallbackMode.PROVIDER_UNAVAILABLE, FallbackMode.PARSE_FAILURE):
+        return _format_answer_reply(answer)
+
+    parts: list[str] = []
+    if fallback is FallbackMode.NO_EVIDENCE:
+        parts.append(_HEADER_CHAT_NO_NOTES)
+    else:
+        if fallback is FallbackMode.WEAK_EVIDENCE:
+            parts.append(_HEADER_CHAT_WEAK_NOTES)
+        parts.append(f"{_LABEL_CHAT_NOTES}\n{answer.answer_text or ''}")
+    if answer.model_text:
+        parts.append(f"{_TRAILER_MODEL_KNOWLEDGE}\n{answer.model_text}")
+    return "\n\n".join(parts)
+
+
 def _format_chat_reply(result: RoutedChatResult) -> str:
-    """Render a routed-chat reply (RC-2, D-108).
+    """Render a routed-chat reply (RC-2/RC-3, D-108).
 
     The body always goes through :func:`_format_answer_reply`, so an
     effective ``notes_lookup`` answer is byte-identical to the ``/ask``
@@ -207,13 +242,18 @@ def _format_chat_reply(result: RoutedChatResult) -> str:
     inherited). A successful ``model_only`` answer appends the explicit
     model-knowledge trailer (generalized I-9: model content is never
     presented as note-grounded); its failure contours reuse the pinned
-    provider/parse literals via the shared formatter. When the effective
-    route differs from the requested one, the reply carries one
-    cause-neutral reroute trailer — classifier failure, unusable output,
-    a not-yet-dispatchable route, and an empty question all read the
-    same (R-6 surfaces the distinction in metadata and traces, not in
-    cause-specific prose).
+    provider/parse literals via the shared formatter. An effective
+    ``notes_plus_model`` answer renders the segmented mixed shape via
+    :func:`_format_notes_plus_model_reply` (only an exact requested
+    match dispatches there, so it never carries the reroute trailer).
+    When the effective route differs from the requested one, the reply
+    carries one cause-neutral reroute trailer — classifier failure,
+    unusable output, a not-yet-dispatchable route, and an empty
+    question all read the same (R-6 surfaces the distinction in
+    metadata and traces, not in cause-specific prose).
     """
+    if result.effective_route is ChatRoute.NOTES_PLUS_MODEL:
+        return _format_notes_plus_model_reply(result.answer)
     body = _format_answer_reply(result.answer)
     if result.effective_route is ChatRoute.MODEL_ONLY:
         if result.answer.fallback is FallbackMode.NONE:

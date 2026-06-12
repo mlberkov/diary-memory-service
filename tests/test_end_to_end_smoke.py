@@ -19,7 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from memory_rag.adapters.answers import MockChatClient
-from memory_rag.adapters.chat_routing import MockRouteClassifier
+from memory_rag.adapters.chat_routing import MockQueryRewriter, MockRouteClassifier
 from memory_rag.adapters.embeddings import MockEmbeddingClient
 from memory_rag.adapters.telegram.webhook import get_dispatcher
 from memory_rag.app import create_app
@@ -54,7 +54,9 @@ def _client_with_fresh_store(
         query,
         ExportService(store),
         settings,
-        routed_chat=RoutedChatService(MockRouteClassifier(), query, chat, store),
+        routed_chat=RoutedChatService(
+            MockRouteClassifier(), query, chat, store, rewriter=MockQueryRewriter()
+        ),
     )
     app = create_app(settings)
     app.dependency_overrides[get_dispatcher] = lambda: dispatcher
@@ -537,3 +539,40 @@ def test_chat_notes_lookup_round_trip_matches_the_ask_reply() -> None:
     assert ask_resp.json()["text"].startswith("Mock answer grounded in 1 diary chunk(s):")
     # One decision row for the /chat call; none for the /ask call.
     assert store.len_chat_route_decisions() == 1
+
+
+def test_chat_notes_plus_model_round_trip_returns_segmented_reply() -> None:
+    """RC-3 (D-108): a /chat question classified notes_plus_model (in-band
+    mock steering) answers with both labeled segments, persisting Query +
+    hits + AnswerTrace + decision row + rewrite row."""
+    client, store = _client_with_fresh_store()
+
+    _post(client, _update("/note 2026-05-09\nTried a notes_plus_model book", update_id=1))
+    resp = _post(client, _update("/chat notes_plus_model book", update_id=2, message_id=2))
+
+    assert resp.status_code == 200
+    text = resp.json()["text"]
+    assert text.startswith("From your saved notes:\n")
+    assert "(model knowledge — not from your saved notes)" in text
+    assert text.endswith("Mock general-knowledge segment.")
+    assert store.len_queries() == 1
+    assert store.len_answer_traces() == 1
+    assert store.len_chat_route_decisions() == 1
+    assert store.len_chat_query_rewrites() == 1
+    assert store.len_retrieval_hits() > 0
+
+
+def test_chat_notes_plus_model_round_trip_degrades_honestly_on_empty_corpus() -> None:
+    """RC-3 (D-108): with nothing ingested, the reply states the empty
+    diary evidence strictly before any model content."""
+    client, store = _client_with_fresh_store()
+
+    resp = _post(client, _update("/chat notes_plus_model what games suit him", update_id=1))
+
+    assert resp.status_code == 200
+    assert resp.json()["text"] == (
+        "Nothing in your saved notes covers this — here's general information instead."
+        "\n\n(model knowledge — not from your saved notes)"
+        "\nMock general-knowledge segment."
+    )
+    assert store.len_chat_query_rewrites() == 1

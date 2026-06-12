@@ -214,6 +214,10 @@ class AnswerResult:
     context: AnswerContext | None = None
     answer_text: str | None = None
     cited_chunk_ids: tuple[str, ...] = ()
+    # RC-3: the explicitly-model-knowledge segment of a routed mixed
+    # answer (generalized I-9 — the reply layer labels it; it is never
+    # attributed to the notes). ``None`` on every pre-existing contour.
+    model_text: str | None = None
 
     @property
     def context_chunk_ids(self) -> list[str]:

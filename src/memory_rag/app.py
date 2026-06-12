@@ -24,7 +24,7 @@ from fastapi import FastAPI
 
 from memory_rag import __version__
 from memory_rag.adapters.answers import build_chat_client
-from memory_rag.adapters.chat_routing import build_route_classifier
+from memory_rag.adapters.chat_routing import build_query_rewriter, build_route_classifier
 from memory_rag.adapters.embeddings import build_embedding_client
 from memory_rag.adapters.telegram import register_telegram_webhook
 from memory_rag.config import Settings, get_settings
@@ -103,6 +103,14 @@ def _verify_classifier_contour(settings: Settings) -> None:
         raise BootHealthError(f"classifier client build failed: {exc}") from exc
     if not client.model_name:
         raise BootHealthError("classifier client reported an empty model_name")
+    # The query rewriter rides the same contour (RC-3): same backend knob,
+    # same canonical pin, one factory shared with the request path.
+    try:
+        rewriter = build_query_rewriter(settings)
+    except ValueError as exc:
+        raise BootHealthError(f"rewriter client build failed: {exc}") from exc
+    if not rewriter.model_name:
+        raise BootHealthError("rewriter client reported an empty model_name")
 
 
 def _verify_pgvector(settings: Settings) -> None:

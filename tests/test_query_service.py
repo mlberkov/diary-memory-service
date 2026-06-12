@@ -822,3 +822,50 @@ def test_cited_chunk_ids_carry_llm_subset_not_full_retrieved() -> None:
     assert len(result.context_chunk_ids) >= 2  # >1 chunk retrieved
     assert len(result.cited_chunk_ids) == 1  # but the model cited only one
     assert set(result.cited_chunk_ids) < set(result.context_chunk_ids)  # strict subset
+
+
+# ---------------------------------------------------------------------------
+# Pure retrieval seam (RC-3): QueryService.retrieve
+# ---------------------------------------------------------------------------
+
+
+def test_retrieve_is_pure_and_returns_candidates() -> None:
+    """``retrieve`` writes no rows — persistence stays with the caller so
+    ``Query.fallback`` remains a single post-generation decision (D-035)."""
+    store = MockDomainStore()
+    _ingest(store, "2026-05-09\nTried a new book")
+    query = _wire(store)
+
+    candidates = query.retrieve("42", "book")
+
+    assert candidates.merged != []
+    assert candidates.embedding_model_name == MockEmbeddingClient().model_name
+    assert store.len_queries() == 0
+    assert store.len_retrieval_hits() == 0
+
+
+def test_retrieve_forwards_kwargs_to_both_legs() -> None:
+    store = MockDomainStore()
+    _ingest(store, "2026-05-09\nTried a new book", msg_id="100", subject_id="kid-1")
+    _ingest(store, "2026-05-20\nAnother book chapter", msg_id="101", subject_id="kid-1")
+    query = _wire(store)
+
+    scoped = query.retrieve(
+        "42",
+        "book",
+        date_range=DateRange(start=date(2026, 5, 1), end=date(2026, 5, 10)),
+        subject_scope="kid-1",
+    )
+    texts = {h.chunk.chunk_text for h in scoped.merged}
+    assert texts == {"Tried a new book"}
+
+    # Strict subject match: a different scope excludes everything.
+    other = query.retrieve("42", "book", subject_scope="kid-2")
+    assert other.merged == []
+
+
+def test_retrieve_requires_community_id() -> None:
+    store = MockDomainStore()
+    query = _wire(store)
+    with pytest.raises(ValueError, match="community_id"):
+        query.retrieve("", "book")

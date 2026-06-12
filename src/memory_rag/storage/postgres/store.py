@@ -45,7 +45,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from memory_rag.core.chat.models import ChatRoute, ChatRouteDecision
+from memory_rag.core.chat.models import ChatQueryRewrite, ChatRoute, ChatRouteDecision
 from memory_rag.core.domain.models import (
     AnswerTrace,
     DateRange,
@@ -711,6 +711,61 @@ class PostgresDomainStore:
             classifier_raw_output=row["classifier_raw_output"],
             classifier_latency_ms=int(row["classifier_latency_ms"]),
             query_id=row["query_id"],
+            created_at=row["created_at"],
+        )
+
+    def save_chat_query_rewrite(self, rewrite: ChatQueryRewrite) -> None:
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO chat_query_rewrites "
+                "(rewrite_id, decision_id, community_id, rewritten_query, "
+                " date_start, date_end, subject_scope, rewriter_model_name, "
+                " rewriter_raw_output, rewriter_latency_ms, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    rewrite.rewrite_id,
+                    rewrite.decision_id,
+                    rewrite.community_id,
+                    rewrite.rewritten_query,
+                    rewrite.date_start,
+                    rewrite.date_end,
+                    rewrite.subject_scope,
+                    rewrite.rewriter_model_name,
+                    rewrite.rewriter_raw_output,
+                    rewrite.rewriter_latency_ms,
+                    rewrite.created_at,
+                ),
+            )
+            conn.commit()
+
+    def get_chat_query_rewrite_for_decision(
+        self, decision_id: str, *, community_id: str
+    ) -> ChatQueryRewrite | None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                "SELECT rewrite_id, decision_id, community_id, rewritten_query, "
+                "       date_start, date_end, subject_scope, rewriter_model_name, "
+                "       rewriter_raw_output, rewriter_latency_ms, created_at "
+                "  FROM chat_query_rewrites "
+                " WHERE decision_id = %s AND community_id = %s",
+                (decision_id, community_id),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return ChatQueryRewrite(
+            rewrite_id=row["rewrite_id"],
+            decision_id=row["decision_id"],
+            community_id=row["community_id"],
+            rewritten_query=row["rewritten_query"],
+            date_start=row["date_start"],
+            date_end=row["date_end"],
+            subject_scope=row["subject_scope"],
+            rewriter_model_name=row["rewriter_model_name"],
+            rewriter_raw_output=row["rewriter_raw_output"],
+            rewriter_latency_ms=int(row["rewriter_latency_ms"]),
             created_at=row["created_at"],
         )
 
