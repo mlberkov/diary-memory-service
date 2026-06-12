@@ -32,12 +32,18 @@ class AnswerPrompt:
     references, in the same order they appear in ``context.ordered_chunks``.
     The future answer-trace packet records ``prompt_version`` against the
     persisted ``Query`` row.
+
+    ``knowledge_refs`` lists the knowledge-excerpt refs the user-side
+    prompt body offers for citation (RC-4, ``notes-plus-knowledge-v1``
+    only); ``()`` on every other prompt version, so pre-existing
+    constructions are unchanged.
     """
 
     prompt_version: str
     system_text: str
     user_text: str
     cited_chunk_ids: tuple[str, ...]
+    knowledge_refs: tuple[str, ...] = ()
 
 
 _SYSTEM_TEXT: Final[str] = (

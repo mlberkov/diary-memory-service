@@ -94,3 +94,11 @@ def test_answer_result_model_text_defaults_to_none() -> None:
     stays valid and carries no model segment."""
     result = AnswerResult(fallback=FallbackMode.NONE, query_text="book")
     assert result.model_text is None
+
+
+def test_answer_result_knowledge_fields_default_to_empty() -> None:
+    """RC-4 additive carriage: every pre-existing AnswerResult construction
+    stays valid and carries no knowledge segment."""
+    result = AnswerResult(fallback=FallbackMode.NONE, query_text="book")
+    assert result.knowledge_text is None
+    assert result.knowledge_refs == ()

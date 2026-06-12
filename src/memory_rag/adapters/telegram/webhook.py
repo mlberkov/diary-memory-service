@@ -21,8 +21,13 @@ from typing import Annotated, Any
 from fastapi import Depends, FastAPI, Header, HTTPException
 
 from memory_rag.adapters.answers import build_chat_client
-from memory_rag.adapters.chat_routing import build_query_rewriter, build_route_classifier
+from memory_rag.adapters.chat_routing import (
+    build_outward_rewriter,
+    build_query_rewriter,
+    build_route_classifier,
+)
 from memory_rag.adapters.embeddings import build_embedding_client
+from memory_rag.adapters.knowledge import build_knowledge_source
 from memory_rag.adapters.telegram.author_display import (
     AuthorDisplayInputStore,
     TelegramBackendStore,
@@ -92,6 +97,8 @@ def get_dispatcher() -> Dispatcher:
         chat_client = build_chat_client(settings)
         route_classifier = build_route_classifier(settings)
         query_rewriter = build_query_rewriter(settings)
+        outward_rewriter = build_outward_rewriter(settings)
+        knowledge_source = build_knowledge_source(settings)
         query_service = QueryService(
             store,
             store,
@@ -111,13 +118,15 @@ def get_dispatcher() -> Dispatcher:
                 chat_client,
                 store,
                 rewriter=query_rewriter,
+                knowledge_source=knowledge_source,
+                outward_rewriter=outward_rewriter,
             ),
         )
         log.info(
             "dispatcher.built storage_backend=%s embedding_backend=%s "
             "embedding_model=%s embedding_dim=%d chat_backend=%s "
             "chat_model=%s classifier_backend=%s classifier_model=%s "
-            "top_k=%d candidate_k=%d",
+            "knowledge_backend=%s top_k=%d candidate_k=%d",
             settings.storage_backend,
             settings.embedding_backend,
             embedding_client.model_name,
@@ -126,6 +135,7 @@ def get_dispatcher() -> Dispatcher:
             chat_client.model_name,
             settings.classifier_backend,
             route_classifier.model_name,
+            knowledge_source.provider_name,
             settings.retrieval_top_k,
             settings.retrieval_candidate_k,
         )

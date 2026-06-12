@@ -1,0 +1,135 @@
+{
+  "_template": true,
+  "drill": "RC closure — routed-chat real-backend smoke: all four /chat routes end-to-end with real OpenAI embeddings (D-024) + real OpenAI chat (D-037) + real gpt-4.1-mini classifier (D-109) + real Tavily knowledge source (D-111) (D-111 prep / operator capture)",
+  "metadata": {
+    "capture_date": "<TO_FILL_BY_OPERATOR YYYYMMDD>",
+    "environment": "real backend — STORAGE_BACKEND=postgres (migrations 0001..0009 applied), EMBEDDING_BACKEND=openai, EMBEDDING_MODEL=text-embedding-3-large, EMBEDDING_DIMENSION=3072, CHAT_BACKEND=openai, CHAT_MODEL=gpt-4.1, CLASSIFIER_BACKEND=openai, CLASSIFIER_MODEL=gpt-4.1-mini, KNOWLEDGE_BACKEND=tavily, KNOWLEDGE_MAX_RESULTS=<TO_FILL_BY_OPERATOR — default 5 per A-47>; OP-2 bounded retry/backoff active at defaults; webhook secret set",
+    "host_redacted": true,
+    "notes": "Live operator evidence for the routed-chat milestone closure (roadmap section 6). Per the redaction rule (RUNBOOK 'Routed-chat real-backend smoke'), credential-bearing values (OPENAI_API_KEY, TAVILY_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, PUBLIC_HOSTNAME if used, webhook URL token) are replaced by <REDACTED> placeholders or a _redacted: true flag; structural outcomes (status strings, log-line shapes, row values, route names, prompt versions, latency_ms magnitudes, cited URLs) are preserved verbatim. Operator action required before commit: (1) copy this file to docs/routed-chat-drill/routed-chat-smoke-<YYYYMMDD>-evidence.json (UTC-dated), (2) drop the top-level \"_template\": true flag, (3) replace every <TO_FILL_BY_OPERATOR> placeholder with the verbatim captured observation, (4) run the redaction grep from the RUNBOOK subsection."
+  },
+  "preflight_state": {
+    "env_knobs": {
+      "STORAGE_BACKEND": "postgres",
+      "EMBEDDING_BACKEND": "openai",
+      "EMBEDDING_MODEL": "text-embedding-3-large",
+      "EMBEDDING_DIMENSION": 3072,
+      "CHAT_BACKEND": "openai",
+      "CHAT_MODEL": "gpt-4.1",
+      "CLASSIFIER_BACKEND": "openai",
+      "CLASSIFIER_MODEL": "gpt-4.1-mini",
+      "KNOWLEDGE_BACKEND": "tavily",
+      "KNOWLEDGE_MAX_RESULTS": "<TO_FILL_BY_OPERATOR — default 5>",
+      "OPENAI_API_KEY": "<REDACTED>",
+      "TAVILY_API_KEY": "<REDACTED>",
+      "TELEGRAM_WEBHOOK_SECRET": "<REDACTED>",
+      "TELEGRAM_BOT_TOKEN": "<REDACTED>"
+    },
+    "boot_log_line_shape": "app.created env=<env> version=<version> embedding_backend=openai embedding_dim=3072 chat_backend=openai chat_model=gpt-4.1 classifier_backend=openai classifier_model=gpt-4.1-mini knowledge_backend=tavily",
+    "boot_log_line_verbatim": "<TO_FILL_BY_OPERATOR — verbatim app.created line; a successful line implies the embedding, chat, classifier, and knowledge gates all passed (R-10)>",
+    "boot_gate_outcome": "ok",
+    "migrations_at_head": "<TO_FILL_BY_OPERATOR — expected: 9 rows in the yoyo migration table, tail = 0009.chat-knowledge-searches>"
+  },
+  "seed_note_round_trip": {
+    "note_text": "<TO_FILL_BY_OPERATOR — the /note text the routed questions ground on>",
+    "reply_text_verbatim": "<TO_FILL_BY_OPERATOR — e.g. \"Saved your note for <date>.\">",
+    "embedding_status_after": "<TO_FILL_BY_OPERATOR — expected: ready for the chunk>"
+  },
+  "route_round_trips": {
+    "_note": "One entry per product-register route. The classifier is live: requested_route is recorded from the chat_route_decisions row, not pre-asserted; a reroute (effective != requested) is captured verbatim, not a defect.",
+    "diary_lookup": {
+      "question_verbatim": "<TO_FILL_BY_OPERATOR — a notes question>",
+      "reply_text_verbatim": "<TO_FILL_BY_OPERATOR>",
+      "decision_row": {
+        "requested_route": "<TO_FILL_BY_OPERATOR>",
+        "effective_route": "<TO_FILL_BY_OPERATOR — expected: notes_lookup>",
+        "classifier_model_name": "gpt-4.1-mini",
+        "query_id_present": "<TO_FILL_BY_OPERATOR — expected: true>"
+      },
+      "answer_trace_row": {
+        "prompt_version": "<TO_FILL_BY_OPERATOR — expected: v1>",
+        "fallback_mode": "<TO_FILL_BY_OPERATOR>",
+        "latency_ms": "<TO_FILL_BY_OPERATOR — integer > 0>"
+      }
+    },
+    "general_llm": {
+      "question_verbatim": "<TO_FILL_BY_OPERATOR — a general-knowledge question>",
+      "reply_text_verbatim": "<TO_FILL_BY_OPERATOR — expected to end with the model-knowledge trailer>",
+      "decision_row": {
+        "requested_route": "<TO_FILL_BY_OPERATOR>",
+        "effective_route": "<TO_FILL_BY_OPERATOR — expected: model_only>",
+        "classifier_model_name": "gpt-4.1-mini",
+        "query_id_present": "<TO_FILL_BY_OPERATOR — expected: true>"
+      },
+      "answer_trace_row": {
+        "prompt_version": "<TO_FILL_BY_OPERATOR — expected: model-only-v1>",
+        "fallback_mode": "<TO_FILL_BY_OPERATOR>",
+        "latency_ms": "<TO_FILL_BY_OPERATOR — integer > 0>"
+      }
+    },
+    "diary_plus_llm": {
+      "question_verbatim": "<TO_FILL_BY_OPERATOR — a notes-plus-advice question>",
+      "reply_text_verbatim": "<TO_FILL_BY_OPERATOR — segments labeled; degradation header first if diary evidence was empty/weak>",
+      "decision_row": {
+        "requested_route": "<TO_FILL_BY_OPERATOR>",
+        "effective_route": "<TO_FILL_BY_OPERATOR — expected: notes_plus_model>",
+        "classifier_model_name": "gpt-4.1-mini",
+        "query_id_present": "<TO_FILL_BY_OPERATOR — expected: true>"
+      },
+      "rewrite_row": {
+        "rewritten_query": "<TO_FILL_BY_OPERATOR — string, or null if the rewrite degraded>",
+        "date_bounds": "<TO_FILL_BY_OPERATOR — date_start/date_end or null>"
+      },
+      "answer_trace_row": {
+        "prompt_version": "<TO_FILL_BY_OPERATOR — expected: notes-plus-model-v1>",
+        "fallback_mode": "<TO_FILL_BY_OPERATOR>",
+        "latency_ms": "<TO_FILL_BY_OPERATOR — integer > 0>"
+      }
+    },
+    "diary_plus_web": {
+      "question_verbatim": "<TO_FILL_BY_OPERATOR — a notes-plus-world question>",
+      "reply_text_verbatim": "<TO_FILL_BY_OPERATOR — segments labeled; the web segment lists its cited URLs verbatim>",
+      "decision_row": {
+        "requested_route": "<TO_FILL_BY_OPERATOR>",
+        "effective_route": "<TO_FILL_BY_OPERATOR — expected: notes_plus_knowledge>",
+        "classifier_model_name": "gpt-4.1-mini",
+        "query_id_present": "<TO_FILL_BY_OPERATOR — expected: true>"
+      },
+      "rewrite_row": {
+        "rewritten_query": "<TO_FILL_BY_OPERATOR — string, or null if the rewrite degraded>"
+      },
+      "knowledge_search_row": {
+        "outward_query_verbatim": "<TO_FILL_BY_OPERATOR — the query actually sent to Tavily (auditable personal-context distillation, D-111 privacy note)>",
+        "provider_name": "tavily",
+        "result_count": "<TO_FILL_BY_OPERATOR — integer; 0 means the search failed and the route degraded in-route>",
+        "latency_ms": "<TO_FILL_BY_OPERATOR — integer>"
+      },
+      "cited_urls_in_reply": "<TO_FILL_BY_OPERATOR — the URLs rendered under the web label, verbatim>",
+      "answer_trace_row": {
+        "prompt_version": "<TO_FILL_BY_OPERATOR — expected: notes-plus-knowledge-v1>",
+        "fallback_mode": "<TO_FILL_BY_OPERATOR>",
+        "latency_ms": "<TO_FILL_BY_OPERATOR — integer > 0>"
+      }
+    }
+  },
+  "provider_attempt_log_lines": {
+    "classifier_verbatim": "<TO_FILL_BY_OPERATOR — one provider.attempt line with label=openai.route_classifier>",
+    "tavily_verbatim": "<TO_FILL_BY_OPERATOR — one provider.attempt line with label=tavily.search>"
+  },
+  "out_of_scope_for_this_drill": [
+    "Any src/ / tests/ / schema / migration / config change.",
+    "Any live provider call inside make check or any new gated test.",
+    "Routing-accuracy measurement or thresholds (D-108: observed via traces, not gated).",
+    "Resilience-knob tuning beyond D-047 / D-049 defaults.",
+    "A-47 knowledge-default re-measurement (the drill observes the defaults as-is).",
+    "A-10 edit/delete; A-21 / Phase 9 host seams."
+  ],
+  "summary": {
+    "diary_lookup_round_trip_green": "<TO_FILL_BY_OPERATOR — true/false>",
+    "general_llm_round_trip_green": "<TO_FILL_BY_OPERATOR — true/false>",
+    "diary_plus_llm_round_trip_green": "<TO_FILL_BY_OPERATOR — true/false>",
+    "diary_plus_web_round_trip_green": "<TO_FILL_BY_OPERATOR — true/false; requires a reply whose web segment cites at least one URL drawn from the Tavily results>",
+    "provenance_labels_observed": "<TO_FILL_BY_OPERATOR — true if every mixed reply labeled its segments and no model/web content was attributed to the diary>",
+    "closes_routed_chat_milestone": "<TO_FILL_BY_OPERATOR — true only when all four round trips are green>",
+    "verdict": "<TO_FILL_BY_OPERATOR>"
+  }
+}

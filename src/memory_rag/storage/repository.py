@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from memory_rag.core.chat.models import ChatQueryRewrite, ChatRouteDecision
+from memory_rag.core.chat.models import ChatKnowledgeSearch, ChatQueryRewrite, ChatRouteDecision
 from memory_rag.core.domain.models import (
     AnswerTrace,
     EventChunk,
@@ -251,6 +251,29 @@ class DomainRepository(Protocol):
 
         Community scoping is mandatory and fail-closed (I-7, R-3): a
         null/empty ``community_id`` raises; a rewrite owned by a
+        different community reads as ``None`` — the row carries its own
+        ``community_id`` column, so no parent join is needed.
+        ``community_id`` is keyword-only to prevent a silent positional
+        swap between two ``str`` identifiers (D-088).
+        """
+
+    def save_chat_knowledge_search(self, search: ChatKnowledgeSearch) -> None:
+        """Persist one knowledge-search trace row per ``notes_plus_knowledge`` execution (RC-4).
+
+        The caller is ``RoutedChatService.chat``, strictly after the
+        :class:`ChatRouteDecision` row the search links to. At most one
+        search row exists per decision (backends enforce uniqueness on
+        ``decision_id``). Append-only: backends never update or delete
+        it.
+        """
+
+    def get_chat_knowledge_search_for_decision(
+        self, decision_id: str, *, community_id: str
+    ) -> ChatKnowledgeSearch | None:
+        """Fetch the knowledge-search row for a decision within a community, or ``None`` (RC-4).
+
+        Community scoping is mandatory and fail-closed (I-7, R-3): a
+        null/empty ``community_id`` raises; a search owned by a
         different community reads as ``None`` — the row carries its own
         ``community_id`` column, so no parent join is needed.
         ``community_id`` is keyword-only to prevent a silent positional

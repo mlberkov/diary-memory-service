@@ -45,7 +45,12 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from memory_rag.core.chat.models import ChatQueryRewrite, ChatRoute, ChatRouteDecision
+from memory_rag.core.chat.models import (
+    ChatKnowledgeSearch,
+    ChatQueryRewrite,
+    ChatRoute,
+    ChatRouteDecision,
+)
 from memory_rag.core.domain.models import (
     AnswerTrace,
     DateRange,
@@ -766,6 +771,65 @@ class PostgresDomainStore:
             rewriter_model_name=row["rewriter_model_name"],
             rewriter_raw_output=row["rewriter_raw_output"],
             rewriter_latency_ms=int(row["rewriter_latency_ms"]),
+            created_at=row["created_at"],
+        )
+
+    def save_chat_knowledge_search(self, search: ChatKnowledgeSearch) -> None:
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO chat_knowledge_searches "
+                "(search_id, decision_id, community_id, outward_query, "
+                " outward_rewriter_model_name, outward_rewriter_raw_output, "
+                " outward_rewriter_latency_ms, provider_name, result_count, "
+                " raw_output, latency_ms, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    search.search_id,
+                    search.decision_id,
+                    search.community_id,
+                    search.outward_query,
+                    search.outward_rewriter_model_name,
+                    search.outward_rewriter_raw_output,
+                    search.outward_rewriter_latency_ms,
+                    search.provider_name,
+                    search.result_count,
+                    search.raw_output,
+                    search.latency_ms,
+                    search.created_at,
+                ),
+            )
+            conn.commit()
+
+    def get_chat_knowledge_search_for_decision(
+        self, decision_id: str, *, community_id: str
+    ) -> ChatKnowledgeSearch | None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                "SELECT search_id, decision_id, community_id, outward_query, "
+                "       outward_rewriter_model_name, outward_rewriter_raw_output, "
+                "       outward_rewriter_latency_ms, provider_name, result_count, "
+                "       raw_output, latency_ms, created_at "
+                "  FROM chat_knowledge_searches "
+                " WHERE decision_id = %s AND community_id = %s",
+                (decision_id, community_id),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return ChatKnowledgeSearch(
+            search_id=row["search_id"],
+            decision_id=row["decision_id"],
+            community_id=row["community_id"],
+            outward_query=row["outward_query"],
+            outward_rewriter_model_name=row["outward_rewriter_model_name"],
+            outward_rewriter_raw_output=row["outward_rewriter_raw_output"],
+            outward_rewriter_latency_ms=int(row["outward_rewriter_latency_ms"]),
+            provider_name=row["provider_name"],
+            result_count=int(row["result_count"]),
+            raw_output=row["raw_output"],
+            latency_ms=int(row["latency_ms"]),
             created_at=row["created_at"],
         )
 

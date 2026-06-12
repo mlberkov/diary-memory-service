@@ -1,4 +1,4 @@
-"""Single factories for the configured classifier and rewriter.
+"""Single factories for the configured classifier and rewriters.
 
 Boot gate (R-10) and request-path wiring (``get_dispatcher``) both go
 through these functions so they cannot disagree on backend or model
@@ -6,17 +6,18 @@ name. ``classifier_backend="openai"`` requires ``OPENAI_API_KEY`` and
 the canonical ``CLASSIFIER_MODEL`` (RC-2, D-108); ``mock`` is the
 test/dev default and has no external dependencies. The retry policy
 reuses the shared ``provider_*`` knobs (R-9). The query rewriter (RC-3)
-rides the classifier contour — same backend knob, same model pin — so
-no third knob set exists.
+and the outward rewriter (RC-4) ride the classifier contour — same
+backend knob, same model pin — so no further knob set exists.
 """
 
 from __future__ import annotations
 
 from memory_rag.adapters.chat_routing.mock import MockRouteClassifier
+from memory_rag.adapters.chat_routing.outward_mock import MockOutwardRewriter
 from memory_rag.adapters.chat_routing.rewrite_mock import MockQueryRewriter
 from memory_rag.adapters.resilience import RetryPolicy
 from memory_rag.config import Settings
-from memory_rag.core.chat import ChatRouteClassifier, QueryRewriter
+from memory_rag.core.chat import ChatRouteClassifier, OutwardQueryRewriter, QueryRewriter
 
 
 def _retry_policy(settings: Settings) -> RetryPolicy:
@@ -50,3 +51,15 @@ def build_query_rewriter(settings: Settings) -> QueryRewriter:
             retry_policy=_retry_policy(settings),
         )
     return MockQueryRewriter()
+
+
+def build_outward_rewriter(settings: Settings) -> OutwardQueryRewriter:
+    if settings.classifier_backend == "openai":
+        from memory_rag.adapters.chat_routing.outward_openai import OpenAIOutwardRewriter
+
+        return OpenAIOutwardRewriter(
+            api_key=settings.openai_api_key,
+            model_name=settings.classifier_model,
+            retry_policy=_retry_policy(settings),
+        )
+    return MockOutwardRewriter()

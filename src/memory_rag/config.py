@@ -80,6 +80,14 @@ class Settings(BaseSettings):
     # canonical pin — a separate pin alongside (not a change to) the D-037
     # ``chat_model`` gate. The mock backend ignores it.
     classifier_model: str = Field(default="")
+    # Knowledge-source contour (RC-4, D-108): ``tavily`` requires
+    # ``TAVILY_API_KEY`` (boot-gated, R-10); ``mock`` is the test/dev
+    # default with no external dependency. ``knowledge_max_results`` caps
+    # how many excerpts one knowledge search may return (default is a
+    # tuning placeholder — see docs/assumptions.md).
+    knowledge_backend: Literal["mock", "tavily"] = Field(default="mock")
+    tavily_api_key: str = Field(default="")
+    knowledge_max_results: int = Field(default=5, ge=1)
 
     # Provider-resilience knobs (R-9), shared by every OpenAI adapter via its
     # factory. ``provider_timeout_seconds`` is the per-attempt wall-clock

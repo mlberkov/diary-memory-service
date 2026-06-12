@@ -33,6 +33,15 @@ round-trips through
 — a cited notes plane when the prompt carries chunks, an empty
 ``no_evidence`` notes plane otherwise, and a deterministic model
 segment on both contours. The earlier branches are byte-unchanged.
+
+RC-4 adds a third additive branch keyed on
+``prompt.prompt_version == NOTES_PLUS_KNOWLEDGE_PROMPT_VERSION``:
+notes-plus-knowledge prompts get a deterministic six-field object that
+round-trips through
+:func:`~memory_rag.core.chat.knowledge_prompt.parse_notes_plus_knowledge_answer`
+— the RC-3 notes-plane behavior plus a cited knowledge plane when the
+prompt offers ``knowledge_refs`` and an empty knowledge plane
+otherwise. The earlier branches are byte-unchanged.
 """
 
 from __future__ import annotations
@@ -41,6 +50,7 @@ import json
 
 from memory_rag.core.answers.client import ChatResponse
 from memory_rag.core.chat.enriched_prompt import NOTES_PLUS_MODEL_PROMPT_VERSION
+from memory_rag.core.chat.knowledge_prompt import NOTES_PLUS_KNOWLEDGE_PROMPT_VERSION
 from memory_rag.core.chat.model_prompt import MODEL_ONLY_PROMPT_VERSION
 from memory_rag.core.domain.answer_prompt import AnswerPrompt
 
@@ -63,6 +73,8 @@ class MockChatClient:
             return self._complete_model_only(prompt)
         if prompt.prompt_version == NOTES_PLUS_MODEL_PROMPT_VERSION:
             return self._complete_notes_plus_model(prompt)
+        if prompt.prompt_version == NOTES_PLUS_KNOWLEDGE_PROMPT_VERSION:
+            return self._complete_notes_plus_knowledge(prompt)
         cited = prompt.cited_chunk_ids
         if cited:
             answer_text = f"Mock answer grounded in {len(cited)} diary chunk(s): " + ", ".join(
@@ -108,6 +120,45 @@ class MockChatClient:
                 "model_text": _MOCK_NOTES_PLUS_MODEL_TEXT,
                 "notes_uncertainty": "no_evidence",
             }
+        raw_text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        token_counts = {
+            "prompt": len(prompt.system_text) + len(prompt.user_text),
+            "completion": len(raw_text),
+        }
+        return ChatResponse(
+            raw_text=raw_text,
+            model_name=self._model_name,
+            token_counts=token_counts,
+            latency_ms=0,
+        )
+
+    def _complete_notes_plus_knowledge(self, prompt: AnswerPrompt) -> ChatResponse:
+        cited = prompt.cited_chunk_ids
+        refs = prompt.knowledge_refs
+        payload: dict[str, object]
+        if cited:
+            payload = {
+                "notes_text": (
+                    f"Mock notes segment grounded in {len(cited)} chunk(s): " + ", ".join(cited)
+                ),
+                "cited_chunk_ids": list(cited),
+                "notes_uncertainty": "confident",
+            }
+        else:
+            payload = {
+                "notes_text": "",
+                "cited_chunk_ids": [],
+                "notes_uncertainty": "no_evidence",
+            }
+        if refs:
+            payload["knowledge_text"] = (
+                f"Mock knowledge segment grounded in {len(refs)} excerpt(s): " + ", ".join(refs)
+            )
+            payload["cited_knowledge_refs"] = list(refs)
+        else:
+            payload["knowledge_text"] = ""
+            payload["cited_knowledge_refs"] = []
+        payload["model_text"] = _MOCK_NOTES_PLUS_MODEL_TEXT
         raw_text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         token_counts = {
             "prompt": len(prompt.system_text) + len(prompt.user_text),

@@ -19,8 +19,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from memory_rag.adapters.answers import MockChatClient
-from memory_rag.adapters.chat_routing import MockQueryRewriter, MockRouteClassifier
+from memory_rag.adapters.chat_routing import (
+    MockOutwardRewriter,
+    MockQueryRewriter,
+    MockRouteClassifier,
+)
 from memory_rag.adapters.embeddings import MockEmbeddingClient
+from memory_rag.adapters.knowledge import MockKnowledgeSource
 from memory_rag.adapters.telegram.webhook import get_dispatcher
 from memory_rag.app import create_app
 from memory_rag.config import Settings
@@ -42,7 +47,9 @@ def _settings() -> Settings:
 
 
 def _client_with_fresh_store(
-    *, chat_client: ChatClient | None = None
+    *,
+    chat_client: ChatClient | None = None,
+    knowledge_source: MockKnowledgeSource | None = None,
 ) -> tuple[TestClient, MockDomainStore]:
     store = MockDomainStore()
     embed = MockEmbeddingClient()
@@ -55,7 +62,13 @@ def _client_with_fresh_store(
         ExportService(store),
         settings,
         routed_chat=RoutedChatService(
-            MockRouteClassifier(), query, chat, store, rewriter=MockQueryRewriter()
+            MockRouteClassifier(),
+            query,
+            chat,
+            store,
+            rewriter=MockQueryRewriter(),
+            knowledge_source=knowledge_source,
+            outward_rewriter=(MockOutwardRewriter() if knowledge_source is not None else None),
         ),
     )
     app = create_app(settings)
@@ -559,6 +572,36 @@ def test_chat_notes_plus_model_round_trip_returns_segmented_reply() -> None:
     assert store.len_answer_traces() == 1
     assert store.len_chat_route_decisions() == 1
     assert store.len_chat_query_rewrites() == 1
+    assert store.len_retrieval_hits() > 0
+
+
+def test_chat_notes_plus_knowledge_round_trip_returns_three_segment_reply() -> None:
+    """RC-4 (D-108): a /chat question classified notes_plus_knowledge
+    (in-band mock steering) answers with all three labeled segments —
+    the web segment citing its refs verbatim — persisting Query + hits +
+    AnswerTrace + decision row + rewrite row + knowledge-search row."""
+    from memory_rag.core.chat import KnowledgeExcerpt
+
+    knowledge = MockKnowledgeSource(
+        excerpts=(KnowledgeExcerpt(ref="https://example.org/naps", title="Naps", text="nap facts"),)
+    )
+    client, store = _client_with_fresh_store(knowledge_source=knowledge)
+
+    _post(client, _update("/note 2026-05-09\nTried a notes_plus_knowledge nap", update_id=1))
+    resp = _post(client, _update("/chat notes_plus_knowledge nap", update_id=2, message_id=2))
+
+    assert resp.status_code == 200
+    text = resp.json()["text"]
+    assert text.startswith("From your saved notes:\n")
+    assert "From the web:" in text
+    assert "https://example.org/naps" in text
+    assert "(model knowledge — not from your saved notes)" in text
+    assert text.endswith("Mock general-knowledge segment.")
+    assert store.len_queries() == 1
+    assert store.len_answer_traces() == 1
+    assert store.len_chat_route_decisions() == 1
+    assert store.len_chat_query_rewrites() == 1
+    assert store.len_chat_knowledge_searches() == 1
     assert store.len_retrieval_hits() > 0
 
 

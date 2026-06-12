@@ -33,7 +33,12 @@ import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
-from memory_rag.core.chat.models import ChatQueryRewrite, ChatRoute, ChatRouteDecision
+from memory_rag.core.chat.models import (
+    ChatKnowledgeSearch,
+    ChatQueryRewrite,
+    ChatRoute,
+    ChatRouteDecision,
+)
 from memory_rag.core.domain.models import (
     AnswerTrace,
     DateRange,
@@ -208,6 +213,27 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_query_rewrites_decision_id
 
 CREATE INDEX IF NOT EXISTS idx_chat_query_rewrites_community_id
     ON chat_query_rewrites(community_id);
+
+CREATE TABLE IF NOT EXISTS chat_knowledge_searches (
+    search_id                   TEXT PRIMARY KEY,
+    decision_id                 TEXT NOT NULL REFERENCES chat_route_decisions(decision_id),
+    community_id                TEXT NOT NULL,
+    outward_query               TEXT NOT NULL,
+    outward_rewriter_model_name TEXT NOT NULL,
+    outward_rewriter_raw_output TEXT NOT NULL,
+    outward_rewriter_latency_ms INTEGER NOT NULL CHECK (outward_rewriter_latency_ms >= 0),
+    provider_name               TEXT NOT NULL,
+    result_count                INTEGER NOT NULL CHECK (result_count >= 0),
+    raw_output                  TEXT NOT NULL,
+    latency_ms                  INTEGER NOT NULL CHECK (latency_ms >= 0),
+    created_at                  TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_knowledge_searches_decision_id
+    ON chat_knowledge_searches(decision_id);
+
+CREATE INDEX IF NOT EXISTS idx_chat_knowledge_searches_community_id
+    ON chat_knowledge_searches(community_id);
 
 CREATE TABLE IF NOT EXISTS indexing_dead_letters (
     dead_letter_id    TEXT PRIMARY KEY,
@@ -810,6 +836,64 @@ class SqliteDomainStore:
             rewriter_model_name=row["rewriter_model_name"],
             rewriter_raw_output=row["rewriter_raw_output"],
             rewriter_latency_ms=int(row["rewriter_latency_ms"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
+
+    def save_chat_knowledge_search(self, search: ChatKnowledgeSearch) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO chat_knowledge_searches "
+                "(search_id, decision_id, community_id, outward_query, "
+                " outward_rewriter_model_name, outward_rewriter_raw_output, "
+                " outward_rewriter_latency_ms, provider_name, result_count, "
+                " raw_output, latency_ms, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    search.search_id,
+                    search.decision_id,
+                    search.community_id,
+                    search.outward_query,
+                    search.outward_rewriter_model_name,
+                    search.outward_rewriter_raw_output,
+                    search.outward_rewriter_latency_ms,
+                    search.provider_name,
+                    search.result_count,
+                    search.raw_output,
+                    search.latency_ms,
+                    search.created_at.isoformat(),
+                ),
+            )
+            conn.commit()
+
+    def get_chat_knowledge_search_for_decision(
+        self, decision_id: str, *, community_id: str
+    ) -> ChatKnowledgeSearch | None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT search_id, decision_id, community_id, outward_query, "
+                "       outward_rewriter_model_name, outward_rewriter_raw_output, "
+                "       outward_rewriter_latency_ms, provider_name, result_count, "
+                "       raw_output, latency_ms, created_at "
+                "  FROM chat_knowledge_searches "
+                " WHERE decision_id = ? AND community_id = ?",
+                (decision_id, community_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return ChatKnowledgeSearch(
+            search_id=row["search_id"],
+            decision_id=row["decision_id"],
+            community_id=row["community_id"],
+            outward_query=row["outward_query"],
+            outward_rewriter_model_name=row["outward_rewriter_model_name"],
+            outward_rewriter_raw_output=row["outward_rewriter_raw_output"],
+            outward_rewriter_latency_ms=int(row["outward_rewriter_latency_ms"]),
+            provider_name=row["provider_name"],
+            result_count=int(row["result_count"]),
+            raw_output=row["raw_output"],
+            latency_ms=int(row["latency_ms"]),
             created_at=datetime.fromisoformat(row["created_at"]),
         )
 

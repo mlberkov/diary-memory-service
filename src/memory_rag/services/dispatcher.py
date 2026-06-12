@@ -153,6 +153,11 @@ _HEADER_CHAT_NO_NOTES = (
 )
 _HEADER_CHAT_WEAK_NOTES = "Your saved notes only weakly cover this."
 _LABEL_CHAT_NOTES = "From your saved notes:"
+# RC-4: the user-facing label deliberately says "web" — the only live
+# knowledge provider is a web search; the core stays on the neutral
+# "knowledge" register and this literal can be revisited when a
+# non-web provider lands behind the same port (D-108).
+_LABEL_CHAT_WEB = "From the web:"
 
 
 def _format_answer_reply(result: AnswerResult) -> str:
@@ -233,8 +238,42 @@ def _format_notes_plus_model_reply(answer: AnswerResult) -> str:
     return "\n\n".join(parts)
 
 
+def _format_notes_plus_knowledge_reply(answer: AnswerResult) -> str:
+    """Render a ``notes_plus_knowledge`` reply (RC-4, D-108).
+
+    Per-segment provenance (generalized I-9): the notes segment renders
+    under the notes label; the knowledge segment renders under the web
+    label with its cited refs (URLs) listed verbatim beneath the text;
+    the model segment renders under the existing model-knowledge label.
+    Each segment is omitted entirely when empty — no orphan label, no
+    unlabeled content. Honest degradation comes first: empty diary
+    evidence states the no-notes header strictly before any web or
+    model content, weak evidence leads with the weak-notes header
+    (D-108 fallback policy). The provider/parse failure contours reuse
+    the pinned literals via the shared formatter.
+    """
+    fallback = answer.fallback
+
+    if fallback in (FallbackMode.PROVIDER_UNAVAILABLE, FallbackMode.PARSE_FAILURE):
+        return _format_answer_reply(answer)
+
+    parts: list[str] = []
+    if fallback is FallbackMode.NO_EVIDENCE:
+        parts.append(_HEADER_CHAT_NO_NOTES)
+    else:
+        if fallback is FallbackMode.WEAK_EVIDENCE:
+            parts.append(_HEADER_CHAT_WEAK_NOTES)
+        parts.append(f"{_LABEL_CHAT_NOTES}\n{answer.answer_text or ''}")
+    if answer.knowledge_text:
+        refs_block = "".join(f"\n{ref}" for ref in answer.knowledge_refs)
+        parts.append(f"{_LABEL_CHAT_WEB}\n{answer.knowledge_text}{refs_block}")
+    if answer.model_text:
+        parts.append(f"{_TRAILER_MODEL_KNOWLEDGE}\n{answer.model_text}")
+    return "\n\n".join(parts)
+
+
 def _format_chat_reply(result: RoutedChatResult) -> str:
-    """Render a routed-chat reply (RC-2/RC-3, D-108).
+    """Render a routed-chat reply (RC-2/RC-3/RC-4, D-108).
 
     The body always goes through :func:`_format_answer_reply`, so an
     effective ``notes_lookup`` answer is byte-identical to the ``/ask``
@@ -244,16 +283,20 @@ def _format_chat_reply(result: RoutedChatResult) -> str:
     presented as note-grounded); its failure contours reuse the pinned
     provider/parse literals via the shared formatter. An effective
     ``notes_plus_model`` answer renders the segmented mixed shape via
-    :func:`_format_notes_plus_model_reply` (only an exact requested
-    match dispatches there, so it never carries the reroute trailer).
-    When the effective route differs from the requested one, the reply
-    carries one cause-neutral reroute trailer — classifier failure,
-    unusable output, a not-yet-dispatchable route, and an empty
+    :func:`_format_notes_plus_model_reply`, and an effective
+    ``notes_plus_knowledge`` answer via
+    :func:`_format_notes_plus_knowledge_reply` (only an exact requested
+    match dispatches to either, so neither carries the reroute
+    trailer). When the effective route differs from the requested one,
+    the reply carries one cause-neutral reroute trailer — classifier
+    failure, unusable output, a non-dispatchable route, and an empty
     question all read the same (R-6 surfaces the distinction in
     metadata and traces, not in cause-specific prose).
     """
     if result.effective_route is ChatRoute.NOTES_PLUS_MODEL:
         return _format_notes_plus_model_reply(result.answer)
+    if result.effective_route is ChatRoute.NOTES_PLUS_KNOWLEDGE:
+        return _format_notes_plus_knowledge_reply(result.answer)
     body = _format_answer_reply(result.answer)
     if result.effective_route is ChatRoute.MODEL_ONLY:
         if result.answer.fallback is FallbackMode.NONE:

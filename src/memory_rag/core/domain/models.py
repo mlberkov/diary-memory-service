@@ -218,6 +218,13 @@ class AnswerResult:
     # answer (generalized I-9 — the reply layer labels it; it is never
     # attributed to the notes). ``None`` on every pre-existing contour.
     model_text: str | None = None
+    # RC-4: the knowledge-source-grounded segment of a routed
+    # ``notes_plus_knowledge`` answer and the refs it cited (generalized
+    # I-9 — the reply layer labels the segment and renders the refs
+    # verbatim as its citations). ``None`` / ``()`` on every
+    # pre-existing contour.
+    knowledge_text: str | None = None
+    knowledge_refs: tuple[str, ...] = ()
 
     @property
     def context_chunk_ids(self) -> list[str]:

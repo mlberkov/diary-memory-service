@@ -80,7 +80,12 @@ class ChatRouteDecision:
 
 @dataclass(frozen=True, slots=True)
 class ChatQueryRewrite:
-    """Persisted rewrite trace for one ``notes_plus_model`` execution (RC-3).
+    """Persisted rewrite trace for one mixed-route execution (RC-3/RC-4).
+
+    Written by ``notes_plus_model`` (RC-3) and ``notes_plus_knowledge``
+    (RC-4) — every route that runs the retrieval-side rewrite. The 0008
+    migration comment names only ``notes_plus_model`` because it predates
+    RC-4; migrations are immutable history, this docstring is current.
 
     One row per execution of the route, written after the
     :class:`ChatRouteDecision` row it links to. ``rewritten_query`` is
@@ -106,6 +111,41 @@ class ChatQueryRewrite:
     rewriter_model_name: str
     rewriter_raw_output: str
     rewriter_latency_ms: int
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ChatKnowledgeSearch:
+    """Persisted knowledge-search trace for one ``notes_plus_knowledge`` execution (RC-4).
+
+    One row per execution of the route, written after the
+    :class:`ChatRouteDecision` row it links to. The outward-rewrite
+    provenance is folded into this row rather than a second table — the
+    outward rewrite and the search are one pipeline step's trace with
+    the same zero-or-one-per-decision cardinality. ``outward_query`` is
+    always present: when no usable outward rewrite existed the route
+    degraded to searching with the stripped original question, and that
+    is what was searched. ``outward_rewriter_model_name`` is ``""`` only
+    when no outward rewriter was wired at all;
+    ``outward_rewriter_raw_output`` is ``""`` when no provider output
+    existed and the verbatim output otherwise. ``raw_output`` is the
+    knowledge provider's verbatim response body, ``""`` when the search
+    failed with no output — the D-035 truthful-provenance rule applied
+    to the search seam. ``result_count`` is the number of excerpts the
+    route actually used (zero on the failed-search contour).
+    """
+
+    search_id: str
+    decision_id: str
+    community_id: str
+    outward_query: str
+    outward_rewriter_model_name: str
+    outward_rewriter_raw_output: str
+    outward_rewriter_latency_ms: int
+    provider_name: str
+    result_count: int
+    raw_output: str
+    latency_ms: int
     created_at: datetime
 
 

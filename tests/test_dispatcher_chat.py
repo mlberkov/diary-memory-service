@@ -1,4 +1,4 @@
-"""Dispatcher ``/chat`` branch (RC-2/RC-3, D-108).
+"""Dispatcher ``/chat`` branch (RC-2/RC-3/RC-4, D-108).
 
 Reply-surface contract: an effective ``notes_lookup`` answer is
 byte-identical to the ``/ask`` reply for the same store and question
@@ -8,7 +8,11 @@ model-knowledge trailer (generalized I-9); ``model_only`` failures reuse
 the pinned provider/parse literals. RC-3: an effective
 ``notes_plus_model`` answer renders the segmented mixed shape — honest
 degradation strictly before any model content, the model segment always
-labeled, failures reusing the same pinned literals. The ``/sources``
+labeled, failures reusing the same pinned literals. RC-4: an effective
+``notes_plus_knowledge`` answer renders the three-segment shape — the
+knowledge segment under the web label with its cited refs listed
+verbatim, empty segments omitted entirely, failures and degradation
+reusing the same pinned literals byte-identically. The ``/sources``
 cache stays an ``/ask``-only surface.
 """
 
@@ -18,10 +22,11 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from memory_rag.adapters.answers import MockChatClient
-from memory_rag.adapters.chat_routing import MockRouteClassifier
+from memory_rag.adapters.chat_routing import MockOutwardRewriter, MockRouteClassifier
 from memory_rag.adapters.embeddings import MockEmbeddingClient
+from memory_rag.adapters.knowledge import MockKnowledgeSource
 from memory_rag.config import Settings
-from memory_rag.core.chat import ChatRoute
+from memory_rag.core.chat import ChatRoute, KnowledgeExcerpt
 from memory_rag.core.routing import InboundMessage, RouteKind
 from memory_rag.services import (
     Dispatcher,
@@ -34,6 +39,7 @@ from memory_rag.services.dispatcher import (
     _HEADER_CHAT_NO_NOTES,
     _HEADER_CHAT_WEAK_NOTES,
     _LABEL_CHAT_NOTES,
+    _LABEL_CHAT_WEB,
     _REPLY_CHAT_UNAVAILABLE,
     _REPLY_NO_MATCHES_TEMPLATE,
     _REPLY_PARSE_FAILURE,
@@ -80,6 +86,7 @@ def _dispatcher(
     classifier: MockRouteClassifier | None = None,
     chat_client: object | None = None,
     routed: bool = True,
+    knowledge_source: object | None = None,
 ) -> Dispatcher:
     embedding = MockEmbeddingClient()
     chat = chat_client if chat_client is not None else MockChatClient()
@@ -90,6 +97,8 @@ def _dispatcher(
             query,
             chat,  # type: ignore[arg-type]
             store,
+            knowledge_source=knowledge_source,  # type: ignore[arg-type]
+            outward_rewriter=(MockOutwardRewriter() if knowledge_source is not None else None),
         )
         if routed
         else None
@@ -127,8 +136,9 @@ def test_chat_notes_lookup_reply_byte_equals_the_ask_reply() -> None:
 def test_chat_rerouted_reply_appends_the_exact_neutral_trailer() -> None:
     """One trailer for every funnel cause — the wording never names the
     cause (classifier failure vs undispatchable route vs empty question).
-    RC-3 narrowed the funnel: ``notes_plus_knowledge`` is the remaining
-    not-yet-dispatchable route until RC-4."""
+    RC-4 made ``notes_plus_knowledge`` dispatchable when a knowledge
+    source is wired; this fixture wires none, so the request still
+    funnels — the remaining non-dispatchable contour."""
     store = MockDomainStore()
     _seed(store)
     dispatcher = _dispatcher(
@@ -296,6 +306,124 @@ def test_rc3_literals_are_byte_pinned_and_siblings_are_byte_identical() -> None:
     assert _HEADER_CHAT_WEAK_NOTES == "Your saved notes only weakly cover this."
     assert _LABEL_CHAT_NOTES == "From your saved notes:"
     # Sibling guards (RC-2 and earlier wording, byte-identical):
+    assert _TRAILER_MODEL_KNOWLEDGE == "(model knowledge — not from your saved notes)"
+    assert _TRAILER_CHAT_REROUTED == "(answered from your saved notes)"
+    assert _REPLY_CHAT_UNAVAILABLE == (
+        "Routed chat isn't available here — use /ask to query your saved notes."
+    )
+    assert _TRAILER_WEAK_EVIDENCE == "(weak evidence — model expressed uncertainty)"
+    assert _TRAILER_AMBIGUOUS == "(ambiguous question — refine and ask again)"
+    assert _REPLY_PROVIDER_UNAVAILABLE == (
+        "Couldn't generate an answer — chat provider is unavailable. Try again later."
+    )
+    assert _REPLY_PARSE_FAILURE == (
+        "Couldn't generate an answer — provider response was unparseable. Try again."
+    )
+    assert _REPLY_NO_MATCHES_TEMPLATE == (
+        "Nothing in your saved notes matched '{query}'. "
+        "Try rephrasing the question, or use words that appear in your notes."
+    )
+
+
+def _knowledge_dispatcher(
+    store: MockDomainStore, *, chat_client: object | None = None
+) -> Dispatcher:
+    """A dispatcher whose routed service has a knowledge source wired."""
+    from tests.test_routed_chat_notes_plus_knowledge import _SixFieldChatClient
+
+    excerpts = (
+        KnowledgeExcerpt(ref="https://example.org/naps", title="Nap science", text="nap facts"),
+    )
+    return _dispatcher(
+        store,
+        classifier=MockRouteClassifier(default_route=ChatRoute.NOTES_PLUS_KNOWLEDGE),
+        chat_client=chat_client if chat_client is not None else _SixFieldChatClient(),
+        knowledge_source=MockKnowledgeSource(excerpts=excerpts),
+    )
+
+
+def test_chat_notes_plus_knowledge_success_renders_all_three_labeled_segments() -> None:
+    store = MockDomainStore()
+    _seed(store)
+    dispatcher = _knowledge_dispatcher(store)
+
+    reply = dispatcher.dispatch(_inbound(RouteKind.CHAT, "book"))
+
+    assert reply.reply_text == (
+        f"{_LABEL_CHAT_NOTES}\nNotes say he naps badly after busy days."
+        f"\n\n{_LABEL_CHAT_WEB}\nWeb says naps shift at this age."
+        "\nhttps://example.org/naps"
+        f"\n\n{_TRAILER_MODEL_KNOWLEDGE}\nGeneral guidance."
+    )
+    assert reply.metadata["requested_route"] == "notes_plus_knowledge"
+    assert reply.metadata["effective_route"] == "notes_plus_knowledge"
+
+
+def test_chat_notes_plus_knowledge_no_evidence_states_degradation_first() -> None:
+    """D-108 honest degradation: empty diary evidence is stated explicitly
+    before any web or model content."""
+    store = MockDomainStore()  # nothing ingested
+    dispatcher = _knowledge_dispatcher(store)
+
+    reply = dispatcher.dispatch(_inbound(RouteKind.CHAT, "why no naps"))
+
+    assert reply.reply_text.startswith(_HEADER_CHAT_NO_NOTES)
+    assert reply.reply_text.index(_HEADER_CHAT_NO_NOTES) < reply.reply_text.index(_LABEL_CHAT_WEB)
+    assert reply.reply_text.index(_LABEL_CHAT_WEB) < reply.reply_text.index(
+        _TRAILER_MODEL_KNOWLEDGE
+    )
+    assert _LABEL_CHAT_NOTES not in reply.reply_text
+    for cause_word in ("classifier", "rewrite", "error", "failed", "unavailable"):
+        assert cause_word not in reply.reply_text
+
+
+def test_chat_notes_plus_knowledge_omits_an_empty_knowledge_segment_entirely() -> None:
+    """No orphan label: a degraded (empty) knowledge plane renders nothing
+    at all — the search-failure contour reads like notes_plus_model."""
+    from tests.test_routed_chat_notes_plus_knowledge import _SixFieldChatClient
+
+    store = MockDomainStore()
+    _seed(store)
+    dispatcher = _dispatcher(
+        store,
+        classifier=MockRouteClassifier(default_route=ChatRoute.NOTES_PLUS_KNOWLEDGE),
+        chat_client=_SixFieldChatClient(),
+        knowledge_source=MockKnowledgeSource(),  # no excerpts -> empty plane
+    )
+
+    reply = dispatcher.dispatch(_inbound(RouteKind.CHAT, "book"))
+
+    assert _LABEL_CHAT_WEB not in reply.reply_text
+    assert reply.reply_text == (
+        f"{_LABEL_CHAT_NOTES}\nNotes say he naps badly after busy days."
+        f"\n\n{_TRAILER_MODEL_KNOWLEDGE}\nGeneral guidance."
+    )
+
+
+def test_chat_notes_plus_knowledge_failures_reuse_the_pinned_literals() -> None:
+    store = MockDomainStore()
+    _seed(store)
+    down = _knowledge_dispatcher(store, chat_client=_DownChatClient())
+    assert down.dispatch(_inbound(RouteKind.CHAT, "book")).reply_text == (
+        _REPLY_PROVIDER_UNAVAILABLE
+    )
+    junk = _knowledge_dispatcher(store, chat_client=_JunkChatClient())
+    assert junk.dispatch(_inbound(RouteKind.CHAT, "book", msg_id="2")).reply_text == (
+        _REPLY_PARSE_FAILURE
+    )
+
+
+def test_rc4_literal_is_pinned_and_every_sibling_is_byte_identical() -> None:
+    """The one new RC-4 literal is pinned; every pre-existing literal of
+    the answer/chat reply family is asserted byte-identical (no literal
+    other than the new one changed in this packet)."""
+    assert _LABEL_CHAT_WEB == "From the web:"
+    # Sibling guards (RC-3 and earlier wording, byte-identical):
+    assert _HEADER_CHAT_NO_NOTES == (
+        "Nothing in your saved notes covers this — here's general information instead."
+    )
+    assert _HEADER_CHAT_WEAK_NOTES == "Your saved notes only weakly cover this."
+    assert _LABEL_CHAT_NOTES == "From your saved notes:"
     assert _TRAILER_MODEL_KNOWLEDGE == "(model knowledge — not from your saved notes)"
     assert _TRAILER_CHAT_REROUTED == "(answered from your saved notes)"
     assert _REPLY_CHAT_UNAVAILABLE == (

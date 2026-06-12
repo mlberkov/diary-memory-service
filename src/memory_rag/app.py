@@ -24,8 +24,13 @@ from fastapi import FastAPI
 
 from memory_rag import __version__
 from memory_rag.adapters.answers import build_chat_client
-from memory_rag.adapters.chat_routing import build_query_rewriter, build_route_classifier
+from memory_rag.adapters.chat_routing import (
+    build_outward_rewriter,
+    build_query_rewriter,
+    build_route_classifier,
+)
 from memory_rag.adapters.embeddings import build_embedding_client
+from memory_rag.adapters.knowledge import build_knowledge_source
 from memory_rag.adapters.telegram import register_telegram_webhook
 from memory_rag.config import Settings, get_settings
 from memory_rag.logging import configure_logging, get_logger
@@ -111,6 +116,28 @@ def _verify_classifier_contour(settings: Settings) -> None:
         raise BootHealthError(f"rewriter client build failed: {exc}") from exc
     if not rewriter.model_name:
         raise BootHealthError("rewriter client reported an empty model_name")
+    # The outward rewriter rides the same contour too (RC-4): same backend
+    # knob, same canonical pin, one factory shared with the request path.
+    try:
+        outward_rewriter = build_outward_rewriter(settings)
+    except ValueError as exc:
+        raise BootHealthError(f"outward rewriter client build failed: {exc}") from exc
+    if not outward_rewriter.model_name:
+        raise BootHealthError("outward rewriter client reported an empty model_name")
+
+
+def _verify_knowledge_contour(settings: Settings) -> None:
+    if settings.knowledge_backend == "tavily" and not settings.tavily_api_key:
+        raise BootHealthError(
+            "knowledge backend mismatch: "
+            "knowledge_backend='tavily' requires a non-empty TAVILY_API_KEY"
+        )
+    try:
+        source = build_knowledge_source(settings)
+    except ValueError as exc:
+        raise BootHealthError(f"knowledge source build failed: {exc}") from exc
+    if not source.provider_name:
+        raise BootHealthError("knowledge source reported an empty provider_name")
 
 
 def _verify_pgvector(settings: Settings) -> None:
@@ -143,6 +170,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     _verify_embedding_contour(effective_settings)
     _verify_chat_contour(effective_settings)
     _verify_classifier_contour(effective_settings)
+    _verify_knowledge_contour(effective_settings)
     _verify_pgvector(effective_settings)
 
     app = FastAPI(
@@ -166,7 +194,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     log.info(
         "app.created env=%s version=%s embedding_backend=%s embedding_dim=%d "
-        "chat_backend=%s chat_model=%s classifier_backend=%s classifier_model=%s",
+        "chat_backend=%s chat_model=%s classifier_backend=%s classifier_model=%s "
+        "knowledge_backend=%s",
         effective_settings.app_env,
         __version__,
         effective_settings.embedding_backend,
@@ -175,6 +204,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         effective_settings.chat_model,
         effective_settings.classifier_backend,
         effective_settings.classifier_model,
+        effective_settings.knowledge_backend,
     )
     return app
 

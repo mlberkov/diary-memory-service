@@ -41,7 +41,7 @@ The routed-chat milestone (D-108; `docs/ROUTED-CHAT-ROADMAP.md`) fixes its four 
 | `diary_plus_web` | `notes_plus_knowledge` |
 | `general_llm` | `model_only` |
 
-`notes_plus_knowledge` is named for the knowledge-source seam, not welded to "web" — a curated domain-knowledge provider is expected later behind the same port (D-108). No core route identifier exists in code until RC-2 lands; naming the mapping here renames nothing.
+`notes_plus_knowledge` is named for the knowledge-source seam, not welded to "web" — a curated domain-knowledge provider is expected later behind the same port (D-108); the first provider behind it is the Tavily web-search adapter (RC-4 / D-111). The four core identifiers landed in code with RC-2 (D-109) as the `ChatRoute` enum; this table carries the dual-register mapping.
 
 ## Identifiers
 
