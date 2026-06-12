@@ -3689,3 +3689,42 @@ A locator-shaped `ref` keeps the port honest to D-108's "not welded to web" whil
 - `/sources` integration for `/chat` answers (decided against for this milestone; revisitable after it).
 - The explicit `/ask` filter-syntax item; natural-language subject scoping (blocked on A-46).
 - A-10 edit/delete (the next milestone, owner re-queue per D-108); A-21 / Phase 9 host seams.
+
+---
+
+## D-112 — RC-5: routed-chat milestone closure (drill evidence artifact)
+
+### Context
+
+RC-4 (D-111) landed the last route, the consolidated regression suite, the RUNBOOK "Routed-chat real-backend smoke (RC closure drill / D-111)" procedure, and the committed evidence-file template, but deliberately did not close the milestone: the §6 exit criterion in `docs/ROUTED-CHAT-ROADMAP.md` requires real-backend round-trip evidence per the REAL-1 precedent (D-073 / D-074) — a committed, dated, redaction-checked evidence artifact — which RC-4 could not honestly self-certify. The roadmap / execution-map / todo blocks were therefore worded "code-complete; closure conditional on the operator drill artifact."
+
+### Decision
+
+Close RC-5 and therefore the routed-chat milestone (D-108) by recording the populated dated evidence artifact at `docs/routed-chat-drill/routed-chat-smoke-20260612-evidence.json`.
+
+The drill ran the canonical real contour from the RUNBOOK pre-conditions: `STORAGE_BACKEND=postgres` with migrations 0001..0009 applied (tail `0009.chat-knowledge-searches`), `EMBEDDING_BACKEND=openai` / `text-embedding-3-large` / 3072, `CHAT_BACKEND=openai` / `gpt-4.1`, `CLASSIFIER_BACKEND=openai` / `gpt-4.1-mini`, `KNOWLEDGE_BACKEND=tavily` with a real key (`KNOWLEDGE_MAX_RESULTS` at the A-47 default 5), and the webhook secret set. The boot gate emitted the expected `app.created … classifier_backend=openai classifier_model=gpt-4.1-mini knowledge_backend=tavily` line.
+
+The isolated smoke seeded one `/note` into a fresh test community (raw persisted before enrichment; one chunk at `embedding_status='ready'` with `model_name='text-embedding-3-large'`, `dimension=3072`), then drove one `/chat` round trip per product-register route through `POST /telegram/webhook`. Every route went green on its first steering attempt with `requested_route == effective_route` in its `chat_route_decisions` row (`notes_lookup` / `model_only` / `notes_plus_model` / `notes_plus_knowledge`, classifier `gpt-4.1-mini`); the mixed routes wrote their `chat_query_rewrites` rows (non-null rewrites, no date bounds); the web route wrote its `chat_knowledge_searches` row (`provider_name='tavily'`, `result_count=5`, an outward query distilled from retrieved personal context with no person names — the D-111 privacy seam observed working as specified); the reply cited three Tavily URLs verbatim under the web label; all four `answer_traces` rows recorded the expected prompt versions (`v1` / `model-only-v1` / `notes-plus-model-v1` / `notes-plus-knowledge-v1`), `fallback_mode='none'`, positive latency, and token counts; every provider call succeeded at `attempt=1/3` under the D-047 / D-049 defaults.
+
+### Why
+
+The milestone exists to prove a routed conversational entry point answering under explicit per-segment provenance labels — not only that the offline contracts and mock smokes pass. The populated artifact closes that gap with one bounded, inspectable run per route: live classification, live rewriting (retrieval-side and outward), live Tavily search, live grounded generation, and the full additive trace plane (0007 / 0008 / 0009) persisted and read back. Per the drill's recording rule, each artifact entry is that route's first green round trip — not a curated best-of-N.
+
+The evidence is intentionally one-shot and operator-deliberate. It does not turn live OpenAI or Tavily calls into CI, adds no thresholds, and does not broaden the harness.
+
+### Consequence
+
+- **New:** `docs/routed-chat-drill/routed-chat-smoke-20260612-evidence.json` — populated RC-5 evidence artifact, derived from the D-111 template with `"_template": true` removed and credential-bearing values redacted (redaction grep clean).
+- **Changed:** `docs/decision-log.md` — this D-112 closure entry.
+- **Changed:** `docs/ROUTED-CHAT-ROADMAP.md` — status / §4 / §6 flipped from "closure conditional on the operator drill artifact" to milestone-closed; RC-5 row added to the §4 ladder.
+- **Changed:** `docs/execution-map.md` — RC-4 row's conditional tail flipped; RC-5 row added pointing at the dated artifact.
+- **Changed:** `docs/todo.md` — routed-chat milestone block flipped to closed; **A-10 edit/delete is now the top pick** (owner re-queue, D-108).
+- The milestone is closed by `summary.diary_lookup_round_trip_green`, `summary.general_llm_round_trip_green`, `summary.diary_plus_llm_round_trip_green`, `summary.diary_plus_web_round_trip_green`, `summary.provenance_labels_observed`, and `summary.closes_routed_chat_milestone` — all `true`.
+- No `src/`, `tests/`, schema, migration, script, or config-surface change is part of this closure. Local `.env` knob additions used to run the drill are uncommitted drill prep, not packet content.
+
+### Out of scope
+
+- Any runtime behavior change; any live provider call inside `make check` or any new gated test.
+- Routing-accuracy measurement or thresholds (D-108: observed via traces, not gated).
+- Resilience-knob tuning beyond the D-047 / D-049 defaults; A-47 default re-measurement.
+- A-10 edit/delete mechanics (the next milestone); A-21 / Phase 9 host seams; the curated domain-knowledge provider; the explicit `/ask` filter-syntax item.

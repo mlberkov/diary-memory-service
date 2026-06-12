@@ -9,14 +9,15 @@ question into one of four routes and answers it under explicit per-source
 provenance labeling — into an ordered set of bounded packets, and carries the
 as-built audit of the surfaces the milestone builds on.
 
-**Status: code-complete — Packet RC-1 (D-108, docs-first contract +
+**Status: milestone-closed — Packet RC-1 (D-108, docs-first contract +
 owner-override recording), Packet RC-2 (D-109, classifier + dispatcher +
 two routes), Packet RC-3 (D-110, enrichment + rewriting +
-`diary_plus_llm`), and Packet RC-4 (D-111, knowledge source +
-`diary_plus_web` + closure docs) landed; the milestone closes when the
-operator runs the routed-chat drill and commits the dated, redaction-checked
-evidence artifact (`docs/routed-chat-drill/`, REAL-1 precedent — see §6 and
-the RUNBOOK "Routed chat" section).** As of RC-4 all four routes are real:
+`diary_plus_llm`), Packet RC-4 (D-111, knowledge source +
+`diary_plus_web` + closure docs), and Packet RC-5 (D-112, the operator-run
+routed-chat drill) landed; the dated, redaction-checked evidence artifact
+`docs/routed-chat-drill/routed-chat-smoke-20260612-evidence.json` (REAL-1
+precedent — see §6 and the RUNBOOK "Routed chat" section) closed the
+milestone.** As of RC-4 all four routes are real:
 the `/chat` command, the core route enum, the `gpt-4.1-mini` classifier
 contour, the routed dispatch at the service seam, the
 `chat_route_decisions` trace table, the query rewriter (rewrite-to-kwargs
@@ -158,7 +159,8 @@ contract. C = core, A = adapter, Cfg = config (D-026 classification).
 | **RC-1 — docs-first contract + owner-override recording** | `docs/decision-log.md` (D-108); this roadmap doc (new); `docs/INVARIANTS.md` (I-9 appended provenance-class clause); `docs/product/PRD.md` (§6 medical bullet amended); `docs/product/TechSpec.md` §4 (`/chat` target line); `docs/GLOSSARY.md` (route mapping); `docs/assumptions.md` + `docs/assumption-audit.md` (A-10 re-queue annotations); `docs/execution-map.md`; `docs/todo.md`. Docs-only — no `src/` / `tests/` / schema change. | docs-only | **Landed (D-108).** |
 | **RC-2 — classifier + dispatcher + two routes** | Routed entry at the service seam: classifier provider adapter (`gpt-4.1-mini` pin + `Settings` knob + boot-gate clause, D-047/D-049 hardening), hand-rolled dispatch over the core route enum (`notes_lookup` / `notes_plus_model` / `notes_plus_knowledge` / `model_only`); `notes_lookup` (`diary_lookup`) delegates to the existing grounded ask unchanged; `model_only` (`general_llm`) adds direct LLM with explicit model labeling; Telegram `/chat` wiring; routing + classifier output captured in traces (additive migration); classification-failure → `diary_lookup` fallback. | C + A (+ Cfg, schema) | **Landed (D-109).** |
 | **RC-3 — enrichment + rewriting + `diary_plus_llm`** | Enrichment retrieval (personal context first), rewrite-to-kwargs onto the landed `date_range` / `subject_scope` seam, `notes_plus_model` (`diary_plus_llm`) generation with mixed notes+model provenance labeling; honest-degradation wording on empty/weak diary evidence; regression coverage asserting R-3 / R-8 scoping inside enrichment retrievals. | C | **Landed (D-110).** |
-| **RC-4 — `diary_plus_web` + closure** | Narrow knowledge-source port + hardened Tavily adapter (R-7 / R-9); `notes_plus_knowledge` (`diary_plus_web`) full pipeline (enrich → rewrite → search → synthesize, citing both planes — notes citations + web URLs); escalation invariant verified on red-flag-style prompts (mock provider); consolidated regression suite (mock + PG-gated); `docs/RUNBOOK.md` operator section; doc reconciliation + closure flips (this doc, execution-map, todo). | C + A (+ Cfg, schema) | **Landed (D-111), pre-checkpoint.** Milestone closure is conditional on the operator's dated drill evidence artifact (§6). |
+| **RC-4 — `diary_plus_web` + closure** | Narrow knowledge-source port + hardened Tavily adapter (R-7 / R-9); `notes_plus_knowledge` (`diary_plus_web`) full pipeline (enrich → rewrite → search → synthesize, citing both planes — notes citations + web URLs); escalation invariant verified on red-flag-style prompts (mock provider); consolidated regression suite (mock + PG-gated); `docs/RUNBOOK.md` operator section; doc reconciliation + closure flips (this doc, execution-map, todo). | C + A (+ Cfg, schema) | **Landed (D-111), pre-checkpoint.** |
+| **RC-5 — drill evidence + milestone close** | Operator-run real-backend drill per the RUNBOOK "Routed-chat real-backend smoke" subsection; populated dated evidence artifact `docs/routed-chat-drill/routed-chat-smoke-20260612-evidence.json` (redaction grep clean, all summary booleans true); closure flips in this doc, `docs/execution-map.md`, `docs/todo.md`; D-112 closure entry. Docs + evidence only — no `src/` / `tests/` / schema / migration / config-surface change. | docs-only | **Landed (D-112), pre-checkpoint. Closes the milestone.** |
 
 ---
 
@@ -195,12 +197,13 @@ milestone-closed; **A-10 is visibly re-queued as next**; the full `make check`
 gate is green; and one PR bundles the coherent milestone, not individual
 packets.
 
-As of RC-4 (D-111) everything above except the evidence artifact is in place:
-the code, tests, gate, and doc flips landed; the operator drill (RUNBOOK
-"Routed chat" section) is the single outstanding closure action — running it
-and committing the populated dated
-`docs/routed-chat-drill/routed-chat-smoke-<YYYYMMDD>-evidence.json` closes the
-milestone.
+All of the above is satisfied. RC-2..RC-4 (D-109..D-111) landed the code,
+tests, and gate; RC-5 (D-112) ran the operator drill against the real backend
+and recorded the populated dated
+`docs/routed-chat-drill/routed-chat-smoke-20260612-evidence.json` (every route
+green on its first steering attempt, requested == effective in every decision
+row, redaction grep clean). The milestone is closed; A-10 edit/delete is the
+next pick (owner re-queue, D-108).
 
 ---
 
