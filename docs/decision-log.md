@@ -3728,3 +3728,35 @@ The evidence is intentionally one-shot and operator-deliberate. It does not turn
 - Routing-accuracy measurement or thresholds (D-108: observed via traces, not gated).
 - Resilience-knob tuning beyond the D-047 / D-049 defaults; A-47 default re-measurement.
 - A-10 edit/delete mechanics (the next milestone); A-21 / Phase 9 host seams; the curated domain-knowledge provider; the explicit `/ask` filter-syntax item.
+
+## D-113 — SEC-1.1: ASGI-stack security closure (Starlette 1.x via FastAPI + idna)
+
+### Context
+
+The SEC-1 dependency-security-refresh milestone was accepted after five Dependabot/pip security alerts surfaced (pinned to dependency state at commit `2499490`, which `git log 2499490..HEAD -- uv.lock` confirmed identical to HEAD). A bounded `pip-audit` sweep over the full lockfile confirmed four of the five against the resolved versions — three Starlette advisories and one idna advisory — and found nothing beyond the Dependabot set; the fifth alert (pytest tmpdir) is not corroborated by OSV/GHSA at the locked `pytest 8.4.2` and is dev/test-only (the runtime image is built `uv sync --frozen --no-dev`), so it is explicitly deferred, not part of required closure. SEC-1.1 is the first packet and lands the confirmed ASGI/idna closure only. The codebase has zero middleware, no `StaticFiles`/`FileResponse`, no inbound server-side multipart, and no `request.url`-based security decisions, so none of the vulnerable paths are reachable today — the closure is hygiene/future-proofing absorbed while the breaking-change surface is minimal, not an emergency.
+
+### Decision
+
+- Retarget the FastAPI pin `fastapi>=0.115,<0.116` → `fastapi>=0.136,<0.137` — the carrier minor whose Starlette range admits the patched floor (resolves `fastapi 0.136.3`).
+- Add a **direct** `starlette>=1.0.1` dependency. This is the plan's surfaced exception path, taken because it proved necessary: FastAPI 0.136.3's Starlette range still admits the vulnerable `0.46.2`, and `uv lock` minimised churn by keeping it, so the carrier bump alone left Starlette unpatched. The explicit floor forces and durably pins the patched line across future re-resolves (resolves `starlette 1.3.1`).
+- Raise idna to the patched floor via a targeted `uv lock --upgrade-package idna` (transitive, no manifest constraint; resolves `idna 3.18`, ≥ the 3.15 fix floor).
+- Leave `httpx` at `>=0.27,<0.28` (resolved 0.27.2). The resolver did not require widening it, so it stayed out of scope per the packet's forced-only rule.
+
+### Why
+
+The three Starlette advisories — `CVE-2025-62727` / `GHSA-7f5h-v6xp-fcq8` (FileResponse Range O(n²) DoS, High), `CVE-2026-48710` / `GHSA-86qp-5c8j-p5mr` (Host-header → `request.url.path` poisoning), `CVE-2025-54121` / `GHSA-2c2j-9gv5-cj73` (multipart large-file event-loop block) — are all closed at Starlette ≥ 1.0.1; the Host-header fix has no backport below 1.0.1, which is what forces the FastAPI carrier jump. The idna advisory `CVE-2026-45409` / `GHSA-65pc-fj4g-8rjx` (incomplete CVE-2024-3651 fix, `idna.encode()` DoS) is closed at ≥ 3.15. Doing this as one coherent ASGI-stack unit now — rather than scattered bumps later — banks the Starlette 1.0 major while the codebase still has no middleware/file-serving/`request.url` surface to regress.
+
+### Consequence
+
+- **Changed:** `pyproject.toml` — FastAPI pin retargeted to `>=0.136,<0.137`; new direct `starlette>=1.0.1` security floor (with an inline comment explaining the FastAPI-range-still-admits-0.46.2 rationale).
+- **Changed:** `uv.lock` — `fastapi` 0.115.14 → 0.136.3, `starlette` 0.46.2 → 1.3.1, `idna` 3.13 → 3.18; `annotated-doc 0.0.4` added (new FastAPI 0.136 transitive). `anyio` (4.13.0), `httpx` (0.27.2), and `pytest` (8.4.2) unchanged.
+- **Code:** none — no `src/` or `tests/` change. Routes (`/health`, `/telegram/webhook`), plain-dict responses, 200/401 contracts, and the boot gates are untouched; no runtime behavior change.
+- **Validation:** ruff check clean; ruff format clean (173 files); mypy strict success (173 files); pytest **994 passed / 96 skipped** (skips are Postgres-integration legs, `MEMORY_RAG_PG_TEST_DSN` unset) — green on the Starlette 1.x major. `pip-audit` over the updated lockfile reports **"No known vulnerabilities found"** (all four confirmed CVEs closed). One non-fatal `StarletteDeprecationWarning` surfaced (the 1.x `TestClient` deprecates `httpx` in favour of `httpx2`) — dev/test-only, no security impact, recorded as a follow-up.
+- **Docs:** this D-113 entry; `docs/execution-map.md` SEC-1.1 row. No other doc hardcodes a dependency version, so nothing else is made false.
+
+### Out of scope
+
+- The pytest tmpdir alert — OSV/GHSA-unconfirmed at 8.4.2, dev/test-only, not in the runtime image; deferred unless an authoritative advisory independently confirms both affected range and fixed version.
+- Any non-security freshness upgrade (numpy / openai / psycopg / etc.).
+- The `TestClient` `httpx` → `httpx2` migration implied by the deprecation warning — future, no security impact.
+- SEC-1 milestone closure / checkpoint — not part of this packet (the row stays pre-checkpoint).

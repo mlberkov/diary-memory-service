@@ -10,7 +10,12 @@ authors = [{ name = "TheyGrow" }]
 # Runtime dependencies are intentionally minimal at Slice 1.1.
 # Storage, retrieval, providers, and Telegram SDK arrive in later slices.
 dependencies = [
-    "fastapi>=0.115,<0.116",
+    "fastapi>=0.136,<0.137",
+    # Starlette security floor (SEC-1.1): FastAPI's dependency range still
+    # admits the vulnerable 0.46.2, so the patched floor is pinned directly to
+    # keep the closure durable across future re-resolves. >=1.0.1 covers the
+    # Range-DoS, Host-header, and multipart advisories.
+    "starlette>=1.0.1",
     "uvicorn[standard]>=0.32,<0.33",
     "pydantic>=2.9,<3",
     "pydantic-settings>=2.6,<3",
