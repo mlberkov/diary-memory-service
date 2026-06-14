@@ -45,6 +45,7 @@ from memory_rag.core.domain.models import (
     EventChunk,
     FallbackMode,
     IndexingDeadLetter,
+    LifecycleState,
     Note,
     Query,
     RetrievalHit,
@@ -77,7 +78,10 @@ CREATE TABLE IF NOT EXISTS notes (
     note_date        TEXT NOT NULL,
     note_text        TEXT NOT NULL,
     created_at        TEXT NOT NULL,
-    subject_id        TEXT
+    subject_id        TEXT,
+    lifecycle_state  TEXT NOT NULL DEFAULT 'active'
+        CHECK (lifecycle_state IN ('active','superseded','tombstoned')),
+    supersedes_note_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_notes_source_message_id
@@ -95,7 +99,10 @@ CREATE TABLE IF NOT EXISTS event_chunks (
     created_at        TEXT NOT NULL,
     embedding_status  TEXT NOT NULL DEFAULT 'pending'
         CHECK (embedding_status IN ('pending','ready','failed')),
-    subject_id        TEXT
+    subject_id        TEXT,
+    lifecycle_state  TEXT NOT NULL DEFAULT 'active'
+        CHECK (lifecycle_state IN ('active','superseded','tombstoned')),
+    supersedes_chunk_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_event_chunks_community_id
@@ -358,8 +365,9 @@ class SqliteDomainStore:
             conn.execute(
                 "INSERT INTO notes "
                 "(note_id, source_message_id, community_id, author_user_id, "
-                " note_date, note_text, created_at, subject_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                " note_date, note_text, created_at, subject_id, "
+                " lifecycle_state, supersedes_note_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     note.note_id,
                     note.source_message_id,
@@ -369,6 +377,8 @@ class SqliteDomainStore:
                     note.note_text,
                     note.created_at.isoformat(),
                     note.subject_id,
+                    note.lifecycle_state.value,
+                    note.supersedes_note_id,
                 ),
             )
             conn.commit()
@@ -381,8 +391,8 @@ class SqliteDomainStore:
                 "INSERT INTO event_chunks "
                 "(chunk_id, note_id, source_message_id, community_id, "
                 " author_user_id, note_date, event_index, chunk_text, created_at, "
-                " embedding_status, subject_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " embedding_status, subject_id, lifecycle_state, supersedes_chunk_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
                         c.chunk_id,
@@ -396,6 +406,8 @@ class SqliteDomainStore:
                         c.created_at.isoformat(),
                         c.embedding_status.value,
                         c.subject_id,
+                        c.lifecycle_state.value,
+                        c.supersedes_chunk_id,
                     )
                     for c in chunks
                 ],
@@ -438,7 +450,8 @@ class SqliteDomainStore:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT note_id, source_message_id, community_id, author_user_id, "
-                "       note_date, note_text, created_at, subject_id "
+                "       note_date, note_text, created_at, subject_id, "
+                "       lifecycle_state, supersedes_note_id "
                 "  FROM notes "
                 " WHERE source_message_id = ? "
                 " LIMIT 1",
@@ -455,6 +468,8 @@ class SqliteDomainStore:
             note_text=row["note_text"],
             created_at=datetime.fromisoformat(row["created_at"]),
             subject_id=row["subject_id"],
+            lifecycle_state=LifecycleState(row["lifecycle_state"]),
+            supersedes_note_id=row["supersedes_note_id"],
         )
 
     def count_event_chunks_for_source(self, source_message_id: str) -> int:
@@ -474,7 +489,8 @@ class SqliteDomainStore:
             row = conn.execute(
                 "SELECT chunk_id, note_id, source_message_id, community_id, "
                 "       author_user_id, note_date, event_index, chunk_text, "
-                "       created_at, embedding_status, subject_id "
+                "       created_at, embedding_status, subject_id, "
+                "       lifecycle_state, supersedes_chunk_id "
                 "  FROM event_chunks "
                 " WHERE chunk_id = ? AND community_id = ?",
                 (chunk_id, community_id),
@@ -568,7 +584,8 @@ class SqliteDomainStore:
         sql = (
             "SELECT chunk_id, note_id, source_message_id, community_id, "
             "       author_user_id, note_date, event_index, chunk_text, "
-            "       created_at, embedding_status, subject_id "
+            "       created_at, embedding_status, subject_id, "
+            "       lifecycle_state, supersedes_chunk_id "
             "  FROM event_chunks "
             " WHERE community_id = ? AND embedding_status = 'failed' "
             " ORDER BY created_at ASC, chunk_id ASC"
@@ -1030,4 +1047,6 @@ def _row_to_chunk(row: sqlite3.Row) -> EventChunk:
         created_at=datetime.fromisoformat(row["created_at"]),
         embedding_status=EmbeddingStatus(row["embedding_status"]),
         subject_id=row["subject_id"],
+        lifecycle_state=LifecycleState(row["lifecycle_state"]),
+        supersedes_chunk_id=row["supersedes_chunk_id"],
     )

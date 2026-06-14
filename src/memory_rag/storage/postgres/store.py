@@ -57,6 +57,7 @@ from memory_rag.core.domain.models import (
     EventChunk,
     FallbackMode,
     IndexingDeadLetter,
+    LifecycleState,
     Note,
     Query,
     RetrievalHit,
@@ -203,8 +204,9 @@ class PostgresDomainStore:
             cur.execute(
                 "INSERT INTO notes "
                 "(note_id, source_message_id, community_id, author_user_id, "
-                " note_date, note_text, created_at, subject_id) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                " note_date, note_text, created_at, subject_id, "
+                " lifecycle_state, supersedes_note_id) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (
                     note.note_id,
                     note.source_message_id,
@@ -214,6 +216,8 @@ class PostgresDomainStore:
                     note.note_text,
                     note.created_at,
                     note.subject_id,
+                    note.lifecycle_state.value,
+                    note.supersedes_note_id,
                 ),
             )
             conn.commit()
@@ -234,6 +238,8 @@ class PostgresDomainStore:
                 c.created_at,
                 c.embedding_status.value,
                 c.subject_id,
+                c.lifecycle_state.value,
+                c.supersedes_chunk_id,
             )
             for c in chunks
         ]
@@ -242,8 +248,8 @@ class PostgresDomainStore:
                 "INSERT INTO event_chunks "
                 "(chunk_id, note_id, source_message_id, community_id, "
                 " author_user_id, note_date, event_index, chunk_text, created_at, "
-                " embedding_status, subject_id) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                " embedding_status, subject_id, lifecycle_state, supersedes_chunk_id) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 params,
             )
             conn.commit()
@@ -314,7 +320,8 @@ class PostgresDomainStore:
         with self._pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT note_id, source_message_id, community_id, author_user_id, "
-                "       note_date, note_text, created_at, subject_id "
+                "       note_date, note_text, created_at, subject_id, "
+                "       lifecycle_state, supersedes_note_id "
                 "  FROM notes "
                 " WHERE source_message_id = %s "
                 " LIMIT 1",
@@ -332,6 +339,8 @@ class PostgresDomainStore:
             note_text=row["note_text"],
             created_at=row["created_at"],
             subject_id=row["subject_id"],
+            lifecycle_state=LifecycleState(row["lifecycle_state"]),
+            supersedes_note_id=row["supersedes_note_id"],
         )
 
     def count_event_chunks_for_source(self, source_message_id: str) -> int:
@@ -352,7 +361,8 @@ class PostgresDomainStore:
             cur.execute(
                 "SELECT chunk_id, note_id, source_message_id, community_id, "
                 "       author_user_id, note_date, event_index, chunk_text, "
-                "       created_at, embedding_status, subject_id "
+                "       created_at, embedding_status, subject_id, "
+                "       lifecycle_state, supersedes_chunk_id "
                 "  FROM event_chunks "
                 " WHERE chunk_id = %s AND community_id = %s",
                 (chunk_id, community_id),
@@ -387,11 +397,13 @@ class PostgresDomainStore:
                 "SELECT ec.chunk_id, ec.note_id, ec.source_message_id, "
                 "       ec.community_id, ec.author_user_id, ec.note_date, "
                 "       ec.event_index, ec.chunk_text, ec.created_at, "
-                "       ec.embedding_status, ec.subject_id "
+                "       ec.embedding_status, ec.subject_id, "
+                "       ec.lifecycle_state, ec.supersedes_chunk_id "
                 "  FROM event_chunks ec "
                 "  JOIN embedding_records er "
                 "    ON er.chunk_id = ec.chunk_id AND er.model_name = %s "
                 " WHERE ec.community_id = %s "
+                "   AND ec.lifecycle_state = 'active' "
                 "   AND ec.embedding_status = 'ready'" + date_sql + subject_sql + " "
                 " ORDER BY er.embedding <=> %s::vector "
                 " LIMIT %s",
@@ -423,9 +435,11 @@ class PostgresDomainStore:
                 "SELECT ec.chunk_id, ec.note_id, ec.source_message_id, "
                 "       ec.community_id, ec.author_user_id, ec.note_date, "
                 "       ec.event_index, ec.chunk_text, ec.created_at, "
-                "       ec.embedding_status, ec.subject_id "
+                "       ec.embedding_status, ec.subject_id, "
+                "       ec.lifecycle_state, ec.supersedes_chunk_id "
                 "  FROM event_chunks ec, q "
                 " WHERE ec.community_id = %s "
+                "   AND ec.lifecycle_state = 'active' "
                 "   AND ec.chunk_text_tsv @@ q.tsq" + date_sql + subject_sql + " "
                 " ORDER BY ts_rank_cd(ec.chunk_text_tsv, q.tsq) DESC, "
                 "          ec.created_at, ec.event_index "
@@ -492,7 +506,8 @@ class PostgresDomainStore:
         sql = (
             "SELECT chunk_id, note_id, source_message_id, community_id, "
             "       author_user_id, note_date, event_index, chunk_text, "
-            "       created_at, embedding_status, subject_id "
+            "       created_at, embedding_status, subject_id, "
+            "       lifecycle_state, supersedes_chunk_id "
             "  FROM event_chunks "
             " WHERE community_id = %s AND embedding_status = 'failed' "
             " ORDER BY created_at ASC, chunk_id ASC"
@@ -971,6 +986,8 @@ def _row_to_chunk(row: dict[str, Any]) -> EventChunk:
         created_at=row["created_at"],
         embedding_status=EmbeddingStatus(row["embedding_status"]),
         subject_id=row["subject_id"],
+        lifecycle_state=LifecycleState(row["lifecycle_state"]),
+        supersedes_chunk_id=row["supersedes_chunk_id"],
     )
 
 

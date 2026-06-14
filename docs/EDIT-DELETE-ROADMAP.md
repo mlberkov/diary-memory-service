@@ -7,11 +7,14 @@ decomposes the **edit/delete** milestone — the contract for what happens when 
 captured `/note` is edited or deleted — into an ordered set of bounded packets,
 and carries the as-built audit of the surfaces the milestone builds on.
 
-**Status: contract ratified (ED-0 / D-114, docs-first); code packets ED-1..ED-n
-open.** ED-0 closes assumption **A-10** at the contract level and resolves
-TechSpec §12. No edit/delete mechanics exist in code yet: no tombstone /
-supersession column, no retrieval predicate change, and no `/edit` / `/delete`
-behavior — those land in ED-1+.
+**Status: contract ratified (ED-0 / D-114, docs-first); ED-1 landed (D-115);
+code packets ED-2..ED-n open.** ED-0 closes assumption **A-10** at the contract
+level and resolves TechSpec §12. ED-1 landed the persisted `lifecycle_state`
+state model + nullable `supersedes_*` lineage columns, generalized the
+active-state retrieval predicate, and landed the R-4 wording. No `/edit` /
+`/delete` behavior exists yet and nothing writes a non-active state — those land
+in ED-2+ (the `/edit` supersession writer) and ED-3 (the `/delete` tombstone
+writer).
 
 This mirrors the **D-108 / `docs/ROUTED-CHAT-ROADMAP.md`**, **D-097 /
 `docs/SUBJECT-SCOPING-ROADMAP.md`**, **D-093 /
@@ -66,7 +69,7 @@ code moves.
 | --- | --- | --- |
 | Source-layer revisions | edited Telegram messages already land as new `source_messages` rows keyed on `(external_chat_id, external_message_id, edit_seq)`; `edit_seq` is `0` for an original delivery and the `edit_date` epoch for an edited state (R-2 / D-023) | the note/chunk layer extends this with supersession (ED-2); the source layer is unchanged |
 | Soft delete | `I-13` — deletes default to tombstones; hard deletion requires an explicit, audited operation | the contract makes I-13 concrete; I-13 reference reconciled to D-114 in ED-0 |
-| Active-state retrieval | `R-4` — retrieval returns only chunks of non-tombstoned notes by default; dense leg additionally requires `embedding_status='ready'` | generalized to exclude `superseded` as well as `tombstoned`; the R-4 **wording** edit lands with ED-1 (it describes runtime behavior the schema does not yet back) |
+| Active-state retrieval | `R-4` — retrieval returns only chunks of non-tombstoned **and** non-superseded notes by default (ED-1 / D-115); dense leg additionally requires `embedding_status='ready'` | **generalized (ED-1):** both legs filter on the `lifecycle_state='active'` column; the R-4 wording edit landed with ED-1 |
 | Authorship | `I-6` — `author_user_id` mandatory at `SourceMessage` / `Note` / `EventChunk`, never erased | preserved across revisions; supersession copies authorship onto each revision, adds no core authorship field |
 | Stage status | Slice 2.6 — per-record `parse_status` / `embedding_status` / `index_status` | a new revision lands `embedding_status='pending'`; the existing pipeline re-embeds it (ED-2) |
 
@@ -108,7 +111,7 @@ contract. C = core, A = adapter, Cfg = config (D-026 classification).
 | Packet | Surfaces it touches | Class | Status |
 | --- | --- | --- | --- |
 | **ED-0 — docs-first contract + decomposition** | `docs/decision-log.md` (D-114); this roadmap doc (new); `docs/product/TechSpec.md` §12 (rewritten to the contract); `docs/assumptions.md` + `docs/assumption-audit.md` (A-10 closed → D-114); `docs/INVARIANTS.md` (I-13 cross-reference reconciliation only); `docs/execution-map.md`; `docs/todo.md`. Docs-only — no `src/` / `tests/` / schema / migration / config change; no new I-/R- number. | docs-only | **Landed (D-114).** |
-| **ED-1 — state model + schema + retrieval predicate** | tombstone/supersession columns + the `active | superseded | tombstoned` encoding (forward migration); the active-state filter generalized to exclude `superseded` as well as `tombstoned`; the **R-4 wording** generalization in `docs/RUNTIME-INVARIANTS.md`; backend parity across Postgres / SQLite / mock. | C + schema | planned |
+| **ED-1 — state model + schema + retrieval predicate** | single `lifecycle_state` column (`active | superseded | tombstoned`, CHECK + DEFAULT `'active'`) + nullable `supersedes_*` lineage columns on `notes` / `event_chunks` (additive migration 0010); the active-state filter generalized to exclude `superseded` as well as `tombstoned` on both legs; the **R-4 wording** generalization in `docs/RUNTIME-INVARIANTS.md`; backend parity across Postgres / SQLite (round-trip only) / mock. | C + schema | **Landed (D-115).** |
 | **ED-2 — `/edit` ingestion supersession + re-embed** | edited source message → new note/chunk revision (supersession) through `DomainService.ingest`; prior revision marked superseded; new revision lands `embedding_status='pending'` and re-embeds via the existing pipeline. | C + A | planned |
 | **ED-3 — `/delete` control surface** | explicit delete → tombstone the active revision; the explicit, audited hard-delete operation; control-surface wiring. | C + A | planned |
 | **ED-n — drill evidence + milestone close** | operator-run real-backend drill (REAL-1 precedent: a committed, dated, redaction-checked evidence artifact); closure flips in this doc, `docs/execution-map.md`, `docs/todo.md`; closure decision entry. | docs-only | planned |

@@ -379,9 +379,12 @@ Ratified by **D-114** (Packet ED-0); decomposed in
   the existing pipeline; superseded and tombstoned chunks are excluded by the
   active-state filter (R-4) immediately, regardless of embedding state.
 
-State model: `active | superseded | tombstoned`. The column shape / encoding,
-exact names, retrieval-predicate change, the R-4 wording generalization, and the
-`/edit` / `/delete` mechanics land in the ED-1+ code packets
+State model: `active | superseded | tombstoned`. **ED-1 (D-115) landed** the
+encoding (a single `lifecycle_state` column on `notes` / `event_chunks`, CHECK +
+DEFAULT `'active'`, with nullable `supersedes_*` lineage columns), the
+retrieval-predicate change (both legs filter `lifecycle_state='active'`), and the
+R-4 wording generalization. The `/edit` (supersession + re-embed) and `/delete`
+(tombstone) mechanics land in the ED-2 / ED-3 code packets
 (`docs/EDIT-DELETE-ROADMAP.md`); assumption A-10 is closed by D-114.
 
 ## 13. Observability

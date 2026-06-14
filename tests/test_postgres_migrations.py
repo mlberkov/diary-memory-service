@@ -62,11 +62,14 @@ CHAT_QUERY_REWRITES_MIGRATION_ID = "0008.chat-query-rewrites"
 #: Id of the RC-4 / D-108 chat-knowledge-searches migration (filename stem).
 CHAT_KNOWLEDGE_SEARCHES_MIGRATION_ID = "0009.chat-knowledge-searches"
 
+#: Id of the ED-1 / D-114 lifecycle-state migration (filename stem).
+LIFECYCLE_STATE_MIGRATION_ID = "0010.note-chunk-lifecycle-state"
+
 #: Index added by the OP-1.2 upgrade migration on ``event_chunks``.
 EMBEDDING_STATUS_INDEX = "idx_event_chunks_embedding_status"
 
-#: Number of versioned migrations in the history (baseline + eight upgrades).
-MIGRATION_COUNT = 9
+#: Number of versioned migrations in the history (baseline + nine upgrades).
+MIGRATION_COUNT = 10
 
 PG_DSN = os.environ.get("MEMORY_RAG_PG_TEST_DSN")
 
@@ -87,7 +90,7 @@ if PG_DSN is not None:
 
 
 def test_migrations_discoverable() -> None:
-    """The migration set is the baseline plus the eight upgrades, in order."""
+    """The migration set is the baseline plus the nine upgrades, in order."""
     assert migration_ids() == [
         BASELINE_MIGRATION_ID,
         UPGRADE_MIGRATION_ID,
@@ -98,6 +101,7 @@ def test_migrations_discoverable() -> None:
         CHAT_ROUTE_DECISIONS_MIGRATION_ID,
         CHAT_QUERY_REWRITES_MIGRATION_ID,
         CHAT_KNOWLEDGE_SEARCHES_MIGRATION_ID,
+        LIFECYCLE_STATE_MIGRATION_ID,
     ]
 
 
@@ -115,6 +119,7 @@ def test_migrations_dir_is_packaged() -> None:
         "0007.chat-route-decisions.sql",
         "0008.chat-query-rewrites.sql",
         "0009.chat-knowledge-searches.sql",
+        "0010.note-chunk-lifecycle-state.sql",
     ]
 
 
@@ -205,6 +210,14 @@ def _count_rows(dsn: str, table: str) -> int:
     return int(row[0])
 
 
+def _count_rows_where(dsn: str, table: str, predicate: str) -> int:
+    with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT count(*) FROM {table} WHERE {predicate}")
+        row = cur.fetchone()
+    assert row is not None
+    return int(row[0])
+
+
 def _index_exists(dsn: str, index_name: str) -> bool:
     with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute("SELECT to_regclass(%s)", (index_name,))
@@ -263,13 +276,13 @@ def _apply_through_0002(dsn: str) -> None:
 
 
 def _apply_through_0004(dsn: str) -> None:
-    """Apply 0001..0004, leaving the 0005..0009 tail pending.
+    """Apply 0001..0004, leaving the 0005..0010 tail pending.
 
     Stages a genuine prior schema version (no ``subject_id`` columns, no
     ``queries.subject_scope``, no ``chat_route_decisions``, no
-    ``chat_query_rewrites``, no ``chat_knowledge_searches``) so a later
-    ``apply_migrations`` runs the pending tail as a real non-destructive
-    upgrade over populated data."""
+    ``chat_query_rewrites``, no ``chat_knowledge_searches``, no
+    ``lifecycle_state`` columns) so a later ``apply_migrations`` runs the
+    pending tail as a real non-destructive upgrade over populated data."""
     from yoyo import get_backend, read_migrations
 
     backend = get_backend(mr._yoyo_uri(dsn))
@@ -283,6 +296,7 @@ def _apply_through_0004(dsn: str) -> None:
                 CHAT_ROUTE_DECISIONS_MIGRATION_ID,
                 CHAT_QUERY_REWRITES_MIGRATION_ID,
                 CHAT_KNOWLEDGE_SEARCHES_MIGRATION_ID,
+                LIFECYCLE_STATE_MIGRATION_ID,
             }
         )
         with backend.lock():
@@ -290,13 +304,13 @@ def _apply_through_0004(dsn: str) -> None:
 
 
 def _apply_through_0005(dsn: str) -> None:
-    """Apply 0001..0005, leaving the 0006..0009 tail pending.
+    """Apply 0001..0005, leaving the 0006..0010 tail pending.
 
     Stages a genuine prior schema version (no ``queries.subject_scope``
     column, no ``chat_route_decisions``, no ``chat_query_rewrites``, no
-    ``chat_knowledge_searches``) so a later ``apply_migrations`` runs
-    the pending tail as a real non-destructive upgrade over populated
-    data."""
+    ``chat_knowledge_searches``, no ``lifecycle_state`` columns) so a later
+    ``apply_migrations`` runs the pending tail as a real non-destructive
+    upgrade over populated data."""
     from yoyo import get_backend, read_migrations
 
     backend = get_backend(mr._yoyo_uri(dsn))
@@ -309,6 +323,7 @@ def _apply_through_0005(dsn: str) -> None:
                 CHAT_ROUTE_DECISIONS_MIGRATION_ID,
                 CHAT_QUERY_REWRITES_MIGRATION_ID,
                 CHAT_KNOWLEDGE_SEARCHES_MIGRATION_ID,
+                LIFECYCLE_STATE_MIGRATION_ID,
             }
         )
         with backend.lock():
@@ -316,12 +331,12 @@ def _apply_through_0005(dsn: str) -> None:
 
 
 def _apply_through_0006(dsn: str) -> None:
-    """Apply 0001..0006, leaving the 0007..0009 tail pending.
+    """Apply 0001..0006, leaving the 0007..0010 tail pending.
 
     Stages a genuine prior schema version (no ``chat_route_decisions``
-    table, no ``chat_query_rewrites``, no ``chat_knowledge_searches``)
-    so a later ``apply_migrations`` runs the pending tail as a real
-    non-destructive upgrade over populated data."""
+    table, no ``chat_query_rewrites``, no ``chat_knowledge_searches``, no
+    ``lifecycle_state`` columns) so a later ``apply_migrations`` runs the
+    pending tail as a real non-destructive upgrade over populated data."""
     from yoyo import get_backend, read_migrations
 
     backend = get_backend(mr._yoyo_uri(dsn))
@@ -333,6 +348,7 @@ def _apply_through_0006(dsn: str) -> None:
                 CHAT_ROUTE_DECISIONS_MIGRATION_ID,
                 CHAT_QUERY_REWRITES_MIGRATION_ID,
                 CHAT_KNOWLEDGE_SEARCHES_MIGRATION_ID,
+                LIFECYCLE_STATE_MIGRATION_ID,
             }
         )
         with backend.lock():
@@ -340,12 +356,12 @@ def _apply_through_0006(dsn: str) -> None:
 
 
 def _apply_through_0007(dsn: str) -> None:
-    """Apply 0001..0007, leaving the 0008..0009 tail pending.
+    """Apply 0001..0007, leaving the 0008..0010 tail pending.
 
     Stages a genuine prior schema version (no ``chat_query_rewrites``
-    table, no ``chat_knowledge_searches``) so a later
-    ``apply_migrations`` runs the pending tail as a real non-destructive
-    upgrade over populated data."""
+    table, no ``chat_knowledge_searches``, no ``lifecycle_state`` columns)
+    so a later ``apply_migrations`` runs the pending tail as a real
+    non-destructive upgrade over populated data."""
     from yoyo import get_backend, read_migrations
 
     backend = get_backend(mr._yoyo_uri(dsn))
@@ -353,25 +369,49 @@ def _apply_through_0007(dsn: str) -> None:
         migrations = read_migrations(str(path))
         prior = migrations.filter(
             lambda m: m.id
-            not in {CHAT_QUERY_REWRITES_MIGRATION_ID, CHAT_KNOWLEDGE_SEARCHES_MIGRATION_ID}
+            not in {
+                CHAT_QUERY_REWRITES_MIGRATION_ID,
+                CHAT_KNOWLEDGE_SEARCHES_MIGRATION_ID,
+                LIFECYCLE_STATE_MIGRATION_ID,
+            }
         )
         with backend.lock():
             backend.apply_migrations(backend.to_apply(prior))
 
 
 def _apply_through_0008(dsn: str) -> None:
-    """Apply every migration except the 0009 tail, leaving it pending.
+    """Apply 0001..0008, leaving the 0009..0010 tail pending.
 
     Stages a genuine prior schema version (no ``chat_knowledge_searches``
-    table) so a later ``apply_migrations`` runs the 0009
-    chat-knowledge-searches migration as a real non-destructive upgrade
+    table, no ``lifecycle_state`` columns) so a later ``apply_migrations``
+    runs the pending tail as a real non-destructive upgrade over populated
+    data."""
+    from yoyo import get_backend, read_migrations
+
+    backend = get_backend(mr._yoyo_uri(dsn))
+    with migrations_dir() as path:
+        migrations = read_migrations(str(path))
+        prior = migrations.filter(
+            lambda m: m.id
+            not in {CHAT_KNOWLEDGE_SEARCHES_MIGRATION_ID, LIFECYCLE_STATE_MIGRATION_ID}
+        )
+        with backend.lock():
+            backend.apply_migrations(backend.to_apply(prior))
+
+
+def _apply_through_0009(dsn: str) -> None:
+    """Apply every migration except the 0010 tail, leaving it pending.
+
+    Stages a genuine prior schema version (no ``lifecycle_state`` /
+    ``supersedes_*`` columns) so a later ``apply_migrations`` runs the 0010
+    note-chunk-lifecycle-state migration as a real non-destructive upgrade
     over populated data."""
     from yoyo import get_backend, read_migrations
 
     backend = get_backend(mr._yoyo_uri(dsn))
     with migrations_dir() as path:
         migrations = read_migrations(str(path))
-        prior = migrations.filter(lambda m: m.id != CHAT_KNOWLEDGE_SEARCHES_MIGRATION_ID)
+        prior = migrations.filter(lambda m: m.id != LIFECYCLE_STATE_MIGRATION_ID)
         with backend.lock():
             backend.apply_migrations(backend.to_apply(prior))
 
@@ -548,9 +588,9 @@ def test_upgrade_0005_preserves_data(clean_db: str) -> None:
     _insert_chunk_row(clean_db, "chunk-1", "note-1", "src-1")
     assert not _column_exists(clean_db, "notes", "subject_id")
     assert not _column_exists(clean_db, "event_chunks", "subject_id")
-    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 5
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 6
 
-    # The real upgrade: the pending tail (0005..0009) applies on top
+    # The real upgrade: the pending tail (0005..0010) applies on top
     # of the populated database.
     apply_migrations(clean_db)
 
@@ -574,9 +614,9 @@ def test_upgrade_0006_preserves_data(clean_db: str) -> None:
     _apply_through_0005(clean_db)
     _insert_query_row(clean_db, "q-1")
     assert not _column_exists(clean_db, "queries", "subject_scope")
-    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 4
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 5
 
-    # The real upgrade: the pending tail (0006..0009) applies on top
+    # The real upgrade: the pending tail (0006..0010) applies on top
     # of the populated database.
     apply_migrations(clean_db)
 
@@ -595,9 +635,9 @@ def test_upgrade_0007_preserves_data(clean_db: str) -> None:
     _apply_through_0006(clean_db)
     _insert_query_row(clean_db, "q-1")
     assert not _table_exists(clean_db, "chat_route_decisions")
-    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 3
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 4
 
-    # The real upgrade: the pending tail (0007..0009) applies on top
+    # The real upgrade: the pending tail (0007..0010) applies on top
     # of the populated database.
     apply_migrations(clean_db)
 
@@ -617,9 +657,9 @@ def test_upgrade_0008_preserves_data(clean_db: str) -> None:
     _insert_query_row(clean_db, "q-1")
     _insert_decision_row(clean_db, "dec-1")
     assert not _table_exists(clean_db, "chat_query_rewrites")
-    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 2
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 3
 
-    # The real upgrade: the pending tail (0008, then 0009) applies on top
+    # The real upgrade: the pending tail (0008..0010) applies on top
     # of the populated database.
     apply_migrations(clean_db)
 
@@ -640,9 +680,10 @@ def test_upgrade_0009_preserves_data(clean_db: str) -> None:
     _insert_query_row(clean_db, "q-1")
     _insert_decision_row(clean_db, "dec-1")
     assert not _table_exists(clean_db, "chat_knowledge_searches")
-    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 1
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 2
 
-    # The real upgrade: 0009 applies on top of the populated database.
+    # The real upgrade: the pending tail (0009..0010) applies on top
+    # of the populated database.
     apply_migrations(clean_db)
 
     assert _table_exists(clean_db, "chat_knowledge_searches")
@@ -650,6 +691,39 @@ def test_upgrade_0009_preserves_data(clean_db: str) -> None:
     assert _count_rows(clean_db, "queries") == 1
     assert _count_rows(clean_db, "chat_route_decisions") == 1
     assert _count_rows(clean_db, "chat_knowledge_searches") == 0
+
+
+@pgmark
+def test_upgrade_0010_preserves_data(clean_db: str) -> None:
+    """Applying 0010 over a populated 0001..0009 database is a non-destructive
+    upgrade: the ``lifecycle_state`` columns appear on ``notes`` /
+    ``event_chunks``, every pre-existing row survives, and those rows are
+    backfilled to ``lifecycle_state='active'`` with NULL ``supersedes_*``."""
+    # Stage a prior schema version (0001..0009) with realistic data.
+    _apply_through_0009(clean_db)
+    _insert_source_row(clean_db, "src-1")
+    _insert_note_row(clean_db, "note-1", "src-1")
+    _insert_chunk_row(clean_db, "chunk-1", "note-1", "src-1")
+    assert not _column_exists(clean_db, "notes", "lifecycle_state")
+    assert not _column_exists(clean_db, "event_chunks", "lifecycle_state")
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT - 1
+
+    # The real upgrade: 0010 applies on top of the populated database.
+    apply_migrations(clean_db)
+
+    assert _column_exists(clean_db, "notes", "lifecycle_state")
+    assert _column_exists(clean_db, "event_chunks", "lifecycle_state")
+    assert _column_exists(clean_db, "notes", "supersedes_note_id")
+    assert _column_exists(clean_db, "event_chunks", "supersedes_chunk_id")
+    assert _yoyo_row_count(clean_db) == MIGRATION_COUNT
+    assert _count_rows(clean_db, "source_messages") == 1
+    assert _count_rows(clean_db, "notes") == 1
+    assert _count_rows(clean_db, "event_chunks") == 1
+    # Existing rows are backfilled active by the constant DEFAULT; lineage NULL.
+    assert _count_rows_where(clean_db, "notes", "lifecycle_state = 'active'") == 1
+    assert _count_rows_where(clean_db, "event_chunks", "lifecycle_state = 'active'") == 1
+    assert _column_all_null(clean_db, "notes", "supersedes_note_id")
+    assert _column_all_null(clean_db, "event_chunks", "supersedes_chunk_id")
 
 
 @pgmark

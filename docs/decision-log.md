@@ -3802,3 +3802,36 @@ The three axes were over-determined by invariants already in force: R-2 makes th
 - Backend parity (Postgres / SQLite / mock) for the active-state predicate (ED-1).
 - Drill evidence + milestone-close packet (ED-n).
 - Any new I-/R- number — none here; opened only if ED-1 implementation forces one.
+
+## D-115 — ED-1: lifecycle-state model + schema + retrieval predicate (enforces D-114)
+
+### Context
+
+ED-0 / D-114 ratified the edit/delete contract docs-first but landed no code: the `active | superseded | tombstoned` state model was named while the column shape / encoding, exact names, and the lineage reference were explicitly deferred to ED-1, and the R-4 wording generalization was deferred with it ("describes runtime behavior the schema does not yet back"). ED-1 is the smallest code-bearing prerequisite for the rest of the milestone — it stands up the persisted state and the active-state read predicate without introducing any `/edit` or `/delete` behavior. Classification: **core + schema** (D-026).
+
+### Decision
+
+- **Single state column.** The revision lifecycle is carried as one low-cardinality `lifecycle_state TEXT NOT NULL DEFAULT 'active' CHECK (lifecycle_state IN ('active','superseded','tombstoned'))` column on both `notes` and `event_chunks`, mirroring the existing `embedding_status` column shape (TEXT + CHECK + DEFAULT) and the `subject_id` two-table placement (migration 0005). The core enum is `LifecycleState` (`core/domain/models.py`).
+- **Nullable lineage column now (additive).** A nullable `supersedes_note_id` / `supersedes_chunk_id` lineage reference is added in the same migration, left NULL at runtime so ED-2 needs no further migration; the retrieval predicate does not read it. (Resolves the "lineage reference is an ED-1 decision" deferral.)
+- **Retrieval predicate generalized (R-4).** Both retrieval legs now return only `lifecycle_state='active'` chunks — superseded and tombstoned revisions are excluded regardless of `embedding_status`. The dense leg keeps its `embedding_status='ready'` requirement (now `active` **and** `ready`); the sparse leg gains an active-state filter for the first time. Mock + Postgres enforce it; SQLite retrieval stays `NotImplementedError` (D-022 / D-025) but round-trips the columns.
+- **R-4 wording lands here.** `docs/RUNTIME-INVARIANTS.md` R-4 generalizes from "non-tombstoned" to "non-tombstoned **and** non-superseded", backed by this schema.
+- **No state-transition writer.** ED-1 writes every row `active`; nothing transitions state. The `/edit` supersession writer is ED-2; the `/delete` tombstone writer is ED-3.
+
+### Why
+
+A single state column is the only encoding consistent with the existing precedents (it mirrors `embedding_status`, lets the active-state filter exclude old revisions with one predicate, and keeps the lineage link orthogonal). Adding the nullable lineage column now — additive and unwritten — keeps ED-2 a pure behavioral change and matches the roadmap §4 "tombstone/supersession columns" wording. Filtering on a persisted column rather than a join keeps both retrieval legs simple and backend-parallel.
+
+### Consequence
+
+- **New:** migration `0010.note-chunk-lifecycle-state.sql` (additive `ALTER TABLE ADD COLUMN`); `LifecycleState` enum + `lifecycle_state` / `supersedes_*` fields on `Note` / `EventChunk`; `tests/test_lifecycle_state_retrieval.py` (retrieval exclusion both legs, round-trip across mock / sqlite / PG, enum-value pin, PG CHECK-rejection).
+- **Changed:** `storage/postgres/store.py` + `storage/sqlite/store.py` (INSERT + SELECT/row-mapper for both tables) and `storage/mock/store.py` (active-state filter on both legs); `storage/search_repository.py` leg docstrings; `tests/test_postgres_migrations.py` (0010 discovery / packaging / upgrade-preserves-data + `MIGRATION_COUNT` 9 → 10).
+- **Changed (docs):** `docs/RUNTIME-INVARIANTS.md` R-4; `docs/EDIT-DELETE-ROADMAP.md` (ED-1 → landed); `docs/execution-map.md` (2.5 ED-1 row); `docs/todo.md` (ED-1 done, ED-2 top pick); `docs/product/TechSpec.md` §12 (the one clause that named the column shape as ED-1+ deferred).
+- **No new I-/R- number** — R-4 generalized in place; I-13 / I-6 / R-2 unchanged.
+- **Validation:** full repo gate via the host `uv` path (`ruff check` + `ruff format --check` + `mypy` strict + `pytest`) green — 1013 passed / 98 PG-skipped with no DSN; the ED-1 + migration + search PG-gated legs run green against a pgvector Postgres 16 with `MEMORY_RAG_PG_TEST_DSN` set.
+
+### Out of scope
+
+- `/edit` ingestion supersession + the re-embed trigger wiring (ED-2).
+- `/delete` command + the explicit audited hard-delete operation (ED-3).
+- Any index on `lifecycle_state` — deferred optimization (low-cardinality; composes with the existing community / tsv / vector scans).
+- Drill evidence + milestone-close packet (ED-n).

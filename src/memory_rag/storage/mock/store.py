@@ -35,6 +35,7 @@ from memory_rag.core.domain.models import (
     DateRange,
     EventChunk,
     IndexingDeadLetter,
+    LifecycleState,
     Note,
     Query,
     RetrievalHit,
@@ -205,6 +206,8 @@ class MockDomainStore:
         for index, chunk in enumerate(self._chunks.values()):
             if chunk.community_id != community_id:
                 continue
+            if chunk.lifecycle_state is not LifecycleState.ACTIVE:
+                continue
             if not _chunk_in_date_range(chunk, date_range):
                 continue
             if not _chunk_in_subject_scope(chunk, subject_scope):
@@ -241,6 +244,8 @@ class MockDomainStore:
         ranked: list[tuple[int, int, EventChunk]] = []
         for index, chunk in enumerate(self._chunks.values()):
             if chunk.community_id != community_id:
+                continue
+            if chunk.lifecycle_state is not LifecycleState.ACTIVE:
                 continue
             if not _chunk_in_date_range(chunk, date_range):
                 continue

@@ -42,11 +42,13 @@ class SearchRepository(Protocol):
     ) -> list[EventChunk]:
         """Return up to ``limit`` chunks ranked by vector similarity.
 
-        Community-scoped (I-7, R-3). Only chunks with
-        ``embedding_status == 'ready'`` participate. The ``model_name``
-        filter is what ties the query vector to the persisted vectors:
-        a chunk indexed under a different model is not a candidate for
-        this query.
+        Community-scoped (I-7, R-3). Only chunks of the active revision
+        (``lifecycle_state == 'active'``) participate — superseded and
+        tombstoned revisions are excluded (R-4; D-114). Of those, only
+        chunks with ``embedding_status == 'ready'`` participate on this
+        dense leg. The ``model_name`` filter is what ties the query
+        vector to the persisted vectors: a chunk indexed under a
+        different model is not a candidate for this query.
 
         When ``date_range`` is given, only chunks whose ``note_date``
         falls within its inclusive bounds participate; ``None`` (the
@@ -72,7 +74,11 @@ class SearchRepository(Protocol):
     ) -> list[EventChunk]:
         """Return up to ``limit`` chunks ranked by PostgreSQL FTS baseline.
 
-        Community-scoped (I-7, R-3). Tokenization is whatever the backend
+        Community-scoped (I-7, R-3). Only chunks of the active revision
+        (``lifecycle_state == 'active'``) participate — superseded and
+        tombstoned revisions are excluded (R-4; D-114); the sparse leg
+        ranks any active chunk whose text yields tokens regardless of
+        ``embedding_status``. Tokenization is whatever the backend
         configures — for Postgres, ``to_tsvector('simple', ...)``;
         ``websearch_to_tsquery('simple', ...)`` parses the query.
 
