@@ -13,7 +13,7 @@ When an item is decided, move it to `docs/decision-log.md` (next D-### id) and r
 | ~~A-7~~ | ~~Sync vs async indexing~~ | — | — | — | Closed → D-024 (sync on ingest) |
 | ~~A-8~~ | ~~Embedding model & dim~~ | — | — | — | Closed → D-024 (`text-embedding-3-large` @ 3072) |
 | A-9 | Chat model | Quality, cost, fallback compatibility | Smoke + eval in Phase 4 | agent | Phase 4 |
-| A-10 | Edit/delete strategy | Data loss / duplication | Spec + small prototype | human + agent | Phase 2.5 — re-queued as the milestone immediately after routed chat (owner override, D-108) |
+| ~~A-10~~ | ~~Edit/delete strategy~~ | — | — | — | Closed → D-114 (supersession + tombstone + re-embed; ED-0, `docs/EDIT-DELETE-ROADMAP.md`) |
 | A-11 | Note grouping rule | Wrong split/merge of notes | Walk 10 sample sessions | human | Phase 2.3 |
 | A-12 | Date parsing scope | Misclassification of notes | List supported formats + tests | agent | Phase 2.3 |
 | A-13 | Timezone source | Wrong `note_date` | Spec + tests | agent | Phase 2.3 |
@@ -23,7 +23,7 @@ When an item is decided, move it to `docs/decision-log.md` (next D-### id) and r
 | ~~A-17~~ | ~~Clarification UX~~ | — | — | — | Closed → D-020; after D-078 CLARIFY survives only as an explicit-command active-conflict reply (not a plain-text route — dormant since D-028) |
 | A-18 | Data residency | Compliance failure | Stakeholder confirmation | human | before prod |
 | A-19 | Retention policy | Storage growth; user trust | Policy doc + sample math | human | Phase 8 |
-| A-20 | Export/delete semantics — export half directionally answered by D-027 (raw export in JSON or TXT, scope-bounded); remaining open: delivery channel and the deletion half (see A-39, A-10) | Compliance, trust | Spec + prototype | human | Phase 8 |
+| A-20 | Export/delete semantics — export half directionally answered by D-027 (raw export in JSON or TXT, scope-bounded); remaining open: delivery channel and the deletion-delivery half (see A-39; underlying edit/delete strategy ratified in D-114) | Compliance, trust | Spec + prototype | human | Phase 8 |
 | A-21 | TheyGrow integration surface | Integration cost | API/SDK sketch | human | Phase 9 |
 | ~~A-22~~ | ~~Hosting target — directionally answered by D-027 (managed cloud as default; OSS and embedded as peers); remaining open: which specific managed environment (see A-41)~~ | — | — | — | Closed → D-060 (DEPLOY-1.1 — self-hosted VPS first / DEPLOY-1; managed cloud as deferred second peer / DEPLOY-2; D-026 / D-027 peer parity preserved; A-41 stays open and is deferred until DEPLOY-2) |
 | A-23 | Backup strategy — directionally answered by D-027 (daily window `03:00–05:00` + stronger-than-nightly recovery); the remaining tooling + RPO/RTO part is resolved by D-053 (A-40 closed) | Data loss | Drill + runbook | human | Phase 7 |

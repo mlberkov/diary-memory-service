@@ -53,7 +53,7 @@ External providers (LLM, embeddings, search backend) are accessed through explic
 Parsing and chunking are deterministic for a given `parse_version`. Re-running parse + chunk + embed on the same `SourceMessage` produces the same logical state, not duplicates.
 
 ## I-13. Soft delete by default
-Deletes default to tombstones. Hard deletion of source data requires an explicit, audited operation. (Specific edit/delete mechanics are open — see `docs/assumptions.md` A-10.)
+Deletes default to tombstones. Hard deletion of source data requires an explicit, audited operation. (The edit/delete contract — supersession for edits, tombstone for deletes, re-embed on revision — is ratified in D-114; mechanics are decomposed in `docs/EDIT-DELETE-ROADMAP.md` and land in the ED-1+ code packets.)
 
 ## I-14. No silent data loss
 Absence of an explicit command never causes silent discard, downgrade, or upgrade of raw persistence. Drafts are the safety floor (D-027 / D-028) and, per D-078, the only route for command-less plain text: heuristics do not auto-route plain text to NOTE or ASK — those lifecycles are reached only via the explicit `/note` / `/ask` commands. CLARIFY (D-020) remains valid only as a response when an explicit command actively conflicts with intent, not as a plain-text route and not as the persistence floor. (D-078 records this contract; D-079 enforces it in code — `classify_plain_text` routes command-less plain text only to the draft floor.)

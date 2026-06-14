@@ -3760,3 +3760,45 @@ The three Starlette advisories — `CVE-2025-62727` / `GHSA-7f5h-v6xp-fcq8` (Fil
 - Any non-security freshness upgrade (numpy / openai / psycopg / etc.).
 - The `TestClient` `httpx` → `httpx2` migration implied by the deprecation warning — future, no security impact.
 - SEC-1 milestone closure / checkpoint — not part of this packet (the row stays pre-checkpoint).
+
+## D-114 — ED-0: edit/delete contract (revisions/supersession + tombstone + re-embed) — resolves A-10, decomposes the milestone
+
+### Context
+
+Milestone 2.5 (execution-map row `2.5 edit/delete strategy`) is the top pick now that the routed-chat milestone is closed (RC-5 / D-112). TechSpec §12 still read "This is not fully fixed yet and must be decided explicitly" across three open axes — revisions vs in-place mutation, tombstones vs hard delete, re-indexing trigger — and assumption **A-10** carried that openness. Code cannot start until the contract is ratified. The directional constraints are already pinned by existing invariants, so the contract is heavily constrained rather than freely chosen: edited Telegram messages already land as *new* `source_messages` rows keyed on `(external_chat_id, external_message_id, edit_seq)` (R-2) — the source layer is already revision-based; soft delete is already the default (I-13); retrieval already filters to active state (R-4); authorship is mandatory and never erased (I-6). The genuinely-open call was the Note/EventChunk-layer model. ED-0 is the docs-first decision packet that ratifies the contract and decomposes the milestone into bounded code packets; it mirrors the D-108 → `docs/ROUTED-CHAT-ROADMAP.md` precedent (and D-097 / D-093 / D-044): the decision entry carries the stable contract, the roadmap doc carries the refinable sequence.
+
+### Decision
+
+- **Axis 1 — supersession (revisions), not in-place mutation.** An edited `/note` produces a new note/chunk revision that supersedes the prior one; the prior revision is **retained** (source lineage and I-6 authorship preserved) and marked inactive, not mutated or destroyed. This continues the source-layer revision model (R-2 `edit_seq`) up into the note/chunk layer.
+- **Axis 2 — tombstones, not hard delete.** A delete sets a tombstone on the active revision (I-13 soft delete by default); hard deletion of source data stays an explicit, audited operation.
+- **Axis 3 — re-embed on revision.** A new revision lands `embedding_status='pending'` (Slice 2.6 stage tracking) and is re-embedded by the existing pipeline; superseded and tombstoned chunks are excluded by the active-state filter **immediately**, regardless of embedding state — so a delete is effective before any re-embedding completes, and the superseded/tombstoned chunk itself is never re-embedded.
+- **State model: `active | superseded | tombstoned`.** The column shape / encoding (single state column vs tombstone flag + supersession link), exact names, and the lineage reference are a code-packet decision deferred to ED-1.
+- **A-10 is closed**, resolved by this entry. Remaining implementation is tracked via the execution-map 2.5 decomposition + `docs/EDIT-DELETE-ROADMAP.md` + `docs/todo.md`.
+- **Decomposition.** The milestone is decomposed docs-first in the new `docs/EDIT-DELETE-ROADMAP.md` as a refinable ED-0..ED-n ladder (D-108 / D-097 / D-093 / D-044 precedent: this entry carries the stable contract; the roadmap carries the refinable sequence).
+- **R-4 generalization is named but not yet written.** The active-state filter generalizes from "non-tombstoned" to "non-tombstoned **and** non-superseded"; the R-4 wording edit lands with the ED-1 code packet, because it describes runtime behavior the schema does not yet back. ED-0 leaves `docs/RUNTIME-INVARIANTS.md` untouched.
+
+### Why
+
+The three axes were over-determined by invariants already in force: R-2 makes the source layer revision-based, I-13 pins soft delete, R-4 filters to active state on retrieval, and I-6 forbids erasing authorship. Supersession at the note/chunk layer is the only option consistent with all four (it preserves lineage and authorship, lets the active-state filter exclude old revisions, and reuses the existing `embedding_status` re-embed path) — in-place mutation would either lose prior text or require a parallel history table for no benefit. Ratifying the contract now, docs-first, unblocks the code packets without pre-committing schema or command shapes.
+
+### Consequence
+
+- **New:** `docs/EDIT-DELETE-ROADMAP.md` (ED-0..ED-n ladder + as-built audit + ratified contract).
+- **Changed:** `docs/decision-log.md` — this D-114 entry.
+- **Changed:** `docs/product/TechSpec.md` §12 — rewritten from "open questions / current recommendation" to the ratified contract, pointing here.
+- **Changed:** `docs/assumptions.md` + `docs/assumption-audit.md` — **A-10 closed** → D-114.
+- **Changed:** `docs/execution-map.md` — row 2.5 updated (contract ratified, ED-0 landed, roadmap pointer) + the ED-0..ED-n decomposition note block.
+- **Changed:** `docs/todo.md` — Edit/delete block flipped to ED-0 done, ED-1+ queued.
+- **Changed:** `docs/INVARIANTS.md` — **cross-reference reconciliation only** on I-13: its trailing `(Specific edit/delete mechanics are open — see docs/assumptions.md A-10.)` now points to this ratified contract instead of an open assumption. No new I-number, no enforcement-wording rewrite, no claim that runtime behavior already exists.
+- **No `src/` / `tests/` / schema / DDL / migration / config change; no new I-/R- number.** `docs/RUNTIME-INVARIANTS.md` untouched (the R-4 generalization lands with ED-1).
+- **Validation:** full repo gate (ruff + mypy strict + pytest, via `make check` or the host's `uv`-equivalent) stays green — zero code touched.
+
+### Out of scope
+
+- The tombstone + supersession columns, the `active | superseded | tombstoned` encoding, exact names, and the forward migration (ED-1).
+- The retrieval predicate change and the R-4 wording generalization in `docs/RUNTIME-INVARIANTS.md` (ED-1).
+- `/edit` ingestion supersession + the re-embed trigger wiring (ED-2).
+- `/delete` command + the explicit audited hard-delete operation (ED-3).
+- Backend parity (Postgres / SQLite / mock) for the active-state predicate (ED-1).
+- Drill evidence + milestone-close packet (ED-n).
+- Any new I-/R- number — none here; opened only if ED-1 implementation forces one.

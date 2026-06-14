@@ -36,8 +36,23 @@ in `docs/OPERATIONALIZATION-ROADMAP.md` (D-044).
 | 2.2 schema (notes) | migration: `notes`, `event_chunks` with lineage |
 | 2.3 ingestion pipeline | parser (`parse_version`), event splitter, chunk creation; raw persisted first (I-3, R-1) |
 | 2.4 idempotent webhook | `DomainRepository.get_or_create_source_message` keyed on `(external_chat_id, external_message_id, edit_seq)`; `UNIQUE` constraint + `INSERT ... ON CONFLICT DO NOTHING` (Postgres) / `INSERT OR IGNORE` (SQLite) / dict dedupe (mock); `DomainService.ingest` short-circuits on replay; webhook logs `effective_path=fresh|replay`; D-023 |
-| 2.5 edit/delete strategy | implementation of the decision recorded for TechSpec §12 (assumption A-10) — **re-queued by owner override (D-108) as the milestone immediately after the routed-chat milestone** |
+| 2.5 edit/delete strategy | **Contract ratified (D-114 / ED-0).** Supersession (edits create revisions) + tombstone (deletes are soft, hard delete is explicit/audited) + re-embed on revision; state model `active | superseded | tombstoned`; resolves TechSpec §12, **closes A-10**. Decomposed docs-first in `docs/EDIT-DELETE-ROADMAP.md` (ED-0..ED-n) — see the block below. Mechanics (columns, predicate, R-4 wording, `/edit` / `/delete`) land in ED-1+. |
 | 2.6 stage status tracking | per-record `parse_status`, `embedding_status`, `index_status` |
+
+Slice 2.5 is decomposed docs-first in `docs/EDIT-DELETE-ROADMAP.md` (D-114),
+mirroring the OP-/RC-/G-/H- roadmap precedent: the decision entry carries the
+stable contract, the roadmap carries the refinable ED-0..ED-n sequence. ED-0 is
+the docs-only contract packet; ED-1 lands the state model + schema + retrieval
+predicate (and the R-4 wording generalization); ED-2 the `/edit` supersession +
+re-embed; ED-3 the `/delete` control surface; ED-n the drill evidence + close.
+
+| Packet | Files / artifacts |
+| --- | --- |
+| ED-0 — contract + decomposition | **Done (D-114).** Docs-only ratification: `docs/decision-log.md` (new D-114 — supersession + tombstone + re-embed contract, `active | superseded | tombstoned` state model, A-10 closed, R-4 generalization named but deferred to ED-1); new `docs/EDIT-DELETE-ROADMAP.md` (ED-0..ED-n ladder); `docs/product/TechSpec.md` §12 (rewritten to the contract); `docs/assumptions.md` + `docs/assumption-audit.md` (**A-10 closed → D-114**); `docs/INVARIANTS.md` (I-13 cross-reference reconciliation only — no new I-number, no enforcement rewrite); this block + the 2.5 row; `docs/todo.md`. `docs/RUNTIME-INVARIANTS.md` untouched (the R-4 wording generalization lands when the predicate ships in ED-1). No `src/` / `tests/` / schema / migration / config change; no new I-/R- number. → ED-0 (D-114). |
+| ED-1 — state model + schema + retrieval predicate | planned — tombstone/supersession columns + `active | superseded | tombstoned` encoding (forward migration); active-state filter generalized to exclude `superseded` as well as `tombstoned`; R-4 wording generalization in `docs/RUNTIME-INVARIANTS.md`; backend parity (Postgres / SQLite / mock). |
+| ED-2 — `/edit` supersession + re-embed | planned — edited source → new note/chunk revision through `DomainService.ingest`; prior revision superseded; new revision lands `embedding_status='pending'` and re-embeds via the existing pipeline. |
+| ED-3 — `/delete` control surface | planned — explicit delete → tombstone the active revision; explicit audited hard-delete operation; control-surface wiring. |
+| ED-n — drill evidence + close | planned — operator-run real-backend drill (REAL-1 precedent); closure flips in roadmap / this block / `docs/todo.md`; closure decision entry. |
 
 ## Phase 3 — Embeddings and Hybrid Retrieval *(Stage 1 — Product baseline)*
 | Slice | Files / artifacts |
