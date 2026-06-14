@@ -167,6 +167,32 @@ class MockDomainStore:
                 return note
         return None
 
+    def get_active_note_for_external_message(
+        self, external_chat_id: str, external_message_id: str, *, community_id: str
+    ) -> Note | None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        matches: list[Note] = []
+        for note in self._notes.values():
+            if note.community_id != community_id:
+                continue
+            if note.lifecycle_state is not LifecycleState.ACTIVE:
+                continue
+            source = self._sources.get(note.source_message_id)
+            if source is None:
+                continue
+            if (
+                source.external_chat_id == external_chat_id
+                and source.external_message_id == external_message_id
+            ):
+                matches.append(note)
+        if not matches:
+            return None
+        # Most recent first, mirroring the SQL ``created_at DESC, note_id DESC``;
+        # at most one active note matches under normal operation, but stay total.
+        matches.sort(key=lambda n: (n.created_at, n.note_id), reverse=True)
+        return matches[0]
+
     def count_event_chunks_for_source(self, source_message_id: str) -> int:
         return sum(
             1 for chunk in self._chunks.values() if chunk.source_message_id == source_message_id
@@ -179,6 +205,21 @@ class MockDomainStore:
         if chunk is None or chunk.community_id != community_id:
             return None
         return chunk
+
+    def get_active_chunk_for_note(self, note_id: str, *, community_id: str) -> EventChunk | None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        matches = [
+            c
+            for c in self._chunks.values()
+            if c.note_id == note_id
+            and c.community_id == community_id
+            and c.lifecycle_state is LifecycleState.ACTIVE
+        ]
+        if not matches:
+            return None
+        matches.sort(key=lambda c: (c.created_at, c.chunk_id), reverse=True)
+        return matches[0]
 
     def dense_candidates(
         self,
@@ -281,6 +322,22 @@ class MockDomainStore:
         if existing is None:
             raise KeyError(f"unknown chunk_id={chunk_id}")
         self._chunks[chunk_id] = replace(existing, embedding_status=status)
+
+    def mark_note_superseded(self, note_id: str, *, community_id: str) -> None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        existing = self._notes.get(note_id)
+        if existing is None or existing.community_id != community_id:
+            raise KeyError(f"unknown note_id={note_id}")
+        self._notes[note_id] = replace(existing, lifecycle_state=LifecycleState.SUPERSEDED)
+
+    def mark_chunk_superseded(self, chunk_id: str, *, community_id: str) -> None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        existing = self._chunks.get(chunk_id)
+        if existing is None or existing.community_id != community_id:
+            raise KeyError(f"unknown chunk_id={chunk_id}")
+        self._chunks[chunk_id] = replace(existing, lifecycle_state=LifecycleState.SUPERSEDED)
 
     def list_failed_event_chunks(
         self, community_id: str, *, limit: int | None = None

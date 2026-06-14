@@ -8,13 +8,14 @@ captured `/note` is edited or deleted — into an ordered set of bounded packets
 and carries the as-built audit of the surfaces the milestone builds on.
 
 **Status: contract ratified (ED-0 / D-114, docs-first); ED-1 landed (D-115);
-code packets ED-2..ED-n open.** ED-0 closes assumption **A-10** at the contract
-level and resolves TechSpec §12. ED-1 landed the persisted `lifecycle_state`
-state model + nullable `supersedes_*` lineage columns, generalized the
-active-state retrieval predicate, and landed the R-4 wording. No `/edit` /
-`/delete` behavior exists yet and nothing writes a non-active state — those land
-in ED-2+ (the `/edit` supersession writer) and ED-3 (the `/delete` tombstone
-writer).
+ED-2 landed (D-116); code packets ED-3..ED-n open.** ED-0 closes assumption
+**A-10** at the contract level and resolves TechSpec §12. ED-1 landed the
+persisted `lifecycle_state` state model + nullable `supersedes_*` lineage
+columns, generalized the active-state retrieval predicate, and landed the R-4
+wording. ED-2 wired the `/edit` supersession writer: a parsed note edit
+supersedes the prior active revision (lineage recorded, prior flipped to
+`superseded`, new revision re-embedded). The `/delete` tombstone writer (ED-3)
+is the only remaining non-active transition.
 
 This mirrors the **D-108 / `docs/ROUTED-CHAT-ROADMAP.md`**, **D-097 /
 `docs/SUBJECT-SCOPING-ROADMAP.md`**, **D-093 /
@@ -112,7 +113,7 @@ contract. C = core, A = adapter, Cfg = config (D-026 classification).
 | --- | --- | --- | --- |
 | **ED-0 — docs-first contract + decomposition** | `docs/decision-log.md` (D-114); this roadmap doc (new); `docs/product/TechSpec.md` §12 (rewritten to the contract); `docs/assumptions.md` + `docs/assumption-audit.md` (A-10 closed → D-114); `docs/INVARIANTS.md` (I-13 cross-reference reconciliation only); `docs/execution-map.md`; `docs/todo.md`. Docs-only — no `src/` / `tests/` / schema / migration / config change; no new I-/R- number. | docs-only | **Landed (D-114).** |
 | **ED-1 — state model + schema + retrieval predicate** | single `lifecycle_state` column (`active | superseded | tombstoned`, CHECK + DEFAULT `'active'`) + nullable `supersedes_*` lineage columns on `notes` / `event_chunks` (additive migration 0010); the active-state filter generalized to exclude `superseded` as well as `tombstoned` on both legs; the **R-4 wording** generalization in `docs/RUNTIME-INVARIANTS.md`; backend parity across Postgres / SQLite (round-trip only) / mock. | C + schema | **Landed (D-115).** |
-| **ED-2 — `/edit` ingestion supersession + re-embed** | edited source message → new note/chunk revision (supersession) through `DomainService.ingest`; prior revision marked superseded; new revision lands `embedding_status='pending'` and re-embeds via the existing pipeline. | C + A | planned |
+| **ED-2 — `/edit` ingestion supersession + re-embed** | edited source message → new note/chunk revision (supersession) through `DomainService.ingest`; prior revision marked superseded; new revision lands `embedding_status='pending'` and re-embeds via the existing pipeline. | C | **Landed (D-116).** Four repo seams (`get_active_note_for_external_message`, `get_active_chunk_for_note`, `mark_note_superseded`, `mark_chunk_superseded`) across mock / sqlite / postgres; `ingest()` lookup→lineage→save→flip(chunk-then-note)→re-embed. NOTE→NOTE only; malformed/draft edits supersede nothing; replay-safe. |
 | **ED-3 — `/delete` control surface** | explicit delete → tombstone the active revision; the explicit, audited hard-delete operation; control-surface wiring. | C + A | planned |
 | **ED-n — drill evidence + milestone close** | operator-run real-backend drill (REAL-1 precedent: a committed, dated, redaction-checked evidence artifact); closure flips in this doc, `docs/execution-map.md`, `docs/todo.md`; closure decision entry. | docs-only | planned |
 

@@ -3835,3 +3835,36 @@ A single state column is the only encoding consistent with the existing preceden
 - `/delete` command + the explicit audited hard-delete operation (ED-3).
 - Any index on `lifecycle_state` — deferred optimization (low-cardinality; composes with the existing community / tsv / vector scans).
 - Drill evidence + milestone-close packet (ED-n).
+
+## D-116 — ED-2: `/edit` ingestion supersession + re-embed (enforces D-114)
+
+### Context
+
+ED-1 / D-115 landed the persisted `lifecycle_state` (`active | superseded | tombstoned`) + nullable `supersedes_*` lineage columns and generalized the active-state retrieval predicate (R-4), but wrote every row `active` and added no state-transition writer: `lifecycle_state` was always `active`, `supersedes_*` always NULL, and the predicate excluded states no runtime path could produce. ED-2 is the first write-side use of that schema — the smallest behavior-bearing packet that makes the D-114 contract observable on the `/edit` path. An edited Telegram message already reaches `DomainService.ingest` with a new `edit_seq` (the `edit_date` epoch), so before ED-2 each edit created a *second independent active* note/chunk and both were retrievable. Classification: **core** (D-026) — the external→note resolution and all SQL stay behind the storage seam; the core passes only opaque ids it already holds on `InboundMessage`.
+
+### Decision
+
+- **Supersession on `/edit`.** When a parsed note ingests and a prior `active` note already exists for the same external message, the new note/chunk land `active` with `supersedes_note_id` / `supersedes_chunk_id` lineage to the prior, and the prior note + its active chunk flip to `superseded` (retained — only `lifecycle_state` changes; source lineage and I-6 authorship survive). The new chunk re-embeds through the existing synchronous ingest embed step; the superseded chunk is excluded from both retrieval legs immediately (R-4) and is never re-embedded.
+- **Trigger = "a prior active note exists for this external message," not the `edit_seq` value.** Idempotency-safe: a redelivered edit short-circuits on replay (R-2) before the lookup; a fresh original finds no prior and supersedes nothing (lineage stays NULL — unchanged behavior).
+- **Owner-confirmed semantics (this session).** A malformed edit (`INVALID_INPUT`) creates no revision and does **not** supersede the prior good revision. Supersession is **NOTE→NOTE only**: a draft edit does not supersede (removing-an-edited-note-from-retrieval is delete semantics, ED-3). Supersession holds even if the new revision's re-embed fails (raw + chunk lineage intact; embedding is downstream). An edit's author may differ from the prior's — supersede regardless; each revision keeps its own authorship (I-6). Out-of-order / concurrent edit delivery is out of scope ("latest active wins"; the read seam stays total via `created_at DESC, id DESC LIMIT 1`).
+- **Ordering is part of the contract.** The prior is flipped only **after** the new active revision is durably saved (a partial failure never leaves zero active revisions), and the **chunk is flipped before the note** (both legs filter on the chunk's `lifecycle_state`, so closing chunk visibility first makes the edit retrieval-effective immediately).
+- **No new schema, no generic state-setter.** ED-2 writes the ED-1 columns only. The two write seams are specific (`mark_note_superseded` / `mark_chunk_superseded`), community-scoped, single-row, `KeyError`-on-miss — mirroring `set_chunk_embedding_status`' shape, not its generality; ED-2 never writes `tombstoned` (ED-3 ships its own `mark_*_tombstoned` pair).
+
+### Why
+
+The trigger and ordering are over-determined by the existing model: the source layer is already revision-keyed (R-2), retrieval already excludes non-active chunks (R-4), and re-embed is already synchronous in `ingest`, so supersession is a behavioral addition that reuses every existing path and adds only the lineage write + the prior-flip. Detecting the prior by "active note for this external message" (rather than by `edit_seq`) keeps the logic idempotent under replay and correct across multiple edits (each edit supersedes the then-current active revision). Specific, community-scoped writers keep the packet autonomous (no ED-3 caller pre-built) and make a cross-community flip structurally impossible (I-7, R-3).
+
+### Consequence
+
+- **New:** four `DomainRepository` seams — read `get_active_note_for_external_message` (notes→source_messages join) + `get_active_chunk_for_note`; write `mark_note_superseded` + `mark_chunk_superseded` — implemented across Postgres / SQLite / mock; `tests/test_edit_supersession_ingest.py` (supersession + lineage, fresh-original no-op, replay no-re-supersede, invalid-edit no-op, draft-edit no-op, both empty-body edges, re-embed-failure holds, author-change preserves I-6, cross-community scoping, marker-seam `KeyError`/`ValueError`, end-to-end retrieval exclusion).
+- **Changed:** `services/domain_service.py` — the `ingest()` supersession block (lookup → lineage on the new note/chunk → save → flip prior chunk then note → re-embed) + module docstring; `storage/repository.py` (four Protocol signatures + docstrings).
+- **No new I-/R- number** — enforces D-114; R-2 / R-4 / I-6 / I-13 unchanged. No migration (ED-1 columns suffice).
+- **Validation:** full repo gate via the host `uv` path (`ruff check` + `ruff format --check` + `mypy` strict + `pytest`) green — 1036 passed / 98 PG-skipped with no DSN. The PG-gated ED-2 legs (mock + sqlite run inline; postgres parametrized) are written to run on a pgvector Postgres 16 with `MEMORY_RAG_PG_TEST_DSN` set; that operator run is the packet's PG acceptance. The known unrelated full-suite DSN-on failure in `test_retrieval_harness_shape` stays out of scope and is not an ED-2 regression.
+
+### Out of scope
+
+- `/delete` command, the tombstone writer (`mark_*_tombstoned`), and the explicit audited hard-delete operation (ED-3).
+- NOTE↔DRAFT route-change edits as a removal/delete (ED-3).
+- Drill evidence + milestone-close packet and the single milestone PR (ED-n).
+- Any background/automatic re-embed worker — none exists; ED-2 relies on the existing synchronous in-ingest embed path.
+- Out-of-order / concurrent-edit resolution and save+flip transactional atomicity (each seam commits independently, matching the existing per-row embedding commits).

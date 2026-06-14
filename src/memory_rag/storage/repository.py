@@ -108,6 +108,26 @@ class DomainRepository(Protocol):
         on replay without re-parsing or re-chunking.
         """
 
+    def get_active_note_for_external_message(
+        self, external_chat_id: str, external_message_id: str, *, community_id: str
+    ) -> Note | None:
+        """Return the single ``active`` note for an external message, or ``None`` (ED-2, D-114).
+
+        Resolves the prior live revision when an edited delivery arrives:
+        joins ``notes`` to ``source_messages`` on ``source_message_id`` and
+        filters ``source_messages.external_chat_id`` /
+        ``external_message_id``, ``notes.community_id``, and
+        ``notes.lifecycle_state='active'``. At most one ``active`` note
+        matches under normal operation (the ``/edit`` supersession writer
+        flips the prior to ``superseded`` in the same ingest); the seam is
+        kept total under an out-of-scope concurrent-edit race by returning
+        the most recent (``created_at DESC, note_id DESC``). Community
+        scoping is mandatory and fail-closed (I-7, R-3): a null/empty
+        ``community_id`` raises; a note owned by a different community reads
+        as ``None``. ``community_id`` is keyword-only to prevent a silent
+        positional swap between two ``str`` identifiers (D-088).
+        """
+
     def count_event_chunks_for_source(self, source_message_id: str) -> int:
         """Count event chunks persisted for a given source."""
 
@@ -121,6 +141,20 @@ class DomainRepository(Protocol):
         raises; a chunk owned by a different community reads as ``None``.
         ``community_id`` is keyword-only to prevent a silent positional
         swap between two ``str`` identifiers (D-088).
+        """
+
+    def get_active_chunk_for_note(self, note_id: str, *, community_id: str) -> EventChunk | None:
+        """Return the single ``active`` chunk of a note, or ``None`` (ED-2, D-114).
+
+        Used by the ``/edit`` supersession writer to find the prior
+        revision's chunk for ``supersedes_chunk_id`` lineage. A date-only
+        note has no chunk; one explicit ``/note`` is exactly one chunk
+        (I-5 / D-106), so this returns at most one row (deterministic under
+        any out-of-scope race via ``created_at DESC, chunk_id DESC``).
+        Community scoping is mandatory and fail-closed (I-7, R-3): a
+        null/empty ``community_id`` raises; a chunk owned by a different
+        community reads as ``None``. ``community_id`` is keyword-only
+        (D-088).
         """
 
     def save_embedding_records(self, records: list[EmbeddingRecord]) -> None:
@@ -141,6 +175,31 @@ class DomainRepository(Protocol):
         ``ready`` after the embedding row is persisted; ``failed`` if the
         provider call raised. The chunk row itself is always intact
         (I-3, R-1).
+        """
+
+    def mark_note_superseded(self, note_id: str, *, community_id: str) -> None:
+        """Flip a note's ``lifecycle_state`` ``active`` -> ``superseded`` (ED-2, D-114).
+
+        The ``/edit`` supersession writer's note-level transition: the prior
+        revision is retained (raw + chunk lineage + I-6 authorship intact)
+        and marked inactive so retrieval excludes it (R-4). Mirrors
+        ``set_chunk_embedding_status``' shape — a single-row UPDATE that
+        raises ``KeyError`` when no row matches — but is **community-scoped**
+        (the UPDATE filters ``community_id``) so a cross-community flip is
+        structurally impossible (I-7, R-3); a null/empty ``community_id``
+        raises ``ValueError``. ``community_id`` is keyword-only (D-088). ED-2
+        only ever writes ``superseded``; the ``tombstoned`` transition is
+        ED-3.
+        """
+
+    def mark_chunk_superseded(self, chunk_id: str, *, community_id: str) -> None:
+        """Flip a chunk's ``lifecycle_state`` ``active`` -> ``superseded`` (ED-2, D-114).
+
+        The chunk-level counterpart of ``mark_note_superseded`` — the
+        retrieval-visible flip (both legs filter the chunk's
+        ``lifecycle_state``). Same single-row, community-scoped,
+        ``KeyError``-on-miss shape; ``community_id`` is keyword-only and a
+        null/empty value raises ``ValueError`` (I-7, R-3, D-088).
         """
 
     def list_failed_event_chunks(

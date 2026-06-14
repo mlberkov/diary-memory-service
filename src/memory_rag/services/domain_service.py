@@ -21,6 +21,19 @@ reconstructs the original ``IngestResult`` from persisted state; the
 persisted ``detected_route`` tells the reconstruction whether the row
 was a draft or a note.
 
+Supersession (ED-2 / D-114): an edited message arrives with a new
+``edit_seq`` (the ``edit_date`` epoch), so it is a fresh, non-replayed
+source row. When it parses as a note and a prior ``active`` note already
+exists for the same external message, the new revision is created
+``active`` with ``supersedes_note_id`` / ``supersedes_chunk_id`` lineage
+to the prior, the prior note and chunk are flipped to ``superseded``
+(retained, not mutated or destroyed — source lineage and I-6 authorship
+survive), and the new chunk is re-embedded by the embedding step below.
+Both retrieval legs exclude the superseded revision immediately (R-4),
+regardless of embedding state. Supersession is NOTE->NOTE only: a draft
+edit and an unparseable edit short-circuit above, so they never supersede
+the prior good revision; a fresh original finds no prior and is unchanged.
+
 Phase 3.1+3.2 embedding step (D-024): after the chunk rows are
 committed, the configured ``EmbeddingClient`` is called once per
 ingest with the chunk texts. On success, one ``EmbeddingRecord`` per
@@ -127,6 +140,26 @@ class DomainService:
                 invalid_first_line=_first_line(message.payload),
             )
 
+        # Supersession (ED-2 / D-114): an edited /note creates a new revision
+        # that supersedes the prior active one. The trigger is "a prior active
+        # note exists for this external message," not the edit_seq value — a
+        # redelivered edit short-circuits on replay above, a draft edit on the
+        # DRAFT branch, and an unparseable edit on INVALID_INPUT, so only a
+        # NOTE->NOTE edit (or a fresh original, which finds no prior) reaches
+        # here. A fresh original leaves both lineage links None (unchanged
+        # behavior). The prior revision is retained — only its lifecycle_state
+        # flips — so source lineage and I-6 authorship survive.
+        prior_note = self._store.get_active_note_for_external_message(
+            message.external_chat_id,
+            message.external_message_id,
+            community_id=community_id,
+        )
+        prior_chunk = (
+            self._store.get_active_chunk_for_note(prior_note.note_id, community_id=community_id)
+            if prior_note is not None
+            else None
+        )
+
         note_id = str(uuid4())
         note = Note(
             note_id=note_id,
@@ -137,6 +170,7 @@ class DomainService:
             note_text=parsed.body,
             created_at=now,
             subject_id=subject_id,
+            supersedes_note_id=prior_note.note_id if prior_note is not None else None,
         )
         self._store.save_note(note)
 
@@ -155,12 +189,30 @@ class DomainService:
                     chunk_text=parsed.body,
                     created_at=now,
                     subject_id=subject_id,
+                    supersedes_chunk_id=(prior_chunk.chunk_id if prior_chunk is not None else None),
                 )
             ]
             if parsed.body
             else []
         )
         self._store.save_event_chunks(chunks)
+
+        # Flip the prior revision to superseded only after the new active
+        # revision is durably saved (a partial failure never leaves zero active
+        # revisions), and flip the chunk before the note: retrieval filters on
+        # the chunk's lifecycle_state, so closing chunk visibility first makes
+        # the edit retrieval-effective immediately, regardless of embedding
+        # state. The superseded chunk is never re-embedded.
+        if prior_chunk is not None:
+            self._store.mark_chunk_superseded(prior_chunk.chunk_id, community_id=community_id)
+        if prior_note is not None:
+            self._store.mark_note_superseded(prior_note.note_id, community_id=community_id)
+            log.info(
+                "edit.superseded community_id=%s prior_note_id=%s new_note_id=%s",
+                community_id,
+                prior_note.note_id,
+                note_id,
+            )
 
         if chunks and self._embedding_client is not None:
             self._embed_chunks(chunks, source_message_id, community_id, now)

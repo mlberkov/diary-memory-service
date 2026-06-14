@@ -472,6 +472,42 @@ class SqliteDomainStore:
             supersedes_note_id=row["supersedes_note_id"],
         )
 
+    def get_active_note_for_external_message(
+        self, external_chat_id: str, external_message_id: str, *, community_id: str
+    ) -> Note | None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT n.note_id, n.source_message_id, n.community_id, "
+                "       n.author_user_id, n.note_date, n.note_text, n.created_at, "
+                "       n.subject_id, n.lifecycle_state, n.supersedes_note_id "
+                "  FROM notes n "
+                "  JOIN source_messages sm "
+                "    ON sm.source_message_id = n.source_message_id "
+                " WHERE sm.external_chat_id = ? "
+                "   AND sm.external_message_id = ? "
+                "   AND n.community_id = ? "
+                "   AND n.lifecycle_state = 'active' "
+                " ORDER BY n.created_at DESC, n.note_id DESC "
+                " LIMIT 1",
+                (external_chat_id, external_message_id, community_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return Note(
+            note_id=row["note_id"],
+            source_message_id=row["source_message_id"],
+            community_id=row["community_id"],
+            author_user_id=row["author_user_id"],
+            note_date=date.fromisoformat(row["note_date"]),
+            note_text=row["note_text"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            subject_id=row["subject_id"],
+            lifecycle_state=LifecycleState(row["lifecycle_state"]),
+            supersedes_note_id=row["supersedes_note_id"],
+        )
+
     def count_event_chunks_for_source(self, source_message_id: str) -> int:
         with self._connect() as conn:
             row = conn.execute(
@@ -494,6 +530,26 @@ class SqliteDomainStore:
                 "  FROM event_chunks "
                 " WHERE chunk_id = ? AND community_id = ?",
                 (chunk_id, community_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return _row_to_chunk(row)
+
+    def get_active_chunk_for_note(self, note_id: str, *, community_id: str) -> EventChunk | None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT chunk_id, note_id, source_message_id, community_id, "
+                "       author_user_id, note_date, event_index, chunk_text, "
+                "       created_at, embedding_status, subject_id, "
+                "       lifecycle_state, supersedes_chunk_id "
+                "  FROM event_chunks "
+                " WHERE note_id = ? AND community_id = ? "
+                "   AND lifecycle_state = 'active' "
+                " ORDER BY created_at DESC, chunk_id DESC "
+                " LIMIT 1",
+                (note_id, community_id),
             ).fetchone()
         if row is None:
             return None
@@ -569,6 +625,31 @@ class SqliteDomainStore:
             cur = conn.execute(
                 "UPDATE event_chunks SET embedding_status = ? WHERE chunk_id = ?",
                 (status.value, chunk_id),
+            )
+            if cur.rowcount != 1:
+                raise KeyError(f"unknown chunk_id={chunk_id}")
+            conn.commit()
+
+    def mark_note_superseded(self, note_id: str, *, community_id: str) -> None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE notes SET lifecycle_state = ? " " WHERE note_id = ? AND community_id = ?",
+                (LifecycleState.SUPERSEDED.value, note_id, community_id),
+            )
+            if cur.rowcount != 1:
+                raise KeyError(f"unknown note_id={note_id}")
+            conn.commit()
+
+    def mark_chunk_superseded(self, chunk_id: str, *, community_id: str) -> None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE event_chunks SET lifecycle_state = ? "
+                " WHERE chunk_id = ? AND community_id = ?",
+                (LifecycleState.SUPERSEDED.value, chunk_id, community_id),
             )
             if cur.rowcount != 1:
                 raise KeyError(f"unknown chunk_id={chunk_id}")
