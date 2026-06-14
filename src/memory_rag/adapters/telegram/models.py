@@ -25,6 +25,17 @@ class TelegramChat(BaseModel):
     id: int
 
 
+class TelegramReplyTarget(BaseModel):
+    """The replied-to message — only its id is needed to address a /delete.
+
+    Telegram's ``reply_to_message`` is a full Message; ``extra="ignore"``
+    drops everything but ``message_id`` (ED-3 / D-114).
+    """
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+    message_id: int
+
+
 class TelegramMessage(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -34,6 +45,7 @@ class TelegramMessage(BaseModel):
     chat: TelegramChat
     from_: TelegramUser = Field(alias="from")
     text: str | None = None
+    reply_to_message: TelegramReplyTarget | None = None
 
 
 class TelegramUpdate(BaseModel):

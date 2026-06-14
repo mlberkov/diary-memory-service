@@ -3868,3 +3868,37 @@ The trigger and ordering are over-determined by the existing model: the source l
 - Drill evidence + milestone-close packet and the single milestone PR (ED-n).
 - Any background/automatic re-embed worker — none exists; ED-2 relies on the existing synchronous in-ingest embed path.
 - Out-of-order / concurrent-edit resolution and save+flip transactional atomicity (each seam commits independently, matching the existing per-row embedding commits).
+
+## D-117 — ED-3: `/delete` control surface, tombstone writer, audited hard-delete (enforces D-114)
+
+### Context
+
+ED-2 / D-116 wired the edit half (`/edit` supersession), leaving the delete half of the D-114 contract entirely unbuilt: `tombstoned` was inert at runtime (no writer produced it), there was no `/delete` control surface, the NOTE→DRAFT route-change removal was explicitly deferred from ED-2 to here, and the explicit audited hard-delete required by I-13 did not exist. ED-3 is the last behavior-bearing packet of the milestone — after it, only the ED-n operator drill / milestone-close remains. Classification: **core + adapter** (D-026) — all SQL and transport stay behind the storage and Telegram seams; the core passes only opaque ids it already holds on `InboundMessage`. Reuses the ED-1 schema only: **no new migration, no generic lifecycle setter**.
+
+### Decision
+
+- **Soft delete by default = tombstone the active revision (I-13).** A delete flips the active note + its active chunk to `tombstoned` (retained — only `lifecycle_state` changes; raw + lineage + I-6 authorship survive), chunk-before-note so the delete is retrieval-effective immediately (R-4), regardless of embedding state; the tombstoned chunk is never re-embedded. Two paths reach it, sharing one helper: the `/delete` command and the NOTE→DRAFT edit-removal.
+- **`/delete` targets by reply (owner-confirmed).** The user replies to the original `/note` message; the replied-to message id (carried as the opaque `InboundMessage.reply_to_external_message_id`) resolves the note via the existing `get_active_note_for_external_message`. Telegram does not deliver message deletions to bots, so an explicit reply-targeted command is the control surface. Every fail-closed miss — no reply target, an unknown / non-note / already-deleted / cross-community target — is a **friendly no-op reply, never an error**; `/delete` is idempotent (the active-only lookup makes a repeat a no-op).
+- **NOTE→DRAFT edit = removal (the ED-2 deferral, D-116).** Editing a captured `/note` to drop its command re-routes the edited delivery to DRAFT; from the ingest DRAFT branch, if a prior active note exists for that external message it is tombstoned. A fresh plain-text draft finds no prior active note and is unchanged. This is removal, not supersession: the prior is `tombstoned` with no `supersedes_*` lineage.
+- **Operator-only audited hard-delete (owner-confirmed).** `hard_delete_source_message` physically removes the targeted `source_messages` row and exactly the rows derived from it within the same community (notes, event chunks, embedding records, and the retrieval-hit traces referencing those chunks), in FK-safe order inside one transaction (the baseline schema declares no `ON DELETE CASCADE`). It is **not** a chat command — there is no `RouteKind` for it; an operator calls it deliberately. "Audited" is satisfied by a structured `audit.hard_delete` log record (requester + target + per-table tally), not a new audit table (which would need a migration). Community scoping is fail-closed: empty `community_id` raises `ValueError`; an unknown / cross-community target raises `KeyError` and removes nothing.
+- **Specific writers, no generic state-setter.** The tombstone seams (`mark_note_tombstoned` / `mark_chunk_tombstoned`) mirror the ED-2 superseded pair exactly — community-scoped, single-row, `KeyError`-on-miss — and write only `tombstoned`.
+
+### Why
+
+The trigger, ordering, and scoping reuse the ED-2 model wholesale: the source layer is revision-keyed (R-2), retrieval already excludes non-active chunks (R-4), and the tombstone writers are the superseded writers with one literal changed. Resolving `/delete` by reply reuses the exact `get_active_note_for_external_message` seam ED-2 added, so no new lookup shape is introduced and the lineage stays exact. Making every `/delete` miss a friendly no-op keeps a destructive-sounding command safe and matches the cause-neutral reply discipline. A log-based audit (rather than a table) keeps the packet migration-free and bounded while still recording the provenance I-13 requires for raw removal; an operator-only surface keeps an irreversible operation off the end-user control surface, where no authorization model yet exists.
+
+### Consequence
+
+- **New:** three `DomainRepository` seams — `mark_note_tombstoned`, `mark_chunk_tombstoned`, `hard_delete_source_message` — across Postgres / SQLite / mock; `RouteKind.DELETE` + `InboundMessage.reply_to_external_message_id`; a minimal `TelegramReplyTarget` model + `reply_to_message` extraction in the webhook; `Dispatcher._dispatch_delete` + three pinned `_REPLY_DELETE_*` strings; `DeleteOutcome` / `HardDeleteOutcome` result types. `tests/test_delete_tombstone.py` (tombstone + retention + I-6, date-only, unknown/idempotent/cross-community no-ops, NOTE→DRAFT removal, fresh-draft no-op, tombstone-seam `KeyError`/`ValueError`, hard-delete cascade + counts + scoping, end-to-end retrieval exclusion) and `tests/test_dispatcher_delete.py` (reply wording, no-target/non-note no-ops, sibling-literal byte guards); webhook reply-extraction + `/delete` command-parse tests extended.
+- **Changed:** `services/domain_service.py` — the DRAFT-branch removal, the shared `_tombstone_active_note_for_external_message` helper, `delete_note_for_external_message`, `hard_delete_source_message`, module docstring; `storage/repository.py` (three Protocol signatures); `core/routing/models.py`, `adapters/telegram/{models,commands,webhook}.py`, `services/dispatcher.py`; `docs/RUNTIME-INVARIANTS.md` R-4 (both non-active states now have a live writer); `tests/test_edit_supersession_ingest.py::test_draft_edit_does_not_supersede_prior_note` (the prior NOTE→DRAFT edit now tombstones the prior note — the behavior ED-2 deferred).
+- **No new I-/R- number** — enforces D-114; concretizes I-13 (soft-delete default + explicit audited hard-delete); R-2 / R-4 / I-6 unchanged in contract. No migration (ED-1 columns suffice).
+- **Validation:** full repo gate via the host `uv` path (`ruff check` + `ruff format --check` + `mypy` strict + `pytest`) green — 1070 passed / 98 PG-skipped with no DSN. The PG-gated ED-3 legs (mock + sqlite run inline; postgres parametrized) are written to run on a pgvector Postgres 16 with `MEMORY_RAG_PG_TEST_DSN` set; that operator run is the packet's PG acceptance.
+
+### Out of scope
+
+- The ED-n operator-run real-backend drill, the dated evidence artifact, the milestone-close flips, and the single milestone PR.
+- The still-pending ED-2 Postgres acceptance leg (operator-run; belongs to ED-n).
+- A persisted audit table / general audit infrastructure — the log-based audit is deliberate.
+- Per-author / role-based delete authorization and any privileged hard-delete chat command.
+- Bulk / range / retention-driven purge (Phase 8 retention).
+- Advertising `/delete` in the `/start` / `/help` reply strings — left byte-unchanged this packet (follow-up).

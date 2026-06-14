@@ -36,6 +36,7 @@ from memory_rag.core.chat.models import ChatKnowledgeSearch, ChatQueryRewrite, C
 from memory_rag.core.domain.models import (
     AnswerTrace,
     EventChunk,
+    HardDeleteOutcome,
     IndexingDeadLetter,
     Note,
     Query,
@@ -200,6 +201,46 @@ class DomainRepository(Protocol):
         ``lifecycle_state``). Same single-row, community-scoped,
         ``KeyError``-on-miss shape; ``community_id`` is keyword-only and a
         null/empty value raises ``ValueError`` (I-7, R-3, D-088).
+        """
+
+    def mark_note_tombstoned(self, note_id: str, *, community_id: str) -> None:
+        """Flip a note's ``lifecycle_state`` ``active`` -> ``tombstoned`` (ED-3, D-114).
+
+        The ``/delete`` writer's note-level transition: the active revision is
+        soft-deleted (I-13) — retained (raw + chunk lineage + I-6 authorship
+        intact) and marked inactive so retrieval excludes it (R-4). The
+        tombstone counterpart of ``mark_note_superseded``; same single-row,
+        community-scoped, ``KeyError``-on-miss shape, ``community_id`` keyword-only
+        and a null/empty value raises ``ValueError`` (I-7, R-3, D-088). Writes
+        only ``tombstoned``.
+        """
+
+    def mark_chunk_tombstoned(self, chunk_id: str, *, community_id: str) -> None:
+        """Flip a chunk's ``lifecycle_state`` ``active`` -> ``tombstoned`` (ED-3, D-114).
+
+        The chunk-level counterpart of ``mark_note_tombstoned`` — the
+        retrieval-visible flip (both legs filter the chunk's ``lifecycle_state``,
+        so the delete is effective immediately, regardless of
+        ``embedding_status``). Same single-row, community-scoped,
+        ``KeyError``-on-miss shape; ``community_id`` is keyword-only and a
+        null/empty value raises ``ValueError`` (I-7, R-3, D-088).
+        """
+
+    def hard_delete_source_message(
+        self, source_message_id: str, *, community_id: str
+    ) -> HardDeleteOutcome:
+        """Physically delete a raw source message and its derived rows (ED-3, I-13).
+
+        The explicit, audited hard-delete the soft-delete default (I-13) reserves
+        for raw-data removal. Deletes exactly the targeted ``source_messages``
+        row and every row derived from it **within the same community** — its
+        notes, event chunks, embedding records, and the retrieval-hit trace rows
+        that reference those chunks — in FK-safe order inside one transaction
+        (the baseline schema declares no ``ON DELETE CASCADE``). Community scoping
+        is mandatory and fail-closed (I-7, R-3): a null/empty ``community_id``
+        raises ``ValueError``; an unknown or cross-community target is not found
+        and raises ``KeyError`` (nothing is deleted). Returns the per-table
+        :class:`HardDeleteOutcome` tally; the caller emits the audit record.
         """
 
     def list_failed_event_chunks(

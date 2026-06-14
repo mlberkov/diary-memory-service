@@ -244,8 +244,11 @@ def test_invalid_edit_keeps_prior_active(
 def test_draft_edit_does_not_supersede_prior_note(
     store: MockDomainStore | SqliteDomainStore | PostgresDomainStore,
 ) -> None:
-    """A draft-routed edit of a prior note does not supersede it — supersession
-    is NOTE->NOTE only (confirmed semantics, Q2)."""
+    """A draft-routed edit of a prior note does not *supersede* it — supersession
+    is NOTE->NOTE only (confirmed semantics, Q2). ED-3 (D-114) gives this edit
+    removal semantics instead: the prior active note is *tombstoned* (not flipped
+    to superseded, and it keeps no supersedes_* lineage), the deferred NOTE->DRAFT
+    case the supersession path never produced."""
     svc = DomainService(store)
     r1 = svc.ingest(_msg("2026-05-09\noriginal body", edit_seq=_ORIGINAL_SEQ))
     prior_note = store.get_note_by_source_message_id(r1.source_message_id)
@@ -255,7 +258,8 @@ def test_draft_edit_does_not_supersede_prior_note(
 
     still = store.get_note_by_source_message_id(r1.source_message_id)
     assert still is not None
-    assert still.lifecycle_state is LifecycleState.ACTIVE
+    assert still.lifecycle_state is LifecycleState.TOMBSTONED
+    assert still.supersedes_note_id is None
 
 
 # === Empty-body edges (both directions) ======================================

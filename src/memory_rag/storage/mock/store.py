@@ -34,6 +34,7 @@ from memory_rag.core.domain.models import (
     AnswerTrace,
     DateRange,
     EventChunk,
+    HardDeleteOutcome,
     IndexingDeadLetter,
     LifecycleState,
     Note,
@@ -338,6 +339,71 @@ class MockDomainStore:
         if existing is None or existing.community_id != community_id:
             raise KeyError(f"unknown chunk_id={chunk_id}")
         self._chunks[chunk_id] = replace(existing, lifecycle_state=LifecycleState.SUPERSEDED)
+
+    def mark_note_tombstoned(self, note_id: str, *, community_id: str) -> None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        existing = self._notes.get(note_id)
+        if existing is None or existing.community_id != community_id:
+            raise KeyError(f"unknown note_id={note_id}")
+        self._notes[note_id] = replace(existing, lifecycle_state=LifecycleState.TOMBSTONED)
+
+    def mark_chunk_tombstoned(self, chunk_id: str, *, community_id: str) -> None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        existing = self._chunks.get(chunk_id)
+        if existing is None or existing.community_id != community_id:
+            raise KeyError(f"unknown chunk_id={chunk_id}")
+        self._chunks[chunk_id] = replace(existing, lifecycle_state=LifecycleState.TOMBSTONED)
+
+    def hard_delete_source_message(
+        self, source_message_id: str, *, community_id: str
+    ) -> HardDeleteOutcome:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        source = self._sources.get(source_message_id)
+        if source is None or source.community_id != community_id:
+            raise KeyError(f"unknown source_message_id={source_message_id}")
+        # FK-safe order, mirroring the SQL backends (PRAGMA foreign_keys=ON / the
+        # baseline REFERENCES, no ON DELETE CASCADE): retrieval_hits + embedding
+        # records reference chunks; chunks + notes reference the source. Remove
+        # the leaves first. author_display_inputs is a different (adapter-owned)
+        # seam — D-083 — and is intentionally untouched here.
+        chunk_ids = {
+            c.chunk_id for c in self._chunks.values() if c.source_message_id == source_message_id
+        }
+        hit_ids = [
+            h.retrieval_hit_id for h in self._retrieval_hits.values() if h.chunk_id in chunk_ids
+        ]
+        for hit_id in hit_ids:
+            del self._retrieval_hits[hit_id]
+        emb_keys = [
+            key
+            for key, record in self._embeddings.items()
+            if record.source_message_id == source_message_id
+        ]
+        for key in emb_keys:
+            del self._embeddings[key]
+        note_ids = [
+            n.note_id for n in self._notes.values() if n.source_message_id == source_message_id
+        ]
+        for note_id in note_ids:
+            del self._notes[note_id]
+        for chunk_id in chunk_ids:
+            del self._chunks[chunk_id]
+        del self._sources[source_message_id]
+        # The idempotency side-index is the mock analog of the source_messages
+        # UNIQUE (R-2) key the SQL backends free automatically on row delete.
+        self._idempotency.pop(
+            (source.external_chat_id, source.external_message_id, source.edit_seq), None
+        )
+        return HardDeleteOutcome(
+            source_messages=1,
+            notes=len(note_ids),
+            event_chunks=len(chunk_ids),
+            embedding_records=len(emb_keys),
+            retrieval_hits=len(hit_ids),
+        )
 
     def list_failed_event_chunks(
         self, community_id: str, *, limit: int | None = None

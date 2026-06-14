@@ -44,6 +44,7 @@ from memory_rag.core.domain.models import (
     DateRange,
     EventChunk,
     FallbackMode,
+    HardDeleteOutcome,
     IndexingDeadLetter,
     LifecycleState,
     Note,
@@ -654,6 +655,79 @@ class SqliteDomainStore:
             if cur.rowcount != 1:
                 raise KeyError(f"unknown chunk_id={chunk_id}")
             conn.commit()
+
+    def mark_note_tombstoned(self, note_id: str, *, community_id: str) -> None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE notes SET lifecycle_state = ? WHERE note_id = ? AND community_id = ?",
+                (LifecycleState.TOMBSTONED.value, note_id, community_id),
+            )
+            if cur.rowcount != 1:
+                raise KeyError(f"unknown note_id={note_id}")
+            conn.commit()
+
+    def mark_chunk_tombstoned(self, chunk_id: str, *, community_id: str) -> None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE event_chunks SET lifecycle_state = ? "
+                " WHERE chunk_id = ? AND community_id = ?",
+                (LifecycleState.TOMBSTONED.value, chunk_id, community_id),
+            )
+            if cur.rowcount != 1:
+                raise KeyError(f"unknown chunk_id={chunk_id}")
+            conn.commit()
+
+    def hard_delete_source_message(
+        self, source_message_id: str, *, community_id: str
+    ) -> HardDeleteOutcome:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        with self._connect() as conn:
+            owner = conn.execute(
+                "SELECT 1 FROM source_messages "
+                " WHERE source_message_id = ? AND community_id = ?",
+                (source_message_id, community_id),
+            ).fetchone()
+            if owner is None:
+                raise KeyError(f"unknown source_message_id={source_message_id}")
+            # FK-safe order (PRAGMA foreign_keys=ON, no ON DELETE CASCADE):
+            # retrieval_hits + embedding_records reference chunks; chunks + notes
+            # reference the source. Delete the leaves first, all in one
+            # transaction (a single _connect() block). Ownership was checked
+            # above, so the child deletes are scoped by source_message_id.
+            hits = conn.execute(
+                "DELETE FROM retrieval_hits WHERE chunk_id IN "
+                "(SELECT chunk_id FROM event_chunks WHERE source_message_id = ?)",
+                (source_message_id,),
+            ).rowcount
+            embeds = conn.execute(
+                "DELETE FROM embedding_records WHERE source_message_id = ?",
+                (source_message_id,),
+            ).rowcount
+            chunks = conn.execute(
+                "DELETE FROM event_chunks WHERE source_message_id = ?",
+                (source_message_id,),
+            ).rowcount
+            notes = conn.execute(
+                "DELETE FROM notes WHERE source_message_id = ?",
+                (source_message_id,),
+            ).rowcount
+            sources = conn.execute(
+                "DELETE FROM source_messages " " WHERE source_message_id = ? AND community_id = ?",
+                (source_message_id, community_id),
+            ).rowcount
+            conn.commit()
+        return HardDeleteOutcome(
+            source_messages=sources,
+            notes=notes,
+            event_chunks=chunks,
+            embedding_records=embeds,
+            retrieval_hits=hits,
+        )
 
     def list_failed_event_chunks(
         self, community_id: str, *, limit: int | None = None

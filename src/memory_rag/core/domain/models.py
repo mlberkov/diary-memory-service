@@ -208,6 +208,41 @@ class IngestResult:
 
 
 @dataclass(frozen=True, slots=True)
+class DeleteOutcome:
+    """Outcome of ``DomainService.delete_note_for_external_message`` (ED-3, D-114).
+
+    ``deleted`` is ``True`` when an ``active`` note was found for the target
+    external message and tombstoned (note + chunk flipped to ``tombstoned``,
+    retained — I-6 authorship and source lineage intact). It is ``False`` for
+    every fail-closed no-op: no active note for the target, an unknown or
+    non-note target, an already-deleted target, or a target owned by another
+    community. The control surface renders the two cases as distinct friendly
+    replies; neither is an error.
+    """
+
+    deleted: bool
+    note_date: date | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class HardDeleteOutcome:
+    """Per-table row counts removed by an audited hard-delete (ED-3, I-13).
+
+    The tally of a single ``hard_delete_source_message`` call: the targeted
+    ``source_messages`` row plus every row derived from it within the same
+    community — its notes, event chunks, embedding records, and the
+    retrieval-hit trace rows that reference those chunks. Returned to the
+    operator surface and emitted in the ``audit.hard_delete`` provenance log.
+    """
+
+    source_messages: int
+    notes: int
+    event_chunks: int
+    embedding_records: int
+    retrieval_hits: int
+
+
+@dataclass(frozen=True, slots=True)
 class AnswerContext:
     """Channel-neutral input to the answer-prompt step (Slice 4.1).
 

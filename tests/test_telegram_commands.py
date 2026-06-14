@@ -18,6 +18,7 @@ from memory_rag.core.routing import RouteKind
         ("/chat", RouteKind.CHAT),
         ("/drafts", RouteKind.DRAFTS),
         ("/sources", RouteKind.SOURCES),
+        ("/delete", RouteKind.DELETE),
     ],
 )
 def test_parse_command_recognizes_each_supported_command(

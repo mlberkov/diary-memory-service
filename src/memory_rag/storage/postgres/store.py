@@ -56,6 +56,7 @@ from memory_rag.core.domain.models import (
     DateRange,
     EventChunk,
     FallbackMode,
+    HardDeleteOutcome,
     IndexingDeadLetter,
     LifecycleState,
     Note,
@@ -579,6 +580,87 @@ class PostgresDomainStore:
             if cur.rowcount != 1:
                 raise KeyError(f"unknown chunk_id={chunk_id}")
             conn.commit()
+
+    def mark_note_tombstoned(self, note_id: str, *, community_id: str) -> None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE notes SET lifecycle_state = %s "
+                " WHERE note_id = %s AND community_id = %s",
+                (LifecycleState.TOMBSTONED.value, note_id, community_id),
+            )
+            if cur.rowcount != 1:
+                raise KeyError(f"unknown note_id={note_id}")
+            conn.commit()
+
+    def mark_chunk_tombstoned(self, chunk_id: str, *, community_id: str) -> None:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE event_chunks SET lifecycle_state = %s "
+                " WHERE chunk_id = %s AND community_id = %s",
+                (LifecycleState.TOMBSTONED.value, chunk_id, community_id),
+            )
+            if cur.rowcount != 1:
+                raise KeyError(f"unknown chunk_id={chunk_id}")
+            conn.commit()
+
+    def hard_delete_source_message(
+        self, source_message_id: str, *, community_id: str
+    ) -> HardDeleteOutcome:
+        if not community_id:
+            raise ValueError("community_id is required (Runtime invariant R-3)")
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM source_messages "
+                " WHERE source_message_id = %s AND community_id = %s",
+                (source_message_id, community_id),
+            )
+            if cur.fetchone() is None:
+                raise KeyError(f"unknown source_message_id={source_message_id}")
+            # FK-safe order (baseline REFERENCES, no ON DELETE CASCADE):
+            # retrieval_hits + embedding_records reference chunks; chunks + notes
+            # reference the source. Delete the leaves first, all in one
+            # transaction (one connection block; psycopg commits at the end).
+            # Ownership was checked above, so the child deletes are scoped by
+            # source_message_id.
+            cur.execute(
+                "DELETE FROM retrieval_hits WHERE chunk_id IN "
+                "(SELECT chunk_id FROM event_chunks WHERE source_message_id = %s)",
+                (source_message_id,),
+            )
+            hits = cur.rowcount
+            cur.execute(
+                "DELETE FROM embedding_records WHERE source_message_id = %s",
+                (source_message_id,),
+            )
+            embeds = cur.rowcount
+            cur.execute(
+                "DELETE FROM event_chunks WHERE source_message_id = %s",
+                (source_message_id,),
+            )
+            chunks = cur.rowcount
+            cur.execute(
+                "DELETE FROM notes WHERE source_message_id = %s",
+                (source_message_id,),
+            )
+            notes = cur.rowcount
+            cur.execute(
+                "DELETE FROM source_messages "
+                " WHERE source_message_id = %s AND community_id = %s",
+                (source_message_id, community_id),
+            )
+            sources = cur.rowcount
+            conn.commit()
+        return HardDeleteOutcome(
+            source_messages=sources,
+            notes=notes,
+            event_chunks=chunks,
+            embedding_records=embeds,
+            retrieval_hits=hits,
+        )
 
     def list_failed_event_chunks(
         self, community_id: str, *, limit: int | None = None
