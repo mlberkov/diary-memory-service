@@ -428,13 +428,20 @@ def test_superseded_prior_excluded_from_retrieval_after_edit(
     svc.ingest(_msg("2026-05-09\nWalked the cat", edit_seq=_EDIT_SEQ))
 
     # The superseded 'dog' revision is excluded from both legs, even though its
-    # embedding is still ready.
+    # embedding is still ready. Postgres dense search is an exact top-N scan, so
+    # it may still return another active chunk as the nearest candidate for an
+    # old embedding; R-4 only requires the superseded revision itself to be gone.
     assert retrieval_store.sparse_candidates("fam-A", "dog", 10) == []
     dense_old = retrieval_store.dense_candidates(
         "fam-A", client.embed(["Walked the dog"])[0], client.model_name, 10
     )
-    assert dense_old == []
+    assert all(c.lifecycle_state is LifecycleState.ACTIVE for c in dense_old)
+    assert "Walked the dog" not in [c.chunk_text for c in dense_old]
 
     # The new active 'cat' revision is retrievable.
     new_sparse = retrieval_store.sparse_candidates("fam-A", "cat", 10)
     assert [c.chunk_text for c in new_sparse] == ["Walked the cat"]
+    new_dense = retrieval_store.dense_candidates(
+        "fam-A", client.embed(["Walked the cat"])[0], client.model_name, 10
+    )
+    assert [c.chunk_text for c in new_dense] == ["Walked the cat"]
