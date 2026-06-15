@@ -203,7 +203,7 @@ def register_telegram_webhook(app: FastAPI) -> None:
     ) -> dict[str, Any]:
         _verify_secret(settings.telegram_webhook_secret, x_telegram_bot_api_secret_token)
 
-        message = update.message
+        message = update.message or update.edited_message
         if message is None:
             log.info("telegram.webhook update_id=%s no_message=true", update.update_id)
             return {}

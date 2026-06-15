@@ -53,3 +53,4 @@ class TelegramUpdate(BaseModel):
 
     update_id: int
     message: TelegramMessage | None = None
+    edited_message: TelegramMessage | None = None

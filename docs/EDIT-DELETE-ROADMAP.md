@@ -7,9 +7,10 @@ decomposes the **edit/delete** milestone — the contract for what happens when 
 captured `/note` is edited or deleted — into an ordered set of bounded packets,
 and carries the as-built audit of the surfaces the milestone builds on.
 
-**Status: contract ratified (ED-0 / D-114, docs-first); ED-1 landed (D-115);
-ED-2 landed (D-116); ED-3 landed (D-117); ED-n-prep landed (drill template +
-RUNBOOK procedure); ED-n operator-run drill + close open.** ED-0
+**Status: milestone closed (ED-n / D-118).** Contract ratified (ED-0 /
+D-114, docs-first); ED-1 landed (D-115); ED-2 landed (D-116); ED-3 landed
+(D-117); ED-n-prep landed (drill template + RUNBOOK procedure); ED-n
+operator-run drill + close landed (D-118). ED-0
 closes assumption **A-10** at the contract level and resolves TechSpec §12. ED-1
 landed the persisted `lifecycle_state` state model + nullable `supersedes_*`
 lineage columns, generalized the active-state retrieval predicate, and landed
@@ -18,15 +19,10 @@ supersedes the prior active revision (lineage recorded, prior flipped to
 `superseded`, new revision re-embedded). ED-3 wired the delete half: the
 reply-targeted `/delete` command and the NOTE→DRAFT edit-removal both tombstone
 the active revision, and an operator-only audited hard-delete physically removes
-raw source data. Both non-active states now have a live writer; the milestone is
-**code-complete**, with closure conditional on the operator's dated drill artifact.
-**ED-n-prep** has landed the agent-authorable half of the close — the committed
-evidence-file template (`docs/edit-delete-drill/edit-delete-smoke-TEMPLATE.json`)
-and the RUNBOOK "Edit/delete real-backend drill (ED-n)" procedure — mirroring the
-REAL-1.0 (D-073) / RC-4 (D-111) / DEPLOY-1 closure-prep (D-076) precedent; the
-operator-run live drill, the populated dated evidence artifact, the closure
-decision entry, the milestone-close flips, and the single bundling PR remain the
-subsequent operator-run step.
+raw source data. Both non-active states now have a live writer. ED-n / D-118
+closed the milestone with the populated, redaction-checked dated artifact
+`docs/edit-delete-drill/edit-delete-smoke-20260615-evidence.json`, the closure
+decision entry, and the milestone-close flips.
 
 This mirrors the **D-108 / `docs/ROUTED-CHAT-ROADMAP.md`**, **D-097 /
 `docs/SUBJECT-SCOPING-ROADMAP.md`**, **D-093 /
@@ -126,7 +122,7 @@ contract. C = core, A = adapter, Cfg = config (D-026 classification).
 | **ED-1 — state model + schema + retrieval predicate** | single `lifecycle_state` column (`active | superseded | tombstoned`, CHECK + DEFAULT `'active'`) + nullable `supersedes_*` lineage columns on `notes` / `event_chunks` (additive migration 0010); the active-state filter generalized to exclude `superseded` as well as `tombstoned` on both legs; the **R-4 wording** generalization in `docs/RUNTIME-INVARIANTS.md`; backend parity across Postgres / SQLite (round-trip only) / mock. | C + schema | **Landed (D-115).** |
 | **ED-2 — `/edit` ingestion supersession + re-embed** | edited source message → new note/chunk revision (supersession) through `DomainService.ingest`; prior revision marked superseded; new revision lands `embedding_status='pending'` and re-embeds via the existing pipeline. | C | **Landed (D-116).** Four repo seams (`get_active_note_for_external_message`, `get_active_chunk_for_note`, `mark_note_superseded`, `mark_chunk_superseded`) across mock / sqlite / postgres; `ingest()` lookup→lineage→save→flip(chunk-then-note)→re-embed. NOTE→NOTE only; malformed/draft edits supersede nothing; replay-safe. |
 | **ED-3 — `/delete` control surface** | **Landed (D-117).** Reply-targeted `/delete` (the user replies to the `/note`; the opaque `reply_to_external_message_id` resolves it) and the NOTE→DRAFT edit-removal both tombstone the active note + chunk (retained, I-6 authorship intact; excluded from retrieval immediately, R-4); every miss is a friendly fail-closed no-op; idempotent. Operator-only `hard_delete_source_message` physically removes the raw source + its derived rows (notes / chunks / embeddings / referencing retrieval-hits) in FK-safe order, community-scoped, audited via a structured `audit.hard_delete` log record. Three repo seams (`mark_note_tombstoned`, `mark_chunk_tombstoned`, `hard_delete_source_message`) across mock / sqlite / postgres; `RouteKind.DELETE` + dispatcher branch; `DeleteOutcome` / `HardDeleteOutcome`. No new schema, no new I-/R- number; R-4 wording flipped (both non-active states now have a live writer). | C + A | **Landed (D-117).** |
-| **ED-n — drill evidence + milestone close** | **ED-n-prep landed:** committed evidence-file template `docs/edit-delete-drill/edit-delete-smoke-TEMPLATE.json` + the RUNBOOK "Edit/delete real-backend drill (ED-n)" procedure (preconditions, numbered run including the no-CLI inline `python` hard-delete snippet, redaction grep, closure signal, `make check` non-impact); roadmap / execution-map / todo reworded to "code-complete; closure conditional on the operator's dated drill artifact", the unrun ED-2/ED-3 Postgres acceptance legs associated with the drill. **Operator-run remains:** the live drill, the populated dated `edit-delete-smoke-<YYYYMMDD>-evidence.json` (REAL-1 precedent), the closure decision entry, the milestone-close flips in this doc / `docs/execution-map.md` / `docs/todo.md`, and one bundling PR. | docs-only | **prep landed; operator-run drill + close open.** |
+| **ED-n — drill evidence + milestone close** | **Done (D-118).** Operator-run real-backend drill completed against the RUNBOOK procedure and populated `docs/edit-delete-drill/edit-delete-smoke-20260615-evidence.json`: live Telegram seed NOTE; NOTE→NOTE edit supersession after the corrective `edited_message` adapter patch; retrieval after edit; reply-targeted `/delete`; retrieval after delete; NOTE→DRAFT tombstone; operator-only audited hard-delete via the documented inline Python path; and ED-2/ED-3 Postgres acceptance legs under a dedicated `MEMORY_RAG_PG_TEST_DSN` (`73 passed`). Redaction check clean. | docs + evidence | **Closed (D-118).** |
 
 ---
 
@@ -150,15 +146,13 @@ ED-0 (D-114, docs) ──▶ ED-1 (state model + schema + predicate) ──▶ E
 
 ## 6. Exit criterion
 
-The milestone exits when an edited `/note` is demonstrably superseded by a new
+The milestone exited in D-118 when an edited `/note` was demonstrably superseded by a new
 re-embedded revision and a deleted `/note` is demonstrably tombstoned, both with
 the prior revision retained (lineage + I-6 authorship preserved) and both
 excluded from retrieval by the generalized active-state filter (R-4); hard delete
-remains an explicit, audited operation (I-13); there is real-backend round-trip
-evidence per the REAL-1 precedent (a committed, dated, redaction-checked
-artifact); the decision log / execution map / todo / this roadmap are flipped to
-milestone-closed; the full repo gate is green; and one PR bundles the coherent
-milestone, not individual packets.
+remained an explicit, audited operation (I-13); and the real-backend round-trip
+evidence was captured in the committed, dated, redaction-checked artifact
+`docs/edit-delete-drill/edit-delete-smoke-20260615-evidence.json`.
 
 ---
 
@@ -166,6 +160,8 @@ milestone, not individual packets.
 
 - **D-114** in `docs/decision-log.md` — the authoritative decision entry for the
   edit/delete contract and the A-10 closure.
+- **D-118** in `docs/decision-log.md` — the operator-run drill evidence and
+  milestone closure.
 - **D-108 / D-097 / D-093 / D-044** and their roadmap docs — the "decision entry
   carries the contract, roadmap doc carries the refinable sequence" precedent.
 - **I-6 / I-13** in `docs/INVARIANTS.md` — authorship preservation; soft delete

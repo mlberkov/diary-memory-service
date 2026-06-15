@@ -79,6 +79,27 @@ def test_telegram_update_accepts_update_without_message() -> None:
     update = TelegramUpdate.model_validate({"update_id": 5})
     assert update.update_id == 5
     assert update.message is None
+    assert update.edited_message is None
+
+
+def test_telegram_update_parses_edited_message_update() -> None:
+    payload = {
+        "update_id": 7,
+        "edited_message": {
+            "message_id": 99,
+            "date": 1715300000,
+            "edit_date": 1715300100,
+            "chat": {"id": 42},
+            "from": {"id": 7},
+            "text": "/note 2026-05-09\nEdited",
+        },
+    }
+    update = TelegramUpdate.model_validate(payload)
+    assert update.message is None
+    assert update.edited_message is not None
+    assert update.edited_message.message_id == 99
+    assert update.edited_message.edit_date == 1715300100
+    assert update.edited_message.text == "/note 2026-05-09\nEdited"
 
 
 def test_telegram_message_parses_edit_date_when_present() -> None:

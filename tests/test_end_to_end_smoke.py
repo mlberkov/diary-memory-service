@@ -32,6 +32,7 @@ from memory_rag.config import Settings
 from memory_rag.core.answers import ChatClient, ChatResponse
 from memory_rag.core.domain import FallbackMode
 from memory_rag.core.domain.answer_prompt import AnswerPrompt
+from memory_rag.core.domain.models import LifecycleState
 from memory_rag.services import (
     Dispatcher,
     DomainService,
@@ -429,6 +430,44 @@ def test_edited_message_is_distinct_state_from_original() -> None:
     # Each note is one chunk now (I-5 / D-106): the original body "A\nB" and
     # the edited body "A\nB\nC" are distinct single chunks.
     assert store.len_chunks() == 2
+
+
+def test_edited_message_update_reaches_supersession_path() -> None:
+    client, store = _client_with_fresh_store()
+
+    first = _post(
+        client,
+        _update("/note 2026-05-09\noriginal body", update_id=1, message_id=99),
+    )
+    edit_payload = _update(
+        "/note 2026-05-09\nedited body",
+        update_id=2,
+        message_id=99,
+        edit_date=1715300100,
+    )
+    edit_payload["edited_message"] = edit_payload.pop("message")
+
+    edited = _post(client, edit_payload)
+
+    assert first.status_code == 200
+    assert edited.status_code == 200
+    assert store.len_sources() == 2
+    assert store.len_notes() == 2
+    assert store.len_chunks() == 2
+
+    sources = store.list_source_messages("42")
+    assert [source.edit_seq for source in sources] == [0, 1715300100]
+    prior_note = store.get_note_by_source_message_id(sources[0].source_message_id)
+    new_note = store.get_note_by_source_message_id(sources[1].source_message_id)
+    assert prior_note is not None and new_note is not None
+    assert prior_note.lifecycle_state is LifecycleState.SUPERSEDED
+    assert new_note.lifecycle_state is LifecycleState.ACTIVE
+    assert new_note.supersedes_note_id == prior_note.note_id
+    assert new_note.note_text == "edited body"
+
+    active_note = store.get_active_note_for_external_message("42", "99", community_id="42")
+    assert active_note is not None
+    assert active_note.note_id == new_note.note_id
 
 
 class _WeakEvidenceChatClient:

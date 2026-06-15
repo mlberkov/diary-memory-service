@@ -3902,3 +3902,98 @@ The trigger, ordering, and scoping reuse the ED-2 model wholesale: the source la
 - Per-author / role-based delete authorization and any privileged hard-delete chat command.
 - Bulk / range / retention-driven purge (Phase 8 retention).
 - Advertising `/delete` in the `/start` / `/help` reply strings — left byte-unchanged this packet (follow-up).
+
+## D-118 — ED-n: edit/delete milestone closure (real-backend drill evidence)
+
+### Context
+
+ED-3 / D-117 completed the behavior-bearing edit/delete packets but deliberately
+left the milestone open: the §6 exit criterion in `docs/EDIT-DELETE-ROADMAP.md`
+requires one operator-run real-backend drill, a populated dated evidence
+artifact, redaction validation, PG acceptance under a dedicated DSN, and the
+milestone-close flips. ED-n-prep had already landed the template and RUNBOOK
+procedure, but no closure artifact existed.
+
+During the operator run, the first live Telegram edit exposed a real adapter
+bug: Telegram delivers edited messages as `edited_message`, while the webhook
+handler only read `message`. A narrow corrective patch was applied before the
+successful drill was rerun: `TelegramUpdate` now models `edited_message`, and
+the webhook sends `update.message or update.edited_message` through the existing
+dispatcher/domain path. No core edit/delete behavior or schema changed.
+
+### Decision
+
+Close the edit/delete milestone by recording the populated dated evidence
+artifact at
+`docs/edit-delete-drill/edit-delete-smoke-20260615-evidence.json`.
+
+The successful drill ran against the canonical real contour: Postgres with
+migrations through `0010.note-chunk-lifecycle-state`, live OpenAI embeddings
+(`text-embedding-3-large`, 3072), live OpenAI chat (`gpt-4.1`), and the Telegram
+webhook secret set. The boot log emitted the expected `app.created` line.
+
+The live Telegram path proved:
+
+- a seed `/note` persisted raw before enrichment, created one active note/chunk,
+  and reached `embedding_status='ready'`;
+- a Telegram NOTE→NOTE edit arrived as `edited_message`, created a fresh
+  `source_messages` revision with `edit_seq=1781565871`, made the prior
+  note/chunk `superseded`, created a new active note/chunk, recorded
+  `supersedes_note_id` / `supersedes_chunk_id`, and re-embedded the new chunk;
+- retrieval after edit returned the edited active chunk and excluded the
+  superseded chunk from hits/context;
+- reply-targeted `/delete` tombstoned the active edited note/chunk while
+  retaining rows and authorship, with the prior revision still `superseded`;
+- retrieval after delete excluded both the tombstoned edited chunk and the
+  superseded seed chunk;
+- NOTE→DRAFT edit-removal persisted the edited delivery as `draft` and
+  tombstoned the prior active note/chunk;
+- the operator-only inline `hard_delete_source_message` path emitted an
+  `audit.hard_delete` log line and physically removed the targeted raw aggregate
+  and derived rows in FK-safe order.
+
+The ED-2 / ED-3 Postgres acceptance legs were rerun under a dedicated
+`MEMORY_RAG_PG_TEST_DSN` and passed (`73 passed`). The populated artifact was
+JSON-valid and redaction-clean: no literal OpenAI key, Telegram bot token,
+webhook secret, or Postgres DSN appeared.
+
+### Why
+
+The milestone is not closed by code-completeness alone. Its exit criterion is an
+operator-deliberate, inspectable real-backend proof that both inactive states
+(`superseded` and `tombstoned`) are produced by live paths, retained with
+lineage/authorship, excluded by retrieval, and that hard delete remains a
+separate explicit audited operation. The dated artifact captures that proof
+without adding live provider calls to CI or inventing a new operator CLI.
+
+### Consequence
+
+- **New:** `docs/edit-delete-drill/edit-delete-smoke-20260615-evidence.json` —
+  populated ED-n evidence artifact, derived from the ED-n-prep template with
+  credential-bearing values redacted.
+- **Changed:** `docs/decision-log.md` — this D-118 closure entry.
+- **Changed:** `docs/EDIT-DELETE-ROADMAP.md` — status / packet table flipped
+  from "closure conditional on the operator's dated drill artifact" to
+  milestone-closed.
+- **Changed:** `docs/execution-map.md` — row 2.5 and the ED-n row flipped to
+  closed with a pointer to the dated artifact.
+- **Changed:** `docs/todo.md` — edit/delete milestone block flipped from top
+  pick to closed.
+- **Changed (corrective runtime packet during the drill):**
+  `src/memory_rag/adapters/telegram/models.py`,
+  `src/memory_rag/adapters/telegram/webhook.py`,
+  `tests/test_telegram_models.py`, `tests/test_telegram_dispatch.py`, and
+  `tests/test_end_to_end_smoke.py` — minimal `edited_message` support and
+  regression coverage. No schema, migration, config, delete semantics,
+  hard-delete semantics, `/start`, or `/help` change.
+- **Validation:** targeted Telegram/edit/delete tests passed (`104 passed`);
+  clean-env full pytest passed (`1073 passed, 98 skipped`); final PG acceptance
+  legs passed (`73 passed`); evidence redaction check clean.
+
+### Out of scope
+
+- Opening a PR, committing, or pushing.
+- A hard-delete CLI / control surface; the documented inline Python path remains
+  the only operator path.
+- Advertising `/delete` in `/start` / `/help`.
+- Any new schema, migration, config, or retrieval/answer behavior change.
