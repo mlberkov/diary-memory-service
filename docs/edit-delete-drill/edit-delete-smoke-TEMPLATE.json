@@ -1,0 +1,189 @@
+{
+  "_template": true,
+  "drill": "ED-n — edit/delete real-backend smoke: /edit supersession + re-embed (D-116), reply-targeted /delete + NOTE->DRAFT tombstone (D-117), operator-only audited hard-delete (D-117); proves the §6 exit criterion of docs/EDIT-DELETE-ROADMAP.md (ED-n-prep template / ED-n capture)",
+  "metadata": {
+    "capture_date": "<TO_FILL_BY_OPERATOR YYYYMMDD>",
+    "environment": "real backend — STORAGE_BACKEND=postgres (migrations through 0010 applied), EMBEDDING_BACKEND=openai, EMBEDDING_MODEL=text-embedding-3-large, EMBEDDING_DIMENSION=3072, CHAT_BACKEND=openai, CHAT_MODEL=gpt-4.1; OP-2 bounded retry/backoff active at defaults; webhook secret set; MEMORY_RAG_PG_TEST_DSN set for the ED-2/ED-3 Postgres acceptance legs",
+    "host_redacted": true,
+    "notes": "Live operator evidence for the edit/delete milestone close. Per the redaction rule (RUNBOOK §\"Edit/delete real-backend drill (ED-n)\"), credential-bearing values (OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, PUBLIC_HOSTNAME if used, webhook URL token) are replaced by <REDACTED> placeholders or a _redacted: true flag; structural outcomes (status strings, log-line shapes, row counts, lifecycle_state values, supersedes_* lineage, audit counts) are preserved verbatim. Operator action required before commit: (1) copy this file to docs/edit-delete-drill/edit-delete-smoke-<YYYYMMDD>-evidence.json (UTC-dated), (2) drop the top-level \"_template\": true flag, (3) replace every <TO_FILL_BY_OPERATOR> placeholder with the verbatim captured observation, (4) run the redaction grep checklist from the RUNBOOK subsection."
+  },
+  "preflight_state": {
+    "env_knobs": {
+      "STORAGE_BACKEND": "postgres",
+      "EMBEDDING_BACKEND": "openai",
+      "EMBEDDING_MODEL": "text-embedding-3-large",
+      "EMBEDDING_DIMENSION": 3072,
+      "CHAT_BACKEND": "openai",
+      "CHAT_MODEL": "gpt-4.1",
+      "OPENAI_API_KEY": "<REDACTED>",
+      "TELEGRAM_WEBHOOK_SECRET": "<REDACTED>",
+      "TELEGRAM_BOT_TOKEN": "<REDACTED>",
+      "MEMORY_RAG_PG_TEST_DSN": "<REDACTED>"
+    },
+    "boot_log_line_shape": "app.created env=<env> version=<version> embedding_backend=openai embedding_dim=3072 chat_backend=openai chat_model=gpt-4.1",
+    "boot_log_line_verbatim": "<TO_FILL_BY_OPERATOR — verbatim app.created line from docker compose logs app; expected: embedding_backend=openai embedding_dim=3072 chat_backend=openai chat_model=gpt-4.1>",
+    "migrations_head": "<TO_FILL_BY_OPERATOR — expected: 0010.note-chunk-lifecycle-state applied (the lifecycle_state + supersedes_* columns exist)>",
+    "boot_gate_outcome": "ok",
+    "boot_gate_notes": "_verify_embedding_contour and _verify_chat_contour in src/memory_rag/app.py abort start on any canonical-knob mismatch (R-10); a successful app.created line implies both gates passed."
+  },
+  "edit_round_trip": {
+    "purpose": "ED-2 (D-116): an /edit of a captured /note supersedes the prior active revision (lineage recorded, prior flipped to superseded), the new revision re-embeds, and the superseded revision is excluded from retrieval immediately (R-4).",
+    "seed_note_request": {
+      "method": "POST",
+      "url_shape": "http(s)://<host>/telegram/webhook",
+      "url_redacted": true,
+      "headers": {"Content-Type": "application/json", "X-Telegram-Bot-Api-Secret-Token": "<REDACTED>"},
+      "body_shape": {
+        "update_id": "<TO_FILL_BY_OPERATOR — integer>",
+        "message": {
+          "message_id": "<TO_FILL_BY_OPERATOR — integer; reused by the /edit below>",
+          "date": "<TO_FILL_BY_OPERATOR — unix seconds>",
+          "chat": {"id": "<TO_FILL_BY_OPERATOR — integer>"},
+          "from": {"id": "<TO_FILL_BY_OPERATOR — integer>"},
+          "text": "<TO_FILL_BY_OPERATOR — e.g. \"/note 2026-05-09\\nWalked the dog\">"
+        }
+      }
+    },
+    "seed_note_outcome": {
+      "http_status": 200,
+      "body_text_verbatim": "<TO_FILL_BY_OPERATOR — e.g. \"Saved your note for 2026-05-09.\">",
+      "prior_note_id": "<TO_FILL_BY_OPERATOR — notes.note_id of the seeded active revision>",
+      "prior_chunk_id": "<TO_FILL_BY_OPERATOR — event_chunks.chunk_id of the seeded active revision>",
+      "prior_embedding_status_observed": "<TO_FILL_BY_OPERATOR — expected: ready>",
+      "prior_lifecycle_state_observed": "<TO_FILL_BY_OPERATOR — expected: active>"
+    },
+    "edit_request": {
+      "method": "POST",
+      "url_redacted": true,
+      "body_shape": {
+        "update_id": "<TO_FILL_BY_OPERATOR — integer, distinct>",
+        "message": {
+          "message_id": "<TO_FILL_BY_OPERATOR — SAME message_id as the seed note>",
+          "date": "<TO_FILL_BY_OPERATOR — unix seconds>",
+          "edit_date": "<TO_FILL_BY_OPERATOR — unix seconds, LATER than date; becomes edit_seq, the new idempotency key>",
+          "chat": {"id": "<TO_FILL_BY_OPERATOR — same chat id>"},
+          "from": {"id": "<TO_FILL_BY_OPERATOR — same author id>"},
+          "text": "<TO_FILL_BY_OPERATOR — e.g. \"/note 2026-05-09\\nWalked the dog along the river\" (edited NOTE content)>"
+        }
+      }
+    },
+    "supersession_log_line_shape": "edit.superseded community_id=<cid> prior_note_id=<id> new_note_id=<id>",
+    "supersession_log_line_verbatim": "<TO_FILL_BY_OPERATOR — verbatim edit.superseded line from app logs>",
+    "post_edit_state": {
+      "prior_note_lifecycle_state": "<TO_FILL_BY_OPERATOR — expected: superseded>",
+      "prior_chunk_lifecycle_state": "<TO_FILL_BY_OPERATOR — expected: superseded>",
+      "new_note_id": "<TO_FILL_BY_OPERATOR — notes.note_id of the new active revision>",
+      "new_note_lifecycle_state": "<TO_FILL_BY_OPERATOR — expected: active>",
+      "new_note_supersedes_note_id": "<TO_FILL_BY_OPERATOR — expected: equals prior_note_id (lineage)>",
+      "new_chunk_supersedes_chunk_id": "<TO_FILL_BY_OPERATOR — expected: equals prior_chunk_id (lineage)>",
+      "new_chunk_embedding_status": "<TO_FILL_BY_OPERATOR — expected: ready (re-embedded)>",
+      "i6_authorship_preserved": "<TO_FILL_BY_OPERATOR — expected: true; both revisions carry the same author_user_id>"
+    },
+    "retrieval_check_after_edit": {
+      "ask_request_text": "<TO_FILL_BY_OPERATOR — e.g. \"/ask river\" — a query matching the EDITED content>",
+      "edited_text_retrievable": "<TO_FILL_BY_OPERATOR — expected: true; the new active revision is returned>",
+      "superseded_text_excluded": "<TO_FILL_BY_OPERATOR — expected: true; the prior revision is not returned on either leg (R-4)>"
+    },
+    "provider_attempt_log_line_shape": "provider.attempt label=openai_embedding attempt=<n>/<N> outcome=<class> latency_ms=<int>",
+    "provider_attempt_log_line_verbatim": "<TO_FILL_BY_OPERATOR — verbatim provider.attempt line for the re-embed; attempt=2/3 outcome=success is acceptable if a transient 429 occurred>"
+  },
+  "delete_round_trip": {
+    "purpose": "ED-3 (D-117): a reply-targeted /delete tombstones the active note + chunk (retained with I-6 authorship, excluded from retrieval immediately — R-4); a NOTE->DRAFT edit tombstones the prior active note; every miss is a friendly fail-closed no-op; idempotent.",
+    "reply_targeted_delete_request": {
+      "method": "POST",
+      "url_redacted": true,
+      "body_shape": {
+        "update_id": "<TO_FILL_BY_OPERATOR — integer, distinct>",
+        "message": {
+          "message_id": "<TO_FILL_BY_OPERATOR — integer (the /delete command message)>",
+          "date": "<TO_FILL_BY_OPERATOR — unix seconds>",
+          "chat": {"id": "<TO_FILL_BY_OPERATOR — same chat id>"},
+          "from": {"id": "<TO_FILL_BY_OPERATOR — integer>"},
+          "text": "/delete",
+          "reply_to_message": {
+            "message_id": "<TO_FILL_BY_OPERATOR — message_id of a saved /note to delete>",
+            "date": "<TO_FILL_BY_OPERATOR — unix seconds>",
+            "chat": {"id": "<TO_FILL_BY_OPERATOR — same chat id>"},
+            "from": {"id": "<TO_FILL_BY_OPERATOR — integer>"},
+            "text": "<TO_FILL_BY_OPERATOR — the original /note text>"
+          }
+        }
+      }
+    },
+    "delete_outcome": {
+      "http_status": 200,
+      "reply_text_verbatim": "<TO_FILL_BY_OPERATOR — expected: \"Deleted. That note is removed from search and won't appear in answers.\">",
+      "tombstoned_note_id": "<TO_FILL_BY_OPERATOR — notes.note_id that was tombstoned>",
+      "note_lifecycle_state_after": "<TO_FILL_BY_OPERATOR — expected: tombstoned>",
+      "chunk_lifecycle_state_after": "<TO_FILL_BY_OPERATOR — expected: tombstoned>",
+      "i6_authorship_preserved": "<TO_FILL_BY_OPERATOR — expected: true; the tombstoned rows are retained with author_user_id intact>"
+    },
+    "delete_log_line_shape": "delete.tombstoned community_id=<cid> note_id=<id> external_message_id=<id>",
+    "delete_log_line_verbatim": "<TO_FILL_BY_OPERATOR — verbatim delete.tombstoned line from app logs>",
+    "retrieval_check_after_delete": {
+      "ask_request_text": "<TO_FILL_BY_OPERATOR — a query that matched the deleted note's content>",
+      "tombstoned_text_excluded": "<TO_FILL_BY_OPERATOR — expected: true; the tombstoned chunk is not returned on either leg (R-4)>"
+    },
+    "fail_closed_no_op_checks": {
+      "delete_with_no_reply_target_reply_verbatim": "<TO_FILL_BY_OPERATOR — expected: \"To delete a note, reply to it with /delete.\">",
+      "delete_replying_to_non_note_reply_verbatim": "<TO_FILL_BY_OPERATOR — expected: \"Nothing to delete — reply to a saved note with /delete to remove it.\">",
+      "idempotent_second_delete": "<TO_FILL_BY_OPERATOR — expected: a second /delete of the same note is a no-op (\"Nothing to delete …\"); already-tombstoned row unchanged>"
+    },
+    "note_to_draft_removal_sub_leg": {
+      "purpose": "Editing a captured /note to drop its /note command re-routes the edited delivery to DRAFT and tombstones the prior active note (ED-3 / D-117).",
+      "edit_to_plain_text_request_body_shape": {
+        "update_id": "<TO_FILL_BY_OPERATOR — integer, distinct>",
+        "message": {
+          "message_id": "<TO_FILL_BY_OPERATOR — SAME message_id as a still-active seeded /note>",
+          "edit_date": "<TO_FILL_BY_OPERATOR — unix seconds, later>",
+          "chat": {"id": "<TO_FILL_BY_OPERATOR — same chat id>"},
+          "from": {"id": "<TO_FILL_BY_OPERATOR — same author id>"},
+          "text": "<TO_FILL_BY_OPERATOR — plain text WITHOUT the /note command, e.g. \"never mind\">"
+        }
+      },
+      "prior_note_lifecycle_state_after": "<TO_FILL_BY_OPERATOR — expected: tombstoned>",
+      "delete_log_line_verbatim": "<TO_FILL_BY_OPERATOR — verbatim delete.tombstoned line for this NOTE->DRAFT removal>"
+    }
+  },
+  "hard_delete": {
+    "purpose": "ED-3 (D-117): operator-only audited hard-delete physically removes the raw source aggregate and its derived rows in FK-safe order, community-scoped, with a structured audit.hard_delete log record. There is NO operator-facing CLI today — the method is reachable only as a DomainService call; a hard-delete CLI is a deferred follow-up (reconciliation-CLI pattern).",
+    "invocation": "inline python snippet (no CLI) — builds the Postgres-backed DomainService exactly as adapters/telegram/webhook.py does (PostgresDomainStore(settings.postgres_dsn()) + build_embedding_client(settings) + DomainService(store, embedding_client=...)), then calls svc.hard_delete_source_message(<source_message_id>, community_id=<cid>, requested_by=\"operator\"); see the RUNBOOK procedure for the exact snippet",
+    "target_source_message_id": "<TO_FILL_BY_OPERATOR — source_messages.source_message_id removed>",
+    "requested_by": "operator",
+    "audit_log_line_shape": "audit.hard_delete community_id=<cid> requested_by=<who> source_message_id=<id> source_messages=<n> notes=<n> event_chunks=<n> embedding_records=<n> retrieval_hits=<n>",
+    "audit_log_line_verbatim": "<TO_FILL_BY_OPERATOR — verbatim audit.hard_delete line from app/script logs>",
+    "deletion_counts": {
+      "source_messages": "<TO_FILL_BY_OPERATOR — expected: 1>",
+      "notes": "<TO_FILL_BY_OPERATOR — integer>",
+      "event_chunks": "<TO_FILL_BY_OPERATOR — integer>",
+      "embedding_records": "<TO_FILL_BY_OPERATOR — integer>",
+      "retrieval_hits": "<TO_FILL_BY_OPERATOR — integer>"
+    },
+    "fk_safe_order_observed": "<TO_FILL_BY_OPERATOR — expected: retrieval_hits -> embedding_records -> event_chunks -> notes -> source_messages, no FK violation>",
+    "post_delete_rows_absent": "<TO_FILL_BY_OPERATOR — expected: true; the source_message_id and all its derived rows are physically gone>"
+  },
+  "pg_acceptance_legs": {
+    "purpose": "The ED-2/ED-3 Postgres acceptance legs written in ED-2/ED-3 but not yet run (MEMORY_RAG_PG_TEST_DSN unset in the dev environment) are executed as part of this drill.",
+    "command": "MEMORY_RAG_PG_TEST_DSN=<REDACTED> uv run pytest tests/test_edit_supersession_ingest.py tests/test_delete_tombstone.py",
+    "test_edit_supersession_ingest_postgres_leg": "<TO_FILL_BY_OPERATOR — expected: passed (the postgres-parametrized fixtures run, incl. test_superseded_prior_excluded_from_retrieval_after_edit)>",
+    "test_delete_tombstone_postgres_leg": "<TO_FILL_BY_OPERATOR — expected: passed (incl. test_tombstoned_note_excluded_from_retrieval)>"
+  },
+  "out_of_scope_for_this_packet": [
+    "Any src/ / scripts / docker-compose.yml / schema / migration / tests/ change.",
+    "A hard-delete operator CLI / control surface (deferred follow-up; this drill invokes the method via an inline python snippet).",
+    "The /start and /help wording change to mention /delete (deferred).",
+    "Any live OpenAI call inside make check or any new gated test.",
+    "Any harness extension, new aggregate, or retrieval/answer-path behavior change.",
+    "Resilience-knob tuning beyond D-047 / D-049 defaults.",
+    "Multi-run / multi-query / multi-language statistical capture — the milestone is a bounded value-loop proof of the edit/delete contract."
+  ],
+  "summary": {
+    "edit_round_trip_green": "<TO_FILL_BY_OPERATOR — expected: true if the /edit superseded the prior revision (prior=superseded, lineage recorded), the new revision is active + re-embedded (embedding_status=ready), and the superseded text is excluded from retrieval (R-4)>",
+    "delete_round_trip_green": "<TO_FILL_BY_OPERATOR — expected: true if reply-targeted /delete and the NOTE->DRAFT edit both tombstoned the active note+chunk (retained, I-6 intact), the tombstoned text is excluded from retrieval (R-4), and the fail-closed no-op / idempotency replies match>",
+    "hard_delete_audited": "<TO_FILL_BY_OPERATOR — expected: true if hard_delete_source_message physically removed the aggregate in FK-safe order and emitted the audit.hard_delete record with non-zero counts>",
+    "superseded_and_tombstoned_excluded_from_retrieval": "<TO_FILL_BY_OPERATOR — expected: true; the generalized active-state filter (R-4) excludes both non-active states on both legs>",
+    "pg_acceptance_legs_green": "<TO_FILL_BY_OPERATOR — expected: true if the ED-2/ED-3 postgres-gated test legs passed under MEMORY_RAG_PG_TEST_DSN>",
+    "closes_edit_delete_milestone": "<TO_FILL_BY_OPERATOR — true only when every leg above is green>",
+    "verdict": "<TO_FILL_BY_OPERATOR>"
+  }
+}

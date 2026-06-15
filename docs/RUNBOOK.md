@@ -337,6 +337,63 @@ Procedure:
 
 Closure signal: the populated dated artifact committed with all four `summary.*_round_trip_green` booleans true and `summary.closes_routed_chat_milestone: true`. The roadmap / execution-map / todo blocks then flip from "closure conditional on the operator drill artifact" to milestone-closed, and A-10 edit/delete becomes the next pick (owner re-queue, D-108).
 
+### Edit/delete real-backend drill (ED-n)
+The edit/delete milestone's exit criterion (`docs/EDIT-DELETE-ROADMAP.md` §6) requires one operator-deliberate, off-CI round trip proving the ratified contract against the real backend — mirroring REAL-1 (D-073 / D-074) and the RC closure drill (D-111): `make check` runs no live provider call; this procedure is invoked out-of-band and closes the milestone when its dated artifact is committed. It lands in two halves: **ED-n-prep** (this subsection + the committed evidence-file template at `docs/edit-delete-drill/edit-delete-smoke-TEMPLATE.json` + the truthful "code-complete; closure conditional on the operator's dated drill artifact" wording in the roadmap / execution-map / todo) is the operator-procedure prep; the operator-run capture produces a populated dated `docs/edit-delete-drill/edit-delete-smoke-<YYYYMMDD>-evidence.json` and, with it, the closure decision entry + the milestone-close flips + the single bundling PR. ED-n-prep does **not** close the milestone on its own.
+
+The drill exercises all three landed behaviors: **/edit supersession + re-embed** (ED-2 / D-116), **reply-targeted /delete + NOTE→DRAFT tombstone** (ED-3 / D-117), and the **operator-only audited hard-delete** (ED-3 / D-117). Note: `hard_delete_source_message` has **no operator-facing CLI** today — it is reachable only as a `DomainService` method, so this procedure invokes it via a one-off inline `python` snippet; a hard-delete CLI is a deferred follow-up (the `reconciliation --retry` CLI pattern).
+
+#### Operator pre-conditions
+- Postgres up via the OP-1 migrations bootstrap with **migration `0010.note-chunk-lifecycle-state` applied** (the `lifecycle_state` + `supersedes_*` columns exist); `STORAGE_BACKEND=postgres` selects the canonical durable backend.
+- Canonical env knobs set: `STORAGE_BACKEND=postgres`, `EMBEDDING_BACKEND=openai`, `EMBEDDING_MODEL=text-embedding-3-large`, `EMBEDDING_DIMENSION=3072`, `CHAT_BACKEND=openai`, `CHAT_MODEL=gpt-4.1`, `TELEGRAM_WEBHOOK_SECRET=<set>`. `_verify_embedding_contour` / `_verify_chat_contour` abort start on mismatch (R-10); a successful `app.created` line is the boot-gate green signal. The `/edit` re-embed needs live embeddings, so a real `OPENAI_API_KEY` is required.
+- `MEMORY_RAG_PG_TEST_DSN` set (pointed at a **dedicated test database** — the suites truncate it) so the still-pending ED-2 / ED-3 Postgres acceptance legs in `tests/test_edit_supersession_ingest.py` / `tests/test_delete_tombstone.py` run as part of this drill.
+- Sync indexing (D-024) means a `/note` (and a re-embedded `/edit` revision) returns 200 only after the embedding is persisted, so the follow-up `/ask` can rely on `embedding_status='ready'`.
+
+#### Numbered run procedure
+1. Export the canonical env knobs. Do not echo `OPENAI_API_KEY` / `TELEGRAM_BOT_TOKEN` / `TELEGRAM_WEBHOOK_SECRET` to a log file. Bring the stack up (`docker compose --profile vps up -d --build`) and confirm the verbatim `app.created` line into `preflight_state.boot_log_line_verbatim`.
+2. **Edit leg (ED-2).** POST a seed `/note` via the QUICKSTART recipe (the curl block at `QUICKSTART.md` lines 88–91, swapping `X-Telegram-Bot-Api-Secret-Token: dev-secret` for the real `$TELEGRAM_WEBHOOK_SECRET`). Record `note_id` / `chunk_id`, confirm `embedding_status='ready'` and `lifecycle_state='active'`.
+3. POST the `/edit` of that note — the **same `message_id`** with an added later `edit_date` (which becomes `edit_seq`, the new idempotency key) and edited `/note` text. Capture the verbatim `edit.superseded community_id=… prior_note_id=… new_note_id=…` line; via SQL confirm the prior `notes`/`event_chunks` rows are now `lifecycle_state='superseded'`, the new revision is `active` with `supersedes_note_id` / `supersedes_chunk_id` lineage set and `embedding_status='ready'`, and the same `author_user_id` on both (I-6). Capture the re-embed `provider.attempt label=openai_embedding …` line.
+4. POST an `/ask` matching the **edited** content; confirm the new text is retrievable and the superseded text is excluded on both legs (R-4). Fill `edit_round_trip`.
+5. **Delete leg (ED-3).** POST `/delete` as a reply to a saved `/note` (the payload carries `reply_to_message.message_id` of the target note). Confirm the reply is `"Deleted. That note is removed from search and won't appear in answers."`, capture the verbatim `delete.tombstoned community_id=… note_id=… external_message_id=…` line, and confirm the note + chunk are now `lifecycle_state='tombstoned'` (retained, `author_user_id` intact). POST an `/ask` matching the deleted content and confirm exclusion (R-4).
+6. Exercise the fail-closed no-ops: a `/delete` with no reply target (`"To delete a note, reply to it with /delete."`), a `/delete` replying to a non-note (`"Nothing to delete — reply to a saved note with /delete to remove it."`), and a second `/delete` of the same note (idempotent no-op). Then the NOTE→DRAFT sub-leg: POST an `/edit` of a still-active `/note` whose new text drops the `/note` command — confirm the prior active note flips to `tombstoned` with its own `delete.tombstoned` line. Fill `delete_round_trip`.
+7. **Hard-delete leg (ED-3, no CLI).** Run the inline snippet below against the live Postgres backend, targeting the `source_message_id` of an aggregate to remove. Capture the verbatim `audit.hard_delete …` line and confirm the FK-safe deletion (retrieval_hits → embedding_records → event_chunks → notes → source_messages) leaves no residual rows. Fill `hard_delete`.
+
+   ```bash
+   uv run python - <<'PY'
+   from memory_rag.config import Settings
+   from memory_rag.storage.postgres.store import PostgresDomainStore
+   from memory_rag.adapters.embeddings import build_embedding_client
+   from memory_rag.services.domain_service import DomainService
+
+   settings = Settings()  # reads STORAGE_BACKEND=postgres + the canonical knobs from the env
+   store = PostgresDomainStore(settings.postgres_dsn())
+   svc = DomainService(store, embedding_client=build_embedding_client(settings))
+   out = svc.hard_delete_source_message(
+       "<SOURCE_MESSAGE_ID>", community_id="<COMMUNITY_ID>", requested_by="operator"
+   )
+   print(out)  # HardDeleteOutcome: source_messages / notes / event_chunks / embedding_records / retrieval_hits counts
+   PY
+   ```
+
+8. **Postgres acceptance legs.** With `MEMORY_RAG_PG_TEST_DSN` set, run `uv run pytest tests/test_edit_supersession_ingest.py tests/test_delete_tombstone.py` and record the postgres-parametrized legs (incl. `test_superseded_prior_excluded_from_retrieval_after_edit` and `test_tombstoned_note_excluded_from_retrieval`) into `pg_acceptance_legs`.
+9. Hand-assemble the dated artifact: `cp docs/edit-delete-drill/edit-delete-smoke-TEMPLATE.json docs/edit-delete-drill/edit-delete-smoke-<YYYYMMDD>-evidence.json`, drop the top-level `"_template": true` flag, and replace every `<TO_FILL_BY_OPERATOR>` placeholder with the verbatim captured observation. Run the redaction grep below before committing.
+
+#### Evidence-file shape
+The artifact carries the branches mirroring the REAL-1 / RC-closure template precedent: `metadata` (capture date, environment, redaction notes), `preflight_state` (env-knob set with secrets redacted; verbatim `app.created` line; migrations head), `edit_round_trip` (seed `/note` + `/edit` + `edit.superseded` line + post-edit lifecycle/lineage state + retrieval check + re-embed `provider.attempt` line), `delete_round_trip` (reply-targeted `/delete` + `delete.tombstoned` line + tombstoned state + retrieval check + fail-closed no-op replies + the NOTE→DRAFT sub-leg), `hard_delete` (the inline-snippet invocation + verbatim `audit.hard_delete` line + deletion counts + FK-safe-order confirmation), `pg_acceptance_legs` (the ED-2/ED-3 postgres-gated test outcomes), `summary` (`edit_round_trip_green` / `delete_round_trip_green` / `hard_delete_audited` / `superseded_and_tombstoned_excluded_from_retrieval` / `pg_acceptance_legs_green` / `closes_edit_delete_milestone` booleans + verdict string). The committed `out_of_scope_for_this_packet` block is preserved verbatim.
+
+#### Redaction rule
+Credential text — `$OPENAI_API_KEY`, `$TELEGRAM_BOT_TOKEN`, `$TELEGRAM_WEBHOOK_SECRET`, and the `MEMORY_RAG_PG_TEST_DSN` connection string — **must not appear in the captured evidence file**. Structural outcomes (status strings, log-line shapes, row counts, `lifecycle_state` values, `supersedes_*` lineage ids, audit counts) are captured verbatim; credential-bearing values are replaced by `<REDACTED>` or a `_redacted: true` flag. Pre-commit, grep the evidence artifact and confirm none appear literally:
+
+```bash
+grep -E "$OPENAI_API_KEY|$TELEGRAM_BOT_TOKEN|$TELEGRAM_WEBHOOK_SECRET|$MEMORY_RAG_PG_TEST_DSN" \
+  docs/edit-delete-drill/edit-delete-smoke-<YYYYMMDD>-evidence.json && echo "REDACTION FAILED" || echo "redaction grep clean"
+```
+
+#### Closure signal
+Closure of the **edit/delete milestone** is by a populated dated `docs/edit-delete-drill/edit-delete-smoke-<YYYYMMDD>-evidence.json` with every `summary.*_green` boolean and `summary.hard_delete_audited` true and `summary.closes_edit_delete_milestone: true`. The roadmap / execution-map / todo blocks then flip from "code-complete; closure conditional on the operator's dated drill artifact" to milestone-closed, the closure decision entry is added, and one PR bundles the coherent milestone. ED-n-prep lands the procedure + template + truthful wording so that the close is a single bounded operator action.
+
+#### `make check` non-impact
+This procedure makes no contribution to `make check`. No new gated test is added; the existing ED-2 / ED-3 Postgres acceptance legs in `tests/test_edit_supersession_ingest.py` / `tests/test_delete_tombstone.py` (env-gated by `MEMORY_RAG_PG_TEST_DSN`) are unchanged. The captured artifact is documentation evidence, not a CI input.
+
 ### Retrieval-quality inspection harness (D-038)
 `src/memory_rag/eval/retrieval/` ships a hand-curated harness that measures the D-025 baseline contour against a small fixture corpus + gold-query set. It is **inspection, not a gate** — the CLI exit code is always `0` regardless of the observed metrics.
 
