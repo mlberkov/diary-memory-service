@@ -71,6 +71,12 @@ _REPLY_EXPORT_USAGE = "Usage: /export json | /export txt — pick a format."
 _REPLY_DRAFTS_USAGE = "Usage: /drafts [N]. N must be a positive integer."
 _REPLY_DRAFTS_EMPTY = "No drafts to show."
 _DRAFT_REPLY_PREFIX = "Stored as draft"
+# /delete control-surface replies (ED-3, D-114). Stable operator-facing
+# strings; the no-target and nothing-to-delete cases are friendly no-ops,
+# never errors.
+_REPLY_DELETE_OK = "Deleted. That note is removed from search and won't appear in answers."
+_REPLY_DELETE_NOTHING = "Nothing to delete — reply to a saved note with /delete to remove it."
+_REPLY_DELETE_NO_TARGET = "To delete a note, reply to it with /delete."
 
 
 def _format_ingest_reply(result: IngestResult) -> str:
@@ -429,6 +435,8 @@ class Dispatcher:
             return self._dispatch_drafts(message)
         if route is RouteKind.EXPORT:
             return self._dispatch_export(message)
+        if route is RouteKind.DELETE:
+            return self._dispatch_delete(message)
         if route is RouteKind.CLARIFY:
             return DispatchResult(
                 reply_text=_REPLY_CLARIFY,
@@ -572,6 +580,43 @@ class Dispatcher:
                 "fallback": FallbackMode.NONE.value,
                 "route_source": message.route_source,
                 "format": fmt.value,
+            },
+        )
+
+    def _dispatch_delete(self, message: InboundMessage) -> DispatchResult:
+        """Serve ``/delete`` — tombstone the replied-to note (ED-3, D-114).
+
+        The target is resolved by reply: the user replies to the original
+        ``/note`` message, so ``reply_to_external_message_id`` names it. With no
+        reply target there is nothing to address — a friendly nudge, no state
+        change. Otherwise the domain service tombstones the active note for that
+        external message; every fail-closed miss (unknown / non-note /
+        cross-community / already-deleted target) comes back ``deleted=False`` and
+        renders the neutral nothing-to-delete reply. Neither empty case is an
+        error.
+        """
+        target = message.reply_to_external_message_id
+        if target is None:
+            return DispatchResult(
+                reply_text=_REPLY_DELETE_NO_TARGET,
+                route=RouteKind.DELETE,
+                metadata={
+                    "fallback": FallbackMode.INVALID_INPUT.value,
+                    "route_source": message.route_source,
+                    "deleted": "false",
+                },
+            )
+        outcome = self._domain.delete_note_for_external_message(
+            message.external_chat_id, target, community_id=message.community_id
+        )
+        reply = _REPLY_DELETE_OK if outcome.deleted else _REPLY_DELETE_NOTHING
+        return DispatchResult(
+            reply_text=reply,
+            route=RouteKind.DELETE,
+            metadata={
+                "fallback": FallbackMode.NONE.value,
+                "route_source": message.route_source,
+                "deleted": "true" if outcome.deleted else "false",
             },
         )
 

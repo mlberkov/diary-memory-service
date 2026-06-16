@@ -363,17 +363,29 @@ Important rule:
 
 ## 12. Edit and Delete Strategy
 
-This is not fully fixed yet and must be decided explicitly.
+Ratified by **D-114** (Packet ED-0); decomposed in
+`docs/EDIT-DELETE-ROADMAP.md`. The three previously-open axes are decided:
 
-Open questions:
-- whether edited Telegram messages create revisions or mutate the latest record,
-- whether deleted messages tombstone chunks or hard-delete them,
-- how re-indexing is triggered after edits.
+- **Edits create revisions, not in-place mutation.** An edited `/note` produces a
+  new note/chunk revision that supersedes the prior one; the prior revision is
+  retained (source lineage and I-6 authorship preserved) and marked inactive.
+  This continues the source-layer revision model already in force (edited
+  messages land as new `source_messages` rows keyed on `edit_seq`, R-2 / D-023).
+- **Deletes tombstone, not hard-delete.** A delete tombstones the active revision
+  (I-13 soft delete by default); hard deletion of source data stays an explicit,
+  audited operation.
+- **Re-embedding is triggered by the revision.** A new revision lands
+  `embedding_status='pending'` (stage tracking, §ingestion) and is re-embedded by
+  the existing pipeline; superseded and tombstoned chunks are excluded by the
+  active-state filter (R-4) immediately, regardless of embedding state.
 
-Current recommendation:
-- use revision-friendly design,
-- never lose source lineage,
-- prefer tombstones over silent destructive deletion.
+State model: `active | superseded | tombstoned`. **ED-1 (D-115) landed** the
+encoding (a single `lifecycle_state` column on `notes` / `event_chunks`, CHECK +
+DEFAULT `'active'`, with nullable `supersedes_*` lineage columns), the
+retrieval-predicate change (both legs filter `lifecycle_state='active'`), and the
+R-4 wording generalization. The `/edit` (supersession + re-embed) and `/delete`
+(tombstone) mechanics land in the ED-2 / ED-3 code packets
+(`docs/EDIT-DELETE-ROADMAP.md`); assumption A-10 is closed by D-114.
 
 ## 13. Observability
 

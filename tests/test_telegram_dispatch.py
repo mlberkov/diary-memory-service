@@ -171,3 +171,46 @@ def test_dispatch_edit_seq_is_edit_date_when_present() -> None:
     response = _post(client, payload)
     assert response.status_code == 200
     assert fake.calls[0].edit_seq == 1715300100
+
+
+def test_dispatch_accepts_edited_message_update() -> None:
+    client, fake = _client_with_fake()
+    payload = _message_update("/note 2026-05-09\nEdited")
+    payload["message"]["edit_date"] = 1715300100
+    payload["edited_message"] = payload.pop("message")
+
+    response = _post(client, payload)
+
+    assert response.status_code == 200
+    assert len(fake.calls) == 1
+    inbound = fake.calls[0]
+    assert inbound.route is RouteKind.NOTE
+    assert inbound.external_message_id == "99"
+    assert inbound.edit_seq == 1715300100
+    assert inbound.payload == "2026-05-09\nEdited"
+
+
+def test_dispatch_reply_target_absent_when_no_reply() -> None:
+    # A plain message carries no reply target (ED-3 / D-114).
+    client, fake = _client_with_fake()
+    response = _post(client, _message_update("/start"))
+    assert response.status_code == 200
+    assert fake.calls[0].reply_to_external_message_id is None
+
+
+def test_dispatch_delete_reply_carries_reply_target() -> None:
+    # /delete in reply to a note: the replied-to message id reaches the core as
+    # an opaque reply target (ED-3 / D-114).
+    client, fake = _client_with_fake()
+    payload = _message_update("/delete")
+    payload["message"]["reply_to_message"] = {
+        "message_id": 555,
+        "date": 1715200000,
+        "chat": {"id": 42},
+        "from": {"id": 7},
+        "text": "/note 2026-05-09\nWalked the dog",
+    }
+    response = _post(client, payload)
+    assert response.status_code == 200
+    assert fake.calls[0].route is RouteKind.DELETE
+    assert fake.calls[0].reply_to_external_message_id == "555"

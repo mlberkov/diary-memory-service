@@ -203,13 +203,20 @@ def register_telegram_webhook(app: FastAPI) -> None:
     ) -> dict[str, Any]:
         _verify_secret(settings.telegram_webhook_secret, x_telegram_bot_api_secret_token)
 
-        message = update.message
+        message = update.message or update.edited_message
         if message is None:
             log.info("telegram.webhook update_id=%s no_message=true", update.update_id)
             return {}
 
         route, payload, route_source, confidence = _resolve_route(message.text)
         edit_seq = message.edit_date if message.edit_date is not None else 0
+        # The opaque id of the replied-to message, when present — how /delete
+        # addresses the captured note the user replied to (ED-3 / D-114).
+        reply_to_external_message_id = (
+            str(message.reply_to_message.message_id)
+            if message.reply_to_message is not None
+            else None
+        )
         external_chat_id = str(message.chat.id)
         # Adapter-axis chat→community mapping resolved once at the edge
         # (D-093 / G-1). The core receives the opaque community_id and never
@@ -232,6 +239,7 @@ def register_telegram_webhook(app: FastAPI) -> None:
             payload=payload,
             edit_seq=edit_seq,
             subject_id=subject_id,
+            reply_to_external_message_id=reply_to_external_message_id,
         )
 
         result = dispatcher.dispatch(inbound)

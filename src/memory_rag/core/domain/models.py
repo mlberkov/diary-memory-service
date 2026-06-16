@@ -52,6 +52,31 @@ class FallbackMode(StrEnum):
     PARSE_FAILURE = "parse_failure"
 
 
+class LifecycleState(StrEnum):
+    """Revision lifecycle of a note / chunk (D-114 edit/delete contract; ED-1).
+
+    The active-state filter on retrieval (R-4) returns only ``ACTIVE`` rows.
+    The other two states are the inactive revisions the contract preserves:
+
+    - ``ACTIVE`` — the live revision; the only state retrieval returns.
+    - ``SUPERSEDED`` — a prior revision retained after an edit produced a
+      newer revision (source lineage + I-6 authorship preserved). Excluded
+      from retrieval.
+    - ``TOMBSTONED`` — a soft-deleted revision (I-13). Excluded from
+      retrieval; hard deletion of source data stays an explicit, audited
+      operation.
+
+    ED-1 lands the state column and the active-state filter only: every row
+    is written ``ACTIVE`` and nothing transitions it yet. The ``/edit``
+    supersession writer (ED-2) and the ``/delete`` tombstone writer (ED-3)
+    introduce the non-active transitions.
+    """
+
+    ACTIVE = "active"
+    SUPERSEDED = "superseded"
+    TOMBSTONED = "tombstoned"
+
+
 @dataclass(frozen=True, slots=True)
 class SourceMessage:
     """Raw inbound message, persisted before any enrichment (I-3, R-1).
@@ -77,7 +102,14 @@ class SourceMessage:
 
 @dataclass(frozen=True, slots=True)
 class Note:
-    """Logical note parsed from a single source message."""
+    """Logical note parsed from a single source message.
+
+    ``lifecycle_state`` records the revision lifecycle (D-114; ED-1). It is
+    ``ACTIVE`` for every note written today; ``supersedes_note_id`` is the
+    nullable lineage link to the prior revision this note supersedes, written
+    only by the ``/edit`` supersession path (ED-2). Both are left at their
+    defaults until then.
+    """
 
     note_id: str
     source_message_id: str
@@ -87,6 +119,8 @@ class Note:
     note_text: str
     created_at: datetime
     subject_id: str | None = None
+    lifecycle_state: LifecycleState = LifecycleState.ACTIVE
+    supersedes_note_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +132,15 @@ class EventChunk:
     the embedding provider call returns; it flips to ``ready`` once an
     ``EmbeddingRecord`` is persisted or to ``failed`` if the provider
     call raised. The chunk row itself is always intact (I-3, R-1).
+
+    ``lifecycle_state`` records the revision lifecycle (D-114; ED-1) and is
+    orthogonal to ``embedding_status``: the active-state filter on retrieval
+    (R-4) returns only ``ACTIVE`` chunks regardless of embedding state, so a
+    superseded/tombstoned chunk is excluded immediately. It is ``ACTIVE`` for
+    every chunk written today; ``supersedes_chunk_id`` is the nullable lineage
+    link to the prior revision this chunk supersedes, written only by the
+    ``/edit`` supersession path (ED-2). Both are left at their defaults until
+    then.
     """
 
     chunk_id: str
@@ -111,6 +154,8 @@ class EventChunk:
     created_at: datetime
     embedding_status: EmbeddingStatus = EmbeddingStatus.PENDING
     subject_id: str | None = None
+    lifecycle_state: LifecycleState = LifecycleState.ACTIVE
+    supersedes_chunk_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +205,41 @@ class IngestResult:
     events_count: int = 0
     invalid_first_line: str | None = None
     replayed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteOutcome:
+    """Outcome of ``DomainService.delete_note_for_external_message`` (ED-3, D-114).
+
+    ``deleted`` is ``True`` when an ``active`` note was found for the target
+    external message and tombstoned (note + chunk flipped to ``tombstoned``,
+    retained — I-6 authorship and source lineage intact). It is ``False`` for
+    every fail-closed no-op: no active note for the target, an unknown or
+    non-note target, an already-deleted target, or a target owned by another
+    community. The control surface renders the two cases as distinct friendly
+    replies; neither is an error.
+    """
+
+    deleted: bool
+    note_date: date | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class HardDeleteOutcome:
+    """Per-table row counts removed by an audited hard-delete (ED-3, I-13).
+
+    The tally of a single ``hard_delete_source_message`` call: the targeted
+    ``source_messages`` row plus every row derived from it within the same
+    community — its notes, event chunks, embedding records, and the
+    retrieval-hit trace rows that reference those chunks. Returned to the
+    operator surface and emitted in the ``audit.hard_delete`` provenance log.
+    """
+
+    source_messages: int
+    notes: int
+    event_chunks: int
+    embedding_records: int
+    retrieval_hits: int
 
 
 @dataclass(frozen=True, slots=True)

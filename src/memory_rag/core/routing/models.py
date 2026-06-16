@@ -29,6 +29,7 @@ class RouteKind(StrEnum):
     DRAFTS = "drafts"
     EXPORT = "export"
     SOURCES = "sources"
+    DELETE = "delete"
     CLARIFY = "clarify"
     UNKNOWN = "unknown"
 
@@ -75,6 +76,12 @@ class InboundMessage:
     (the default single-subject mapping), so the field is behavior-preserving
     today; the core scopes on it and never derives a subject from a host
     identity field (I-1).
+
+    ``reply_to_external_message_id`` carries the opaque id of the message this
+    one replies to, when the transport supplies one (``None`` otherwise). It is
+    the same kind of opaque transport identifier as ``external_message_id`` — not
+    a transport type (I-1) — and lets ``/delete`` address the captured note the
+    user replied to (ED-3 / D-114).
     """
 
     external_message_id: str
@@ -88,6 +95,7 @@ class InboundMessage:
     payload: str = ""
     edit_seq: int = 0
     subject_id: str | None = None
+    reply_to_external_message_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

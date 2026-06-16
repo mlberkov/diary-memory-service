@@ -14,9 +14,11 @@ Replaying the same channel message-state produces no new persisted state. The id
 Every retrieval call carries a non-null `community_id`. The retriever rejects calls without it. There is no admin path that bypasses scoping in MVP. The `community_id` a read is scoped to is produced by the adapter-axis chat→community mapping (D-093); this invariant governs the read, not how the id is assigned.
 
 ## R-4. Active-state filter on retrieval
-Retrieval returns only chunks of non-tombstoned notes by default. Bypass requires an explicit, logged debug path.
+Retrieval returns only chunks of the active revision — non-tombstoned **and** non-superseded — by default. Bypass requires an explicit, logged debug path.
 
-The dense leg additionally requires `embedding_status='ready'` (D-025): chunks with `pending` or `failed` status do not participate in dense ranking. The sparse leg ranks any chunk whose text yields tokens regardless of `embedding_status` — sparse is text-only and does not depend on a successful embedding. Every retrieval call logs `dense_n`, `sparse_n`, `merged_n` so an operator can confirm both legs ran.
+The active state is the `lifecycle_state` column on `notes` / `event_chunks` (ED-1 / D-115, enforcing the D-114 edit/delete contract): both retrieval legs return only `lifecycle_state='active'` chunks, so `superseded` and `tombstoned` revisions are excluded **immediately**, regardless of `embedding_status` — a delete is effective before any re-embedding completes, and a superseded/tombstoned chunk is never re-embedded. The `/edit` supersession writer (ED-2 / D-116) produces the `superseded` state; the `/delete` tombstone writer (ED-3 / D-117) produces `tombstoned` — via both the reply-targeted `/delete` command and the NOTE→DRAFT edit-removal path. Both non-active states now have a live writer.
+
+The dense leg additionally requires `embedding_status='ready'` (D-025): chunks with `pending` or `failed` status do not participate in dense ranking. The sparse leg ranks any active chunk whose text yields tokens regardless of `embedding_status` — sparse is text-only and does not depend on a successful embedding. Every retrieval call logs `dense_n`, `sparse_n`, `merged_n` so an operator can confirm both legs ran.
 
 ## R-5. Provenance on every answer
 No answer is returned to a user without an `AnswerTrace` row that records `context_chunk_ids` (possibly empty in fallback modes), `prompt_version`, and `fallback_mode`.

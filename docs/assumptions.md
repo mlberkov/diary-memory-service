@@ -8,7 +8,7 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 *A-5 → D-024. A-6 → D-025. A-7 → D-024. A-8 → D-024. A-9 → D-037.*
 
 ## Domain semantics
-- **A-10. Edit/delete strategy**: TechSpec §12 explicitly leaves this open — revisions vs in-place mutation, tombstones vs hard delete, re-indexing trigger. Required before Phase 2.5. **Re-queued by owner override in D-108**: edit/delete is the milestone **immediately after** the routed-chat milestone (`docs/ROUTED-CHAT-ROADMAP.md`); routed chat does not depend on it, and tombstone exclusion will apply to every routed retrieval automatically via the unchanged retrieval seam (R-4).
+*A-10 → D-114 (edit/delete contract: supersession + tombstone + re-embed; decomposed in `docs/EDIT-DELETE-ROADMAP.md`).*
 - **A-11. Note grouping**: whether consecutive Telegram messages within a window can form one logical note, or each Telegram message is one note. PRD example shows a single multi-line message. Required before Phase 2.3.
 - **A-12. Date parsing scope**: which date formats are accepted (ISO only? localized? relative like "yesterday"?). Required before Phase 2.3.
 - **A-13. Timezone handling**: where the note timezone comes from (per-user setting, Telegram metadata, default). Required before Phase 2.3.
@@ -20,7 +20,7 @@ Add new items here the moment one is identified. Do not let assumptions live onl
 ## Privacy & lifecycle
 - **A-18. Data residency**: not stated.
 - **A-19. Retention policy**: revision and trace retention are not bounded. Required before Phase 8.
-- **A-20. Export/delete semantics**: directionally answered by D-027 for the export half — raw export on demand in JSON or TXT, scope-bounded. Remaining open: delivery channel per host (Telegram file reply / HTTP download / host-app screen), request shape, and the deletion half (still tied to A-10 edit/delete strategy).
+- **A-20. Export/delete semantics**: directionally answered by D-027 for the export half — raw export on demand in JSON or TXT, scope-bounded. Remaining open: delivery channel per host (Telegram file reply / HTTP download / host-app screen), request shape, and the deletion-delivery half (the underlying edit/delete strategy is now ratified in D-114; the user-facing deletion request/delivery semantics remain open here).
 
 ## Integration target
 - **A-21. TheyGrow integration surface**: HTTP API, in-process SDK, or message bus. Required before Phase 9.
