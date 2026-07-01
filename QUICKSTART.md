@@ -151,7 +151,7 @@ curl -s -X POST http://127.0.0.1:8000/telegram/webhook \
 
 #### Durable local store (Postgres)
 
-`STORAGE_BACKEND=postgres` is the canonical durable backend (D-007 / D-022). It writes through `PostgresDomainStore` to the local Postgres provided by `docker-compose.yml`. Schema is bootstrapped on first boot from `src/memory_rag/storage/postgres/schema.sql` via `CREATE TABLE / CREATE INDEX IF NOT EXISTS`. Default backend is still `memory`; SQLite (below) remains an opt-in non-default backend.
+`STORAGE_BACKEND=postgres` is the canonical durable backend (D-007 / D-022). It writes through `PostgresDomainStore` to the local Postgres provided by `docker-compose.yml`. The host port is published on `127.0.0.1` only, so local tools can connect to `localhost:${POSTGRES_PORT:-5432}` while the DB is not exposed on external host interfaces. Schema is bootstrapped on first boot from `src/memory_rag/storage/postgres/schema.sql` via `CREATE TABLE / CREATE INDEX IF NOT EXISTS`. Default backend is still `memory`; SQLite (below) remains an opt-in non-default backend.
 
 ```bash
 # 0. Bring up Postgres (compose defaults work without a custom .env)

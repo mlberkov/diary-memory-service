@@ -38,7 +38,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-memory_rag}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Operator-local access only. App/sidecars use the Compose network; the
+      # database port must never be published on external VPS interfaces.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - memory_rag_pg_data:/var/lib/postgresql/data
       - memory_rag_pg_archive:/archive
@@ -124,7 +126,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-memory_rag}
     ports:
-      - "${RESTORE_PORT:-5433}:5432"
+      # Restore drills are operator-local only; never expose recovered clusters
+      # on external VPS interfaces.
+      - "127.0.0.1:${RESTORE_PORT:-5433}:5432"
     volumes:
       - memory_rag_pg_restore_data:/var/lib/postgresql/data
       - memory_rag_pg_archive:/archive
